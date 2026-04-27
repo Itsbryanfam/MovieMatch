@@ -3,7 +3,46 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>MovieMatch</title>
+
+  <!-- Primary SEO -->
+  <title>MovieMatch — Chain Movies With Friends | Free Multiplayer Game</title>
+  <meta name="description" content="MovieMatch is a free multiplayer game where players chain movies and TV shows through shared cast members. Last one standing wins!">
+  <meta name="author" content="Bryan Cortez">
+  <link rel="canonical" href="https://moviematch.it.com">
+
+  <!-- Open Graph (Discord, iMessage, Facebook) -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://moviematch.it.com">
+  <meta property="og:title" content="MovieMatch — Chain Movies With Friends">
+  <meta property="og:description" content="Connect movies through shared cast members. Free, instant, multiplayer.">
+  <meta property="og:image" content="https://moviematch.it.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+
+  <!-- Twitter / X Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@ItsBryanFam">
+  <meta name="twitter:title" content="MovieMatch — Chain Movies With Friends">
+  <meta name="twitter:description" content="Connect movies through shared cast members. Free, instant, multiplayer.">
+  <meta name="twitter:image" content="https://moviematch.it.com/og-image.png">
+
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "VideoGame",
+    "name": "MovieMatch",
+    "description": "Multiplayer movie trivia game — chain movies and TV shows through shared cast members. Last player standing wins.",
+    "url": "https://moviematch.it.com",
+    "author": { "@type": "Person", "name": "Bryan Cortez" },
+    "genre": ["Trivia", "Party Game"],
+    "playMode": "MultiPlayer",
+    "applicationCategory": "Game",
+    "operatingSystem": "Web Browser",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -22,8 +61,67 @@
       </nav>
     </header>
 
+    <!-- HERO SCREEN -->
+    <div id="hero-screen" class="screen active">
+      <div class="hero-body">
+
+        <!-- Left: Copy -->
+        <div class="hero-copy">
+          <h1 class="hero-headline">
+            Chain movies.<br>Outsmart your friends.
+          </h1>
+          <p class="hero-description">
+            Take turns linking movies and TV shows through shared cast members.
+            Run out of time or fumble a connection&nbsp;&mdash; you're eliminated.
+            Last player standing wins.
+          </p>
+          <div class="hero-cta-group">
+            <button id="hero-play-btn" class="btn-primary hero-play-btn">
+              &#9654;&nbsp; Play Now &mdash; It's Free
+            </button>
+            <button id="hero-code-btn" class="btn-secondary hero-code-btn">
+              &#128279;&nbsp; Have a room code? Jump in
+            </button>
+          </div>
+          <p class="hero-fine">
+            No account needed &nbsp;&bull;&nbsp; Works on any device
+          </p>
+        </div>
+
+        <!-- Right: Animated demo -->
+        <div class="hero-demo" aria-hidden="true">
+          <div class="demo-label">Live example</div>
+          <div class="chain-item demo-item demo-item-1">
+            <div class="chain-poster demo-poster" style="background:#1e1b4b;"></div>
+            <div class="chain-content">
+              <div class="player-name">Alex</div>
+              <div class="movie-title">Iron Man <span class="year">(2008)</span></div>
+              <div class="movie-cast">Robert Downey Jr., Gwyneth Paltrow, Jeff Bridges</div>
+            </div>
+          </div>
+          <div class="chain-item demo-item demo-item-2 shared-highlight">
+            <div class="chain-poster demo-poster" style="background:#1e3a5f;"></div>
+            <div class="chain-content">
+              <div class="player-name">Bryan</div>
+              <div class="movie-title">Iron Man 2 <span class="year">(2010)</span></div>
+              <div class="movie-cast"><strong>Robert Downey Jr.</strong>, Scarlett Johansson, Don Cheadle</div>
+            </div>
+          </div>
+          <div class="chain-item demo-item demo-item-3 shared-highlight">
+            <div class="chain-poster demo-poster" style="background:#1a3a2a;"></div>
+            <div class="chain-content">
+              <div class="player-name">Alex</div>
+              <div class="movie-title">The Jungle Book <span class="year">(2016)</span></div>
+              <div class="movie-cast"><strong>Scarlett Johansson</strong>, Bill Murray, Ben Kingsley</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- LOBBY SCREEN -->
-    <div id="lobby-screen" class="screen active">
+    <div id="lobby-screen" class="screen">
       <!-- STAGE 1: SET NAME -->
       <div id="join-panel" class="panel lobby-panel">
         <div class="panel-header">

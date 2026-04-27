@@ -2,6 +2,7 @@ const socket = io();
 
 // UI Elements
 const lobbyScreen = document.getElementById('lobby-screen');
+const heroScreen = document.getElementById('hero-screen');
 const gameScreen = document.getElementById('game-screen');
 const waitingRoom = document.getElementById('waiting-room');
 const lobbyPanel = document.querySelector('.lobby-panel');
@@ -27,6 +28,9 @@ const backToJoinBtn = document.getElementById('back-to-join-btn');
 const backToJoinBtn2 = document.getElementById('back-to-join-btn-2');
 const refreshLobbiesBtn = document.getElementById('refresh-lobbies-btn');
 const publicLobbiesList = document.getElementById('public-lobbies-list');
+
+const heroPlayBtn = document.getElementById('hero-play-btn');
+const heroCodeBtn = document.getElementById('hero-code-btn');
 
 const howToPlayModal = document.getElementById('how-to-play-modal');
 const creditsModal = document.getElementById('credits-modal');
@@ -102,15 +106,16 @@ logo.addEventListener('click', () => {
         currentLobbyId = null;
         gameState = null;
         myPlayerId = null;
-        
-        gameScreen.classList.remove('active');
-        lobbyScreen.classList.add('active');
-        
-        waitingRoom.classList.add('hidden');
-        if(privatePanel) privatePanel.classList.add('hidden');
-        if(publicPanel) publicPanel.classList.add('hidden');
-        if(joinPanel) joinPanel.classList.remove('hidden');
     }
+    
+    gameScreen.classList.remove('active');
+    lobbyScreen.classList.remove('active');
+    heroScreen.classList.add('active');
+    
+    waitingRoom.classList.add('hidden');
+    if(privatePanel) privatePanel.classList.add('hidden');
+    if(publicPanel) publicPanel.classList.add('hidden');
+    if(joinPanel) joinPanel.classList.remove('hidden');
 });
 
 function prepareAudio() {
@@ -176,6 +181,39 @@ joinBtn.addEventListener('click', () => {
 startBtn.addEventListener('click', () => {
     socket.emit('startLobby', currentLobbyId);
 });
+
+// --- HERO LOGIC & FLOW C ---
+
+heroPlayBtn.addEventListener('click', () => {
+    heroScreen.classList.remove('active');
+    lobbyScreen.classList.add('active');
+    prepareAudio();
+});
+
+heroCodeBtn.addEventListener('click', () => {
+    heroScreen.classList.remove('active');
+    lobbyScreen.classList.add('active');
+    joinPanel.classList.add('hidden');
+    privatePanel.classList.remove('hidden');
+    lobbyIdInput.focus();
+    prepareAudio();
+});
+
+// Detect room ID in URL (Flow C)
+function checkUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get('room') || params.get('lobby');
+    if (roomId) {
+        lobbyIdInput.value = roomId.toUpperCase();
+        heroScreen.classList.remove('active');
+        lobbyScreen.classList.add('active');
+        joinPanel.classList.add('hidden');
+        privatePanel.classList.remove('hidden');
+        // If we have a saved name, we could even auto-focus the join button
+    }
+}
+
+checkUrlParams();
 
 hardcoreToggle.addEventListener('change', (e) => {
     socket.emit('toggleHardcore', { lobbyId: currentLobbyId, state: e.target.checked });
