@@ -310,7 +310,7 @@ io.on('connection', (socket) => {
   }
   
   socket.on('joinLobby', ({ name, lobbyId }) => {
-    let id = lobbyId || generateLobbyId();
+    let id = (lobbyId || '').trim().toUpperCase() || generateLobbyId();
     if (!lobbies[id]) {
       lobbies[id] = new GameRoom(id, io);
     }
