@@ -43,6 +43,7 @@ const inputArea = document.getElementById('input-area');
 const turnIndicator = document.getElementById('turn-indicator');
 const hintText = document.getElementById('hint-text');
 const autocompleteContainer = document.getElementById('autocomplete-container');
+const mobileAcDropdown = document.getElementById('mobile-ac-dropdown');
 const chatMessages = document.getElementById('chat-messages');
 const chatInput = document.getElementById('chat-input');
 
@@ -191,6 +192,7 @@ movieInput.addEventListener('input', (e) => {
     const query = e.target.value.trim();
     if (query.length < 2) {
         autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+        closeMobileAc();
         return;
     }
     clearTimeout(debounceTimeout);
@@ -209,10 +211,54 @@ chatInput.addEventListener('keypress', (e) => {
     }
 });
 
+function closeMobileAc() {
+    mobileAcDropdown.classList.remove('open');
+    mobileAcDropdown.innerHTML = '';
+}
+
+function renderAutocompleteResults(results) {
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+    const target = isMobile ? mobileAcDropdown : autocompleteContainer;
+
+    if (!results || results.length === 0) {
+        target.innerHTML = '<div class="empty-hint">No results found.</div>';
+        if (isMobile) mobileAcDropdown.classList.add('open');
+        return;
+    }
+
+    target.innerHTML = '';
+    results.forEach(movie => {
+        const div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        const imgTag = movie.poster
+            ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">`
+            : `<div class="mini-poster placeholder"></div>`;
+        div.innerHTML = `
+            ${imgTag}
+            <div class="ac-text">
+                <div class="ac-title">${movie.title}</div>
+                <span class="year">(${movie.year})</span>
+            </div>
+        `;
+        div.addEventListener('click', () => {
+            movieInput.value = movie.title;
+            // Desktop: show prompt
+            autocompleteContainer.innerHTML = '<div class="empty-hint">Press Submit to lock it in!</div>';
+            // Mobile: close dropdown
+            closeMobileAc();
+            movieInput.focus();
+        });
+        target.appendChild(div);
+    });
+
+    if (isMobile) mobileAcDropdown.classList.add('open');
+}
+
 function submitMovie() {
     const movie = movieInput.value.trim();
     if (!movie) return;
     autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+    closeMobileAc();
     socket.emit('submitMovie', { lobbyId: currentLobbyId, movie });
     movieInput.value = '';
 }
@@ -231,31 +277,9 @@ socket.on('receiveChat', ({ playerName, msg }) => {
 });
 
 socket.on('autocompleteResults', (results) => {
-    if (!results || results.length === 0) {
-        autocompleteContainer.innerHTML = '<div class="empty-hint">No results found.</div>';
-        return;
-    }
-    autocompleteContainer.innerHTML = '';
-    
-    results.forEach(movie => {
-        const div = document.createElement('div');
-        div.className = 'autocomplete-item';
-        const imgTag = movie.poster ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">` : `<div class="mini-poster placeholder"></div>`;
-        div.innerHTML = `
-            ${imgTag}
-            <div class="ac-text">
-                <div class="ac-title">${movie.title}</div>
-                <span class="year">(${movie.year})</span>
-            </div>
-        `;
-        div.addEventListener('click', () => {
-            movieInput.value = movie.title;
-            autocompleteContainer.innerHTML = '<div class="empty-hint">Press Submit to lock it in!</div>';
-            movieInput.focus();
-        });
-        autocompleteContainer.appendChild(div);
-    });
+    renderAutocompleteResults(results);
 });
+
 
 socket.on('joined', (data) => {
     currentLobbyId = data.lobbyId;

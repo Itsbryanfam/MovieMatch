@@ -474,6 +474,11 @@ input:disabled {
   transition: opacity 0.3s ease;
 }
 
+/* MOBILE AUTOCOMPLETE DROPDOWN — hidden everywhere except mobile */
+.mobile-ac-dropdown {
+  display: none;
+}
+
 .input-area.disabled-area {
   opacity: 0.4;
   pointer-events: none;
@@ -1238,6 +1243,44 @@ input:disabled {
   .step-number {
     width: 28px;
     height: 28px;
+    font-size: 0.8rem;
+  }
+
+  /* MOBILE AUTOCOMPLETE FLOATING DROPDOWN */
+  .mobile-ac-dropdown {
+    display: block; /* visible on mobile */
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 8px); /* floats ABOVE input area so keyboard doesn't cover it */
+    z-index: 50;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+
+  .mobile-ac-dropdown.open {
+    max-height: 300px;
+    pointer-events: auto;
+  }
+
+  .mobile-ac-dropdown .autocomplete-item {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.75rem 1rem;
+    min-height: 52px; /* generous touch target */
+  }
+
+  .mobile-ac-dropdown .autocomplete-item:last-child {
+    border-bottom: none;
+  }
+
+  .mobile-ac-dropdown .empty-hint {
+    padding: 1rem;
     font-size: 0.8rem;
   }
 }
