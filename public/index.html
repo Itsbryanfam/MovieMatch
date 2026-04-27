@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MovieMatch</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+  <div id="poster-carousel"></div>
+  <div id="app-container">
+    <header class="app-header">
+      <div class="logo">Movie<span>Match</span></div>
+    </header>
+
+    <!-- LOBBY SCREEN -->
+    <div id="lobby-screen" class="screen active">
+      <div class="panel lobby-panel">
+        <div class="panel-header">
+          <h2>Join Lobby</h2>
+          <p>Enter your details to connect</p>
+        </div>
+        <div class="input-group-vertical">
+          <label for="player-name">Player Name</label>
+          <input type="text" id="player-name" placeholder="John Doe" autocomplete="off" />
+        </div>
+        <div class="input-group-vertical">
+          <label for="lobby-id-input">Room Code</label>
+          <input type="text" id="lobby-id-input" placeholder="Leave blank to create new" autocomplete="off" />
+        </div>
+        <button id="join-btn" class="btn-primary">Connect to Room</button>
+      </div>
+      
+      <div id="waiting-room" class="panel hidden lobby-panel">
+        <div class="panel-header">
+          <h2>Room: <span id="lobby-code-display" class="accent-text"></span></h2>
+          <p>Waiting for players...</p>
+        </div>
+        <div class="players-list-container">
+          <ul id="lobby-players"></ul>
+        </div>
+        <button id="start-btn" class="btn-primary" style="display:none;">Start Match</button>
+      </div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="game-screen" class="screen">
+      <div class="layout-grid">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+          <div class="sidebar-header">
+            <h3>Active Players</h3>
+          </div>
+          <ul id="game-players" class="sidebar-players"></ul>
+        </aside>
+        
+        <!-- Main Feed -->
+        <main class="game-board">
+          <div id="chain-display" class="feed-container">
+            <!-- Movie chain history goes here -->
+          </div>
+          
+          <div id="input-area" class="input-area disabled-area">
+            <div class="timer-wrapper">
+              <div id="timer-bar"></div>
+            </div>
+            <div class="input-header">
+              <span id="turn-indicator" class="status-indicator">Waiting for game to start...</span>
+              <span id="time-text" class="time-text">60s</span>
+            </div>
+            
+            <div class="input-row">
+              <input type="text" id="movie-input" class="search-input" placeholder="Name a connecting movie..." autocomplete="off" disabled />
+              <button id="submit-btn" class="btn-icon" disabled>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              </button>
+            </div>
+            <p id="hint-text" class="hint-text">Waiting...</p>
+          </div>
+          
+          <div class="reaction-bar" id="reaction-bar">
+             <button class="reaction-btn">🔥</button>
+             <button class="reaction-btn">😂</button>
+             <button class="reaction-btn">💀</button>
+             <button class="reaction-btn">👀</button>
+          </div>
+        </main>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="notification-overlay" class="hidden">
+    <div id="notification-text"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
