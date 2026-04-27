@@ -23,9 +23,9 @@ let cachedPosters = [];
 
 async function fetchBackgroundPosters() {
   try {
-    const res1 = await fetch(`https://api.themoviedb.org/3/movie/popular?language=en-US&page=1`, { headers: TMDB_HEADERS });
+    const res1 = await fetch(`https://api.themoviedb.org/3/movie/popular?language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
     const data1 = await res1.json();
-    const res2 = await fetch(`https://api.themoviedb.org/3/movie/top_rated?language=en-US&page=1`, { headers: TMDB_HEADERS });
+    const res2 = await fetch(`https://api.themoviedb.org/3/movie/top_rated?language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
     const data2 = await res2.json();
     
     const combined = [...(data1.results || []), ...(data2.results || [])];
@@ -115,7 +115,7 @@ class GameRoom {
         p.isAlive = true;
         p.score = 0;
     });
-    this.currentTurnIndex = 0; 
+    this.currentTurnIndex = Math.floor(Math.random() * this.players.length);
     this.isValidating = false;
     
     this.resetTimer();
@@ -134,7 +134,7 @@ class GameRoom {
 
     try {
       // 1. Search TMDB
-      const searchRes = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(movieName)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS });
+      const searchRes = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(movieName)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
       const searchData = await searchRes.json();
       
       const results = searchData.results || [];
@@ -150,7 +150,7 @@ class GameRoom {
       // 2. Fetch casts concurrently
       const candidateMovies = await Promise.all(topCandidates.map(async (c) => {
         try {
-            const credRes = await fetch(`https://api.themoviedb.org/3/movie/${c.id}/credits?language=en-US`, { headers: TMDB_HEADERS });
+            const credRes = await fetch(`https://api.themoviedb.org/3/movie/${c.id}/credits?language=en-US`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
             const credData = await credRes.json();
             return {
                 title: c.title,
@@ -329,7 +329,7 @@ io.on('connection', (socket) => {
 
   socket.on('autocompleteSearch', async (query) => {
     try {
-      const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS });
+      const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(2000) });
       const data = await res.json();
       const results = (data.results || []).slice(0, 5).map(m => ({
           title: m.title,
