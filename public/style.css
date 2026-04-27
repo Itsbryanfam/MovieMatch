@@ -239,6 +239,9 @@ body {
   border-radius: 6px;
   flex-shrink: 0;
   background-color: #1e1b4b;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 @keyframes float {
