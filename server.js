@@ -58,7 +58,15 @@ async function getAllLobbies() {
 const socketLobbyMap = new Map();
 
 function broadcastState(id, state) {
-  io.to(id).emit('stateUpdate', state);
+  const clientState = {
+    ...state,
+    chain: state.chain.map(item => ({
+       playerId: item.playerId,
+       playerName: item.playerName,
+       movie: item.movie
+    }))
+  };
+  io.to(id).emit('stateUpdate', clientState);
 }
 
 // --- PURE GAME LOGIC ---
@@ -315,9 +323,12 @@ async function startApp() {
                   const mediaType = c.media_type || 'movie';
                   const title = mediaType === 'tv' ? c.name : c.title;
                   const date = mediaType === 'tv' ? c.first_air_date : c.release_date;
-                  const credRes = await fetch(`https://api.themoviedb.org/3/${mediaType}/${c.id}/credits?language=en-US`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
+                  let endpoint = `https://api.themoviedb.org/3/movie/${c.id}/credits`;
+                  if (mediaType === 'tv') endpoint = `https://api.themoviedb.org/3/tv/${c.id}/aggregate_credits`;
+                  
+                  const credRes = await fetch(`${endpoint}?language=en-US`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
                   const credData = await credRes.json();
-                  return { title, year: date ? date.split('-')[0] : 'Unknown', cast: (credData.cast || []).slice(0, 30).map(actor => actor.name), poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null, mediaType };
+                  return { title, year: date ? date.split('-')[0] : 'Unknown', cast: (credData.cast || []).map(actor => actor.name), poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null, mediaType };
               } catch(e) { return { title: c.name || c.title, year: 'Unknown', cast: [], poster: null, mediaType: c.media_type || 'movie'}; }
             }));
 
@@ -327,22 +338,26 @@ async function startApp() {
             }
 
             let validMatch = null;
+            let matchedActors = [];
             let failReason = "Invalid movie connection.";
-            const lastMovie = room.chain.length > 0 ? room.chain[room.chain.length - 1].movie : null;
+            const lastNode = room.chain.length > 0 ? room.chain[room.chain.length - 1] : null;
+            const lastNodeCast = lastNode ? (lastNode.fullCast || lastNode.movie.cast) : [];
 
             for (let i = 0; i < candidateMovies.length; i++) {
                 const candidate = candidateMovies[i];
                 if (room.usedMovies.includes(candidate.title.toLowerCase())) { if(i===0) failReason = "Movie already used!"; continue; }
-                if (!lastMovie) { validMatch = candidate; break; } 
+                if (!lastNode) { validMatch = candidate; break; } 
                 else {
-                    const sharedActors = candidate.cast.filter(actor => lastMovie.cast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase()));
+                    const sharedActors = candidate.cast.filter(actor => lastNodeCast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase()));
                     if (sharedActors.length > 0) {
                         if (room.hardcoreMode && room.previousSharedActors.length > 0) {
                             const newSharedActors = sharedActors.filter(actor => !room.previousSharedActors.some(pActor => pActor.toLowerCase() === actor.toLowerCase()));
                             if (newSharedActors.length === 0) { failReason = "Hardcore Mode: You cannot reuse the exact same connecting actor from the previous turn!"; continue; }
                             room.previousSharedActors = newSharedActors;
+                            matchedActors = newSharedActors;
                         } else {
                             room.previousSharedActors = sharedActors;
+                            matchedActors = sharedActors;
                         }
                         validMatch = candidate; break;
                     }
@@ -354,9 +369,18 @@ async function startApp() {
                 await eliminateCurrentPlayer(lobbyId, room, failReason); return;
             }
 
+            const fullCastList = validMatch.cast;
+            let displayCast = fullCastList.slice(0, 5);
+            matchedActors.forEach(actor => {
+               if(!displayCast.some(d => d.toLowerCase() === actor.toLowerCase())) {
+                   displayCast.push(actor);
+               }
+            });
+            validMatch.cast = displayCast;
+
             // Valid play
             room.usedMovies.push(validMatch.title.toLowerCase());
-            room.chain.push({ playerId: player.id, playerName: player.name, movie: validMatch });
+            room.chain.push({ playerId: player.id, playerName: player.name, movie: validMatch, fullCast: fullCastList });
             const pIndex = room.players.findIndex(p => p.id === socket.id);
             if(pIndex > -1) room.players[pIndex].score += 100;
 
