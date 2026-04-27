@@ -418,9 +418,8 @@ io.on('connection', (socket) => {
     }
 
     socket.join(id);
-    if (room.addPlayer(socket, name)) {
-      socket.emit('joined', { lobbyId: id, playerId: socket.id });
-    }
+    socket.emit('joined', { lobbyId: id, playerId: socket.id });
+    room.addPlayer(socket, name);
   });
 
   socket.on('leaveLobby', () => {
