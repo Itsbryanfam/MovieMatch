@@ -329,6 +329,9 @@ socket.on('posters', (posters) => {
     }
 });
 
+let turnInterval = null;
+let lastTickSound = 0;
+
 socket.on('stateUpdate', (state) => {
     gameState = state;
     
@@ -336,29 +339,48 @@ socket.on('stateUpdate', (state) => {
         lobbyScreen.classList.remove('active');
         gameScreen.classList.add('active');
         renderGame();
+        
+        if (turnInterval) clearInterval(turnInterval);
+        
+        turnInterval = setInterval(() => {
+            if (!gameState || !gameState.turnExpiresAt || gameState.status !== 'playing') {
+                clearInterval(turnInterval);
+                return;
+            }
+            
+            const ms = gameState.turnExpiresAt - Date.now();
+            let tr = Math.max(0, Math.ceil(ms / 1000));
+            
+            timeText.innerText = tr + 's';
+            const percentage = (tr / 60) * 100;
+            timerBar.style.width = Math.max(0, Math.min(percentage, 100)) + '%';
+            
+            if (tr <= 10) {
+                timerBar.style.backgroundColor = 'var(--timer-red)';
+                if (tr > 0 && Math.floor(Date.now() / 1000) > lastTickSound) {
+                   playTick();
+                   lastTickSound = Math.floor(Date.now() / 1000);
+                }
+            } else if (tr <= 30) {
+                timerBar.style.backgroundColor = 'var(--timer-yellow)';
+            } else {
+                timerBar.style.backgroundColor = 'var(--timer-green)';
+            }
+            
+            if (tr === 0) {
+                socket.emit('forceNextTurn', currentLobbyId);
+                clearInterval(turnInterval);
+            }
+        }, 100);
+        
     } else if (state.status === 'waiting') {
+        if (turnInterval) clearInterval(turnInterval);
         gameScreen.classList.remove('active');
         lobbyScreen.classList.add('active');
         renderLobby();
     } else if (state.status === 'finished') {
+        if (turnInterval) clearInterval(turnInterval);
         renderGame();
-        // The notification will be handled separately
-    }
-});
-
-socket.on('tick', (timeRemaining) => {
-    timeText.innerText = timeRemaining + 's';
-    
-    const percentage = (timeRemaining / 60) * 100; // rough approx for colors
-    timerBar.style.width = Math.max(0, percentage) + '%';
-    
-    if (timeRemaining <= 10) {
-        timerBar.style.backgroundColor = 'var(--timer-red)';
-        playTick();
-    } else if (timeRemaining <= 30) {
-        timerBar.style.backgroundColor = 'var(--timer-yellow)';
-    } else {
-        timerBar.style.backgroundColor = 'var(--timer-green)';
     }
 });
 
