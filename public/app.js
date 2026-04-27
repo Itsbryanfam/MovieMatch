@@ -215,6 +215,16 @@ function checkUrlParams() {
 
 checkUrlParams();
 
+// Trigger hero demo animation after short delay
+window.addEventListener('DOMContentLoaded', () => {
+    const heroDemo = document.querySelector('.hero-demo');
+    if (heroDemo) {
+        setTimeout(() => {
+            heroDemo.classList.add('animate-demo');
+        }, 500);
+    }
+});
+
 hardcoreToggle.addEventListener('change', (e) => {
     socket.emit('toggleHardcore', { lobbyId: currentLobbyId, state: e.target.checked });
 });

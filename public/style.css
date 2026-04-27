@@ -224,14 +224,19 @@ body {
   font-weight: 600;
 }
 
-.demo-item {
+.hero-demo .demo-item {
   opacity: 0;
-  animation: dropIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform: translateY(-40px);
+  will-change: transform, opacity;
 }
 
-.demo-item-1 { animation-delay: 0.4s; }
-.demo-item-2 { animation-delay: 1.0s; }
-.demo-item-3 { animation-delay: 1.6s; }
+.hero-demo.animate-demo .demo-item {
+  animation: dropIn 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.hero-demo.animate-demo .demo-item-1 { animation-delay: 0.2s; }
+.hero-demo.animate-demo .demo-item-2 { animation-delay: 0.8s; }
+.hero-demo.animate-demo .demo-item-3 { animation-delay: 1.4s; }
 
 .demo-poster {
   width: 52px;
@@ -860,11 +865,11 @@ input:disabled {
 }
 
 @keyframes dropIn {
-  from { 
+  0% { 
     opacity: 0; 
-    transform: translateY(-20px) scale(0.95); 
+    transform: translateY(-40px) scale(0.9); 
   }
-  to { 
+  100% { 
     opacity: 1; 
     transform: translateY(0) scale(1); 
   }
