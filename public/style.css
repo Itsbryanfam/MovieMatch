@@ -1003,3 +1003,263 @@ input:disabled {
   color: var(--text-muted);
 }
 
+/* =============================================
+   MOBILE TAB BAR (hidden by default on desktop)
+   ============================================= */
+.mobile-tabs {
+  display: none;
+}
+
+/* =============================================
+   TABLET — iPad Portrait (768px–1023px)
+   2-column: board + right panel
+   ============================================= */
+@media (max-width: 1023px) {
+  #app-container {
+    padding: 1rem 1.25rem;
+  }
+
+  .app-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .layout-grid {
+    grid-template-columns: 1fr 240px;
+    gap: 1rem;
+  }
+
+  [data-panel="players"] {
+    display: none;
+  }
+
+  .lobby-panel {
+    max-width: 420px;
+    padding: 1.5rem;
+  }
+
+  .nav-link-btn {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.7rem;
+  }
+}
+
+/* =============================================
+   MOBILE — iPhone and small screens ≤ 767px
+   Single column + bottom tab navigation
+   ============================================= */
+@media (max-width: 767px) {
+  body {
+    overflow: hidden;
+    align-items: flex-start;
+  }
+
+  #app-container {
+    padding: 0.75rem 1rem 0;
+    height: 100dvh;
+  }
+
+  .app-header {
+    margin-bottom: 0.75rem;
+    flex-shrink: 0;
+  }
+
+  .logo {
+    font-size: 1.25rem;
+  }
+
+  .nav-link-btn {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  /* LOBBY PANELS */
+  .lobby-panel {
+    max-width: 100%;
+    width: 100%;
+    padding: 1.25rem;
+    border-radius: 12px;
+    margin: auto;
+  }
+
+  #lobby-screen {
+    overflow-y: auto;
+    padding-bottom: 1rem;
+  }
+
+  /* GAME SCREEN */
+  #game-screen {
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* MOBILE TAB BAR */
+  .mobile-tabs {
+    display: flex;
+    flex-shrink: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
+    margin-bottom: 0.75rem;
+  }
+
+  .mobile-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.5rem 0.4rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-height: 44px;
+  }
+
+  .mobile-tab.active {
+    background: var(--bg-elevated);
+    color: var(--text-main);
+    font-weight: 600;
+  }
+
+  /* LAYOUT GRID — single column */
+  .layout-grid {
+    grid-template-columns: 1fr;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Sidebars hidden by default, shown by JS */
+  [data-panel="players"],
+  [data-panel="chat"] {
+    display: none;
+  }
+
+  [data-panel="players"].mobile-visible,
+  [data-panel="chat"].mobile-visible {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .game-board.mobile-hidden {
+    display: none;
+  }
+
+  /* Game board */
+  .game-board {
+    gap: 0.75rem;
+  }
+
+  .input-area {
+    padding: 1rem;
+    flex-shrink: 0;
+  }
+
+  .feed-container {
+    min-height: 0;
+  }
+
+  /* Chain items */
+  .chain-item {
+    padding: 0.75rem 1rem;
+    gap: 0.75rem;
+  }
+
+  .chain-poster {
+    width: 44px;
+  }
+
+  .chain-item .movie-title {
+    font-size: 1rem;
+  }
+
+  .chain-item .movie-cast {
+    font-size: 0.8rem;
+  }
+
+  /* Buttons */
+  .btn-primary,
+  .btn-secondary {
+    min-height: 44px;
+    font-size: 0.9rem;
+  }
+
+  .btn-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Reactions */
+  .reaction-bar {
+    gap: 0.5rem;
+  }
+
+  .reaction-btn {
+    padding: 0.4rem 0.6rem;
+    font-size: 1.1rem;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Notifications */
+  #notification-text {
+    font-size: 1.75rem;
+    padding: 1rem;
+  }
+
+  /* Waiting room: stack public toggle below header */
+  #waiting-room .panel-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  #waiting-room .panel-header label.setting-toggle {
+    position: static;
+  }
+
+  /* Modals */
+  .modal-card {
+    padding: 1.5rem;
+    border-radius: 12px;
+    max-height: 90dvh;
+    overflow-y: auto;
+  }
+
+  .how-to-steps {
+    gap: 1rem;
+  }
+
+  .step-number {
+    width: 28px;
+    height: 28px;
+    font-size: 0.8rem;
+  }
+}
+
+/* =============================================
+   VERY SMALL — iPhone SE (≤ 390px)
+   ============================================= */
+@media (max-width: 390px) {
+  .logo {
+    font-size: 1.1rem;
+  }
+
+  .nav-link-btn {
+    font-size: 0.65rem;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .mobile-tab {
+    font-size: 0.72rem;
+  }
+
+  #notification-text {
+    font-size: 1.4rem;
+  }
+}

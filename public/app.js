@@ -345,6 +345,7 @@ socket.on('stateUpdate', (state) => {
     if (state.status === 'playing') {
         lobbyScreen.classList.remove('active');
         gameScreen.classList.add('active');
+        resetMobileTab();
         renderGame();
         
         if (turnInterval) clearInterval(turnInterval);
@@ -605,3 +606,47 @@ document.addEventListener('keydown', (e) => {
         creditsModal.classList.add('hidden');
     }
 });
+
+// --- MOBILE TAB SWITCHER ---
+const mobileTabs = document.getElementById('mobile-tabs');
+const gameBoardEl = document.querySelector('.game-board');
+const playersPanel = document.querySelector('[data-panel="players"]');
+const chatPanel = document.querySelector('[data-panel="chat"]');
+
+if (mobileTabs) {
+    mobileTabs.addEventListener('click', (e) => {
+        const btn = e.target.closest('.mobile-tab');
+        if (!btn) return;
+
+        const tab = btn.dataset.tab;
+
+        // Update active button
+        document.querySelectorAll('.mobile-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Reset all panels
+        gameBoardEl.classList.remove('mobile-hidden');
+        playersPanel.classList.remove('mobile-visible');
+        chatPanel.classList.remove('mobile-visible');
+
+        if (tab === 'players') {
+            gameBoardEl.classList.add('mobile-hidden');
+            playersPanel.classList.add('mobile-visible');
+        } else if (tab === 'chat') {
+            gameBoardEl.classList.add('mobile-hidden');
+            chatPanel.classList.add('mobile-visible');
+        }
+        // 'board' tab: defaults already set above (board visible)
+    });
+}
+
+// Reset tab state back to board whenever a new game state arrives (e.g. turn starts)
+function resetMobileTab() {
+    if (!mobileTabs) return;
+    document.querySelectorAll('.mobile-tab').forEach(b => b.classList.remove('active'));
+    const boardTab = mobileTabs.querySelector('[data-tab="board"]');
+    if (boardTab) boardTab.classList.add('active');
+    gameBoardEl.classList.remove('mobile-hidden');
+    playersPanel.classList.remove('mobile-visible');
+    chatPanel.classList.remove('mobile-visible');
+}

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>MovieMatch</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -101,9 +101,15 @@
 
     <!-- GAME SCREEN -->
     <div id="game-screen" class="screen">
+      <!-- MOBILE TAB BAR -->
+      <nav class="mobile-tabs" id="mobile-tabs">
+        <button class="mobile-tab active" data-tab="board">🎬 Board</button>
+        <button class="mobile-tab" data-tab="players">👥 Players</button>
+        <button class="mobile-tab" data-tab="chat">💬 Chat</button>
+      </nav>
       <div class="layout-grid">
         <!-- Sidebar -->
-        <aside class="sidebar">
+        <aside class="sidebar" data-panel="players">
           <div class="sidebar-header">
             <h3>Active Players</h3>
           </div>
@@ -143,7 +149,7 @@
         </main>
         
         <!-- Search Suggestions -->
-        <aside class="sidebar right-panel">
+        <aside class="sidebar right-panel" data-panel="chat">
           <div class="sidebar-half">
             <div class="sidebar-header">
               <h3>Search Suggestions</h3>
