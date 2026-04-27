@@ -226,12 +226,12 @@ body {
 
 .demo-item {
   opacity: 0;
-  animation: slideIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards, float 6s ease-in-out infinite;
+  animation: dropIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.demo-item-1 { animation-delay: 0.3s, 0s; }
-.demo-item-2 { animation-delay: 0.9s, 0.5s; }
-.demo-item-3 { animation-delay: 1.5s, 1s; }
+.demo-item-1 { animation-delay: 0.4s; }
+.demo-item-2 { animation-delay: 1.0s; }
+.demo-item-3 { animation-delay: 1.6s; }
 
 .demo-poster {
   width: 52px;
@@ -857,6 +857,17 @@ input:disabled {
 @keyframes slideIn {
   from { opacity: 0; transform: translateX(-15px); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes dropIn {
+  from { 
+    opacity: 0; 
+    transform: translateY(-20px) scale(0.95); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+  }
 }
 
 @keyframes popIn {
