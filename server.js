@@ -305,12 +305,24 @@ async function startApp() {
 
     // --- TIMEOUT FORCE TURN ---
     socket.on('forceNextTurn', async (lobbyId) => {
-        const room = await getLobby(lobbyId);
+        let room = await getLobby(lobbyId);
         if (!room || room.status !== 'playing' || room.isValidating) return;
+        if (!room.turnExpiresAt) return;
         
-        // Only if it's actually expired! Add 1 sec buffer for sync delays
-        if (room.turnExpiresAt && Date.now() > (room.turnExpiresAt + 1000)) {
+        const now = Date.now();
+        if (now >= room.turnExpiresAt) {
             await eliminateCurrentPlayer(lobbyId, room, "Time's up!");
+        } else {
+            const delay = (room.turnExpiresAt - now) + 500; 
+            if (delay > 0 && delay < 65000) {
+                setTimeout(async () => {
+                    const freshRoom = await getLobby(lobbyId);
+                    if (!freshRoom || freshRoom.status !== 'playing' || freshRoom.isValidating) return;
+                    if (freshRoom.turnExpiresAt === room.turnExpiresAt && Date.now() >= freshRoom.turnExpiresAt) {
+                        await eliminateCurrentPlayer(lobbyId, freshRoom, "Time's up!");
+                    }
+                }, delay);
+            }
         }
     });
 
