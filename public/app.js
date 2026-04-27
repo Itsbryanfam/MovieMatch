@@ -28,6 +28,13 @@ const backToJoinBtn2 = document.getElementById('back-to-join-btn-2');
 const refreshLobbiesBtn = document.getElementById('refresh-lobbies-btn');
 const publicLobbiesList = document.getElementById('public-lobbies-list');
 
+const howToPlayModal = document.getElementById('how-to-play-modal');
+const creditsModal = document.getElementById('credits-modal');
+const howToPlayBtn = document.getElementById('how-to-play-btn');
+const creditsBtn = document.getElementById('credits-btn');
+const closeHowToPlay = document.getElementById('close-how-to-play');
+const closeCredits = document.getElementById('close-credits');
+
 const gamePlayersList = document.getElementById('game-players');
 const chainDisplay = document.getElementById('chain-display');
 const movieInput = document.getElementById('movie-input');
@@ -579,4 +586,22 @@ socket.on('receiveReaction', ({ emoji }) => {
     setTimeout(() => {
         el.remove();
     }, 2500);
+});
+
+// --- MODALS ---
+howToPlayBtn.addEventListener('click', () => howToPlayModal.classList.remove('hidden'));
+creditsBtn.addEventListener('click', () => creditsModal.classList.remove('hidden'));
+closeHowToPlay.addEventListener('click', () => howToPlayModal.classList.add('hidden'));
+closeCredits.addEventListener('click', () => creditsModal.classList.add('hidden'));
+
+// Close on backdrop click
+howToPlayModal.addEventListener('click', (e) => { if (e.target === howToPlayModal) howToPlayModal.classList.add('hidden'); });
+creditsModal.addEventListener('click', (e) => { if (e.target === creditsModal) creditsModal.classList.add('hidden'); });
+
+// Close on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        howToPlayModal.classList.add('hidden');
+        creditsModal.classList.add('hidden');
+    }
 });
