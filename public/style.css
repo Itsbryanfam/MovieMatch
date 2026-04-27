@@ -1098,6 +1098,16 @@ input:disabled {
   }
 
   /* MOBILE TAB BAR */
+  /* Hide desktop search suggestions — replaced by floating dropdown */
+  [data-panel="chat"] .sidebar-half:first-child {
+    display: none;
+  }
+
+  /* Remove the dividing border since only chat remains */
+  [data-panel="chat"] .chat-half {
+    border-top: none;
+  }
+
   .mobile-tabs {
     display: flex;
     flex-shrink: 0;
