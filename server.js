@@ -375,6 +375,12 @@ async function startApp() {
                if(!displayCast.some(d => d.toLowerCase() === actor.toLowerCase())) {
                    displayCast.push(actor);
                }
+               if (room.chain.length > 0) {
+                   const prevNode = room.chain[room.chain.length - 1];
+                   if (!prevNode.movie.cast.some(d => d.toLowerCase() === actor.toLowerCase())) {
+                       prevNode.movie.cast.push(actor);
+                   }
+               }
             });
             validMatch.cast = displayCast;
 
