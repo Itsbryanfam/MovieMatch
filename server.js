@@ -63,8 +63,10 @@ function broadcastState(id, state) {
     chain: state.chain.map(item => ({
        playerId: item.playerId,
        playerName: item.playerName,
-       movie: item.movie
-    }))
+       movie: item.movie,
+       matchedActors: item.matchedActors || []
+    })),
+    winner: state.winner || null
   };
   io.to(id).emit('stateUpdate', clientState);
 }
@@ -111,6 +113,7 @@ async function checkWinCondition(id, state) {
     
     const winner = alivePlayers[0];
     winner.wins += 1;
+    state.winner = { name: winner.name, score: winner.score, id: winner.id };
 
     io.to(id).emit('notification', `${winner.name} wins!`);
     await saveLobby(id, state);
@@ -246,6 +249,24 @@ async function startApp() {
         if (room && room.players.find(p => p.id === socket.id)?.isHost) {
             await startGame(lobbyId, room);
         }
+    });
+
+    socket.on('restartLobby', async (lobbyId) => {
+        const room = await getLobby(lobbyId);
+        if (!room) return;
+        const player = room.players.find(p => p.id === socket.id);
+        if (!player?.isHost) return;
+        if (room.status !== 'finished') return;
+        // Reset to waiting, preserve wins
+        room.status = 'waiting';
+        room.chain = [];
+        room.usedMovies = [];
+        room.winner = null;
+        room.timerMultiplier = 0;
+        room.previousSharedActors = [];
+        room.players.forEach(p => { p.isAlive = true; p.score = 0; });
+        await saveLobby(lobbyId, room);
+        broadcastState(lobbyId, room);
     });
 
     socket.on('togglePublic', async ({lobbyId, state}) => {
@@ -386,7 +407,7 @@ async function startApp() {
 
             // Valid play
             room.usedMovies.push(validMatch.title.toLowerCase());
-            room.chain.push({ playerId: player.id, playerName: player.name, movie: validMatch, fullCast: fullCastList });
+            room.chain.push({ playerId: player.id, playerName: player.name, movie: validMatch, fullCast: fullCastList, matchedActors });
             const pIndex = room.players.findIndex(p => p.id === socket.id);
             if(pIndex > -1) room.players[pIndex].score += 100;
 
