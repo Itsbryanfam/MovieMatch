@@ -223,6 +223,9 @@ function renderLobby() {
         if (p.isHost) {
             label += ' 👑';
         }
+        if (p.wins > 0) {
+            label += ` (${p.wins} Wins)`;
+        }
         li.innerText = label;
         lobbyPlayersList.appendChild(li);
     });

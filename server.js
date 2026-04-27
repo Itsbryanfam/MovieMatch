@@ -70,7 +70,8 @@ class GameRoom {
       isHost,
       isAlive: true,
       connected: true,
-      score: 0
+      score: 0,
+      wins: 0
     });
     this.broadcastState();
     return true;
@@ -102,12 +103,18 @@ class GameRoom {
   }
 
   startGame() {
-    if (this.players.length < 2) return;
+    if (this.players.length < 2) {
+      this.io.to(this.id).emit('error', "Need at least 2 players!");
+      return;
+    }
     this.status = 'playing';
     this.chain = [];
     this.usedMovies.clear();
     this.timerMultiplier = 0;
-    this.players.forEach(p => p.isAlive = true);
+    this.players.forEach(p => {
+        p.isAlive = true;
+        p.score = 0;
+    });
     this.currentTurnIndex = 0; 
     this.isValidating = false;
     
@@ -154,6 +161,11 @@ class GameRoom {
             return { title: c.title, year: 'Unknown', cast: [] };
         }
       }));
+
+      // In case they disconnected or time ran out during the API hits, quietly abort
+      if (this.status !== 'playing' || this.players[this.currentTurnIndex].id !== socketId) {
+          return;
+      }
 
       let validMatch = null;
       let failReason = "Invalid movie connection.";
@@ -238,6 +250,7 @@ class GameRoom {
     clearInterval(this.timerInterval);
     const reduction = Math.floor(this.timerMultiplier / 2) * 5;
     this.timeRemaining = Math.max(10, this.initialTime - reduction);
+    this.io.to(this.id).emit('tick', this.timeRemaining);
 
     this.timerInterval = setInterval(() => {
       // Don't count down if we are waiting for API
@@ -258,7 +271,11 @@ class GameRoom {
     if (alivePlayers.length === 1 && this.players.length > 1) {
       this.status = 'finished';
       clearInterval(this.timerInterval);
-      this.io.to(this.id).emit('notification', `${alivePlayers[0].name} wins!`);
+      
+      const winner = alivePlayers[0];
+      winner.wins += 1;
+
+      this.io.to(this.id).emit('notification', `${winner.name} wins!`);
       this.broadcastState();
 
       setTimeout(() => {
