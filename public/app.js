@@ -165,7 +165,14 @@ socket.on('autocompleteResults', (results) => {
     results.forEach(movie => {
         const div = document.createElement('div');
         div.className = 'autocomplete-item';
-        div.innerHTML = `${movie.title} <span class="year">(${movie.year})</span>`;
+        const imgTag = movie.poster ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">` : `<div class="mini-poster placeholder"></div>`;
+        div.innerHTML = `
+            ${imgTag}
+            <div class="ac-text">
+                <div class="ac-title">${movie.title}</div>
+                <span class="year">(${movie.year})</span>
+            </div>
+        `;
         div.addEventListener('click', () => {
             movieInput.value = movie.title;
             autocompleteContainer.innerHTML = '<div class="empty-hint">Press Submit to lock it in!</div>';
@@ -343,10 +350,14 @@ function renderGame() {
             castHtml = item.movie.cast.join(', ');
         }
 
+        const imgTag = item.movie.poster ? `<img src="${item.movie.poster}" alt="Poster" class="chain-poster">` : `<div class="chain-poster placeholder"></div>`;
         div.innerHTML = `
-            <div class="player-name">${item.playerName}</div>
-            <div class="movie-title">${item.movie.title} (${item.movie.year})</div>
-            <div class="movie-cast">Cast: ${castHtml}</div>
+            ${imgTag}
+            <div class="chain-content">
+                <div class="player-name">${item.playerName}</div>
+                <div class="movie-title">${item.movie.title} <span class="year">(${item.movie.year})</span></div>
+                <div class="movie-cast">Cast: ${castHtml}</div>
+            </div>
         `;
         chainDisplay.appendChild(div);
         previousActors = item.movie.cast;

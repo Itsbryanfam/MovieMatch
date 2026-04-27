@@ -322,6 +322,23 @@ input:disabled {
   border-radius: 8px;
   animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   opacity: 0;
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.chain-poster {
+  width: 60px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  background: var(--bg-surface);
+  aspect-ratio: 2/3;
+  object-fit: cover;
+}
+
+.chain-content {
+  flex: 1;
 }
 
 .chain-item .player-name {
@@ -460,6 +477,23 @@ input:disabled {
   border-bottom: 1px solid rgba(255,255,255,0.05);
   transition: background 0.2s;
   font-size: 0.95rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.mini-poster {
+  width: 32px;
+  border-radius: 4px;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  background: var(--bg-surface);
+}
+
+.ac-text {
+  flex: 1;
 }
 
 .autocomplete-item:hover {

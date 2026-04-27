@@ -155,10 +155,11 @@ class GameRoom {
             return {
                 title: c.title,
                 year: c.release_date ? c.release_date.split('-')[0] : 'Unknown',
-                cast: (credData.cast || []).slice(0, 30).map(actor => actor.name) // keep top 30 actors for fairness
+                cast: (credData.cast || []).slice(0, 30).map(actor => actor.name), // keep top 30 actors for fairness
+                poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null
             };
         } catch(e) {
-            return { title: c.title, year: 'Unknown', cast: [] };
+            return { title: c.title, year: 'Unknown', cast: [], poster: null };
         }
       }));
 
@@ -332,7 +333,8 @@ io.on('connection', (socket) => {
       const data = await res.json();
       const results = (data.results || []).slice(0, 5).map(m => ({
           title: m.title,
-          year: m.release_date ? m.release_date.split('-')[0] : '????'
+          year: m.release_date ? m.release_date.split('-')[0] : '????',
+          poster: m.poster_path ? `https://image.tmdb.org/t/p/w92${m.poster_path}` : null
       }));
       socket.emit('autocompleteResults', results);
     } catch (e) {
