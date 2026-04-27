@@ -57,6 +57,9 @@ class GameRoom {
     this.initialTime = 60;
     this.timerInterval = null;
     this.isValidating = false; // Prevents spamming submits
+    this.hardcoreMode = false;
+    this.previousSharedActors = [];
+    this.allowTvShows = false;
   }
 
   addPlayer(socket, name) {
@@ -111,6 +114,7 @@ class GameRoom {
     this.chain = [];
     this.usedMovies.clear();
     this.timerMultiplier = 0;
+    this.previousSharedActors = [];
     this.players.forEach(p => {
         p.isAlive = true;
         p.score = 0;
@@ -133,33 +137,40 @@ class GameRoom {
     this.isValidating = true;
 
     try {
-      // 1. Search TMDB
-      const searchRes = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(movieName)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
+      // 1. Search TMDB — use multi-search if TV shows are enabled
+      const searchType = this.allowTvShows ? 'multi' : 'movie';
+      const searchRes = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(movieName)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
       const searchData = await searchRes.json();
       
-      const results = searchData.results || [];
+      // Filter out 'person' results from multi-search, only keep movie/tv
+      const results = (searchData.results || []).filter(r => r.media_type !== 'person');
 
       if (results.length === 0) {
-        this.eliminateCurrentPlayer("Movie not found!");
+        this.eliminateCurrentPlayer("Title not found!");
         return;
       }
 
       // Check top 5 results for a match to help with ambiguity
       const topCandidates = results.slice(0, 5);
 
-      // 2. Fetch casts concurrently
+      // 2. Fetch casts concurrently (branch by media_type for TV vs Movie)
       const candidateMovies = await Promise.all(topCandidates.map(async (c) => {
         try {
-            const credRes = await fetch(`https://api.themoviedb.org/3/movie/${c.id}/credits?language=en-US`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
+            const mediaType = c.media_type || 'movie';
+            const title = mediaType === 'tv' ? c.name : c.title;
+            const date = mediaType === 'tv' ? c.first_air_date : c.release_date;
+            const credRes = await fetch(`https://api.themoviedb.org/3/${mediaType}/${c.id}/credits?language=en-US`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
             const credData = await credRes.json();
             return {
-                title: c.title,
-                year: c.release_date ? c.release_date.split('-')[0] : 'Unknown',
-                cast: (credData.cast || []).slice(0, 30).map(actor => actor.name), // keep top 30 actors for fairness
-                poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null
+                title,
+                year: date ? date.split('-')[0] : 'Unknown',
+                cast: (credData.cast || []).slice(0, 30).map(actor => actor.name),
+                poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null,
+                mediaType
             };
         } catch(e) {
-            return { title: c.title, year: 'Unknown', cast: [], poster: null };
+            const mediaType = c.media_type || 'movie';
+            return { title: c.media_type === 'tv' ? c.name : c.title, year: 'Unknown', cast: [], poster: null, mediaType };
         }
       }));
 
@@ -189,6 +200,21 @@ class GameRoom {
               );
 
               if (sharedActors.length > 0) {
+                  if (this.hardcoreMode && this.previousSharedActors.length > 0) {
+                      const newSharedActors = sharedActors.filter(actor => 
+                          !this.previousSharedActors.some(pActor => pActor.toLowerCase() === actor.toLowerCase())
+                      );
+                      
+                      if (newSharedActors.length === 0) {
+                          failReason = "Hardcore Mode: You cannot reuse the exact same connecting actor from the previous turn!";
+                          continue;
+                      }
+                      
+                      this.previousSharedActors = newSharedActors;
+                  } else {
+                      this.previousSharedActors = sharedActors;
+                  }
+
                   validMatch = candidate;
                   break;
               }
@@ -314,7 +340,9 @@ class GameRoom {
       players: this.players,
       currentTurnIndex: this.currentTurnIndex,
       chain: this.chain,
-      timeRemaining: this.timeRemaining
+      timeRemaining: this.timeRemaining,
+      hardcoreMode: this.hardcoreMode,
+      allowTvShows: this.allowTvShows
     };
     this.io.to(this.id).emit('stateUpdate', state);
   }
@@ -327,15 +355,22 @@ io.on('connection', (socket) => {
     socket.emit('posters', cachedPosters);
   }
 
-  socket.on('autocompleteSearch', async (query) => {
+  socket.on('autocompleteSearch', async ({ query, lobbyId }) => {
     try {
-      const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(2000) });
+      const room = lobbies[lobbyId];
+      const allowTv = room ? room.allowTvShows : false;
+      const searchType = allowTv ? 'multi' : 'movie';
+      const res = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(2000) });
       const data = await res.json();
-      const results = (data.results || []).slice(0, 5).map(m => ({
-          title: m.title,
-          year: m.release_date ? m.release_date.split('-')[0] : '????',
-          poster: m.poster_path ? `https://image.tmdb.org/t/p/w92${m.poster_path}` : null
-      }));
+      const results = (data.results || [])
+        .filter(m => m.media_type !== 'person')
+        .slice(0, 5)
+        .map(m => ({
+          title: m.media_type === 'tv' ? m.name : (m.title || m.name),
+          year: (m.media_type === 'tv' ? m.first_air_date : m.release_date)?.split('-')[0] || '????',
+          poster: m.poster_path ? `https://image.tmdb.org/t/p/w92${m.poster_path}` : null,
+          mediaType: m.media_type || 'movie'
+        }));
       socket.emit('autocompleteResults', results);
     } catch (e) {
       console.error('Autocomplete Error:', e);
@@ -387,6 +422,28 @@ io.on('connection', (socket) => {
       const player = room.players.find(p => p.id === socket.id);
       if (player && player.isHost) {
         room.startGame();
+      }
+    }
+  });
+
+  socket.on('toggleHardcore', ({ lobbyId, state }) => {
+    const room = lobbies[lobbyId];
+    if (room && room.status === 'waiting') {
+      const player = room.players.find(p => p.id === socket.id);
+      if (player && player.isHost) {
+        room.hardcoreMode = !!state;
+        room.broadcastState();
+      }
+    }
+  });
+
+  socket.on('toggleTvShows', ({ lobbyId, state }) => {
+    const room = lobbies[lobbyId];
+    if (room && room.status === 'waiting') {
+      const player = room.players.find(p => p.id === socket.id);
+      if (player && player.isHost) {
+        room.allowTvShows = !!state;
+        room.broadcastState();
       }
     }
   });

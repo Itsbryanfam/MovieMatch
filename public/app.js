@@ -13,6 +13,9 @@ const joinBtn = document.getElementById('join-btn');
 const startBtn = document.getElementById('start-btn');
 const lobbyPlayersList = document.getElementById('lobby-players');
 const lobbyCodeDisplay = document.getElementById('lobby-code-display');
+const lobbySettings = document.getElementById('lobby-settings');
+const hardcoreToggle = document.getElementById('hardcore-toggle');
+const tvShowsToggle = document.getElementById('tv-shows-toggle');
 
 const gamePlayersList = document.getElementById('game-players');
 const chainDisplay = document.getElementById('chain-display');
@@ -107,6 +110,14 @@ startBtn.addEventListener('click', () => {
     socket.emit('startLobby', currentLobbyId);
 });
 
+hardcoreToggle.addEventListener('change', (e) => {
+    socket.emit('toggleHardcore', { lobbyId: currentLobbyId, state: e.target.checked });
+});
+
+tvShowsToggle.addEventListener('change', (e) => {
+    socket.emit('toggleTvShows', { lobbyId: currentLobbyId, state: e.target.checked });
+});
+
 submitBtn.addEventListener('click', submitMovie);
 movieInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') submitMovie();
@@ -120,7 +131,7 @@ movieInput.addEventListener('input', (e) => {
     }
     clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(() => {
-        socket.emit('autocompleteSearch', query);
+        socket.emit('autocompleteSearch', { query, lobbyId: currentLobbyId });
     }, 400);
 });
 
@@ -295,6 +306,12 @@ function renderLobby() {
         lobbyPlayersList.appendChild(li);
     });
     
+    lobbySettings.style.display = 'flex';
+    hardcoreToggle.checked = gameState.hardcoreMode || false;
+    hardcoreToggle.disabled = !amIHost;
+    tvShowsToggle.checked = gameState.allowTvShows || false;
+    tvShowsToggle.disabled = !amIHost;
+
     if (gameState.players.length >= 2) {
         startBtn.style.display = 'block';
         if (amIHost) {
