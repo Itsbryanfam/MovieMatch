@@ -399,7 +399,7 @@ function renderLobby() {
             label += ' 👑';
         }
         if (p.wins > 0) {
-            label += ` (${p.wins} Wins)`;
+            label += ` • ${p.wins} 🏆`;
         }
         li.innerText = label;
         lobbyPlayersList.appendChild(li);
