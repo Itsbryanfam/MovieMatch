@@ -370,7 +370,7 @@ async function startApp() {
             }
 
             const fullCastList = validMatch.cast;
-            let displayCast = fullCastList.slice(0, 5);
+            let displayCast = fullCastList.slice(0, 30);
             matchedActors.forEach(actor => {
                if(!displayCast.some(d => d.toLowerCase() === actor.toLowerCase())) {
                    displayCast.push(actor);
