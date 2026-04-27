@@ -16,6 +16,7 @@ const lobbyCodeDisplay = document.getElementById('lobby-code-display');
 const lobbySettings = document.getElementById('lobby-settings');
 const hardcoreToggle = document.getElementById('hardcore-toggle');
 const tvShowsToggle = document.getElementById('tv-shows-toggle');
+const publicRoomToggle = document.getElementById('public-room-toggle');
 
 const joinPanel = document.getElementById('join-panel');
 const privatePanel = document.getElementById('private-panel');
@@ -163,6 +164,12 @@ startBtn.addEventListener('click', () => {
 hardcoreToggle.addEventListener('change', (e) => {
     socket.emit('toggleHardcore', { lobbyId: currentLobbyId, state: e.target.checked });
 });
+
+if(publicRoomToggle) {
+    publicRoomToggle.addEventListener('change', (e) => {
+        socket.emit('togglePublic', { lobbyId: currentLobbyId, state: e.target.checked });
+    });
+}
 
 tvShowsToggle.addEventListener('change', (e) => {
     socket.emit('toggleTvShows', { lobbyId: currentLobbyId, state: e.target.checked });
@@ -403,6 +410,10 @@ function renderLobby() {
     hardcoreToggle.disabled = !amIHost;
     tvShowsToggle.checked = gameState.allowTvShows || false;
     tvShowsToggle.disabled = !amIHost;
+    if(publicRoomToggle) {
+        publicRoomToggle.checked = gameState.isPublic || false;
+        publicRoomToggle.disabled = !amIHost;
+    }
 
     if (gameState.players.length >= 2) {
         startBtn.style.display = 'block';

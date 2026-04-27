@@ -33,7 +33,7 @@
         
         <div class="flex-column" style="display:flex; flex-direction:column; gap: 0.75rem;">
           <button id="show-public-btn" class="btn-primary">Browse Public Rooms</button>
-          <button id="show-private-btn" class="btn-secondary" style="background:transparent; color: #fff; border: 1px solid rgba(255,255,255,0.2);">Create / Join Private Room</button>
+          <button id="show-private-btn" class="btn-secondary">Create / Join Private Room</button>
         </div>
       </div>
 
@@ -48,7 +48,7 @@
           <input type="text" id="lobby-id-input" placeholder="Leave blank to create new" autocomplete="off" />
         </div>
         <button id="join-btn" class="btn-primary" style="margin-bottom:0.75rem;">Connect to Room</button>
-        <button id="back-to-join-btn" class="btn-secondary" style="background:transparent; color: #fff; border: 1px solid rgba(255,255,255,0.2);">Back</button>
+        <button id="back-to-join-btn" class="btn-secondary">Back</button>
       </div>
 
       <!-- STAGE 2B: PUBLIC ROOMS -->
@@ -65,13 +65,17 @@
            <div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">Loading lobbies...</div>
         </div>
         
-        <button id="back-to-join-btn-2" class="btn-secondary" style="background:transparent; color: #fff; border: 1px solid rgba(255,255,255,0.2);">Back</button>
+        <button id="back-to-join-btn-2" class="btn-secondary">Back</button>
       </div>
       
       <div id="waiting-room" class="panel hidden lobby-panel">
-        <div class="panel-header">
+        <div class="panel-header" style="position:relative;">
           <h2>Room: <span id="lobby-code-display" class="accent-text"></span></h2>
           <p>Waiting for players...</p>
+          <label class="setting-toggle" style="position:absolute; top:0; right:0;" title="List this room on the Public Matchmaking viewer">
+            <input type="checkbox" id="public-room-toggle" disabled>
+            <span>Public Room</span>
+          </label>
         </div>
         <div class="players-list-container">
           <ul id="lobby-players"></ul>

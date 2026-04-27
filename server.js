@@ -60,6 +60,7 @@ class GameRoom {
     this.hardcoreMode = false;
     this.previousSharedActors = [];
     this.allowTvShows = false;
+    this.isPublic = false;
   }
 
   addPlayer(socket, name) {
@@ -342,7 +343,8 @@ class GameRoom {
       chain: this.chain,
       timeRemaining: this.timeRemaining,
       hardcoreMode: this.hardcoreMode,
-      allowTvShows: this.allowTvShows
+      allowTvShows: this.allowTvShows,
+      isPublic: this.isPublic
     };
     this.io.to(this.id).emit('stateUpdate', state);
   }
@@ -389,7 +391,7 @@ io.on('connection', (socket) => {
 
   socket.on('requestPublicLobbies', () => {
     const publicList = Object.values(lobbies)
-      .filter(room => room.status === 'waiting' && room.players.length < 8)
+      .filter(room => room.status === 'waiting' && room.isPublic && room.players.length < 8)
       .map(room => {
         const host = room.players.find(p => p.isHost);
         return {
@@ -459,6 +461,17 @@ io.on('connection', (socket) => {
       const player = room.players.find(p => p.id === socket.id);
       if (player && player.isHost) {
         room.allowTvShows = !!state;
+        room.broadcastState();
+      }
+    }
+  });
+
+  socket.on('togglePublic', ({ lobbyId, state }) => {
+    const room = lobbies[lobbyId];
+    if (room && room.status === 'waiting') {
+      const player = room.players.find(p => p.id === socket.id);
+      if (player && player.isHost) {
+        room.isPublic = !!state;
         room.broadcastState();
       }
     }
