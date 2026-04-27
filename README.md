@@ -1,58 +1,40 @@
 # 🎬 MovieMatch
 
-A fast-paced, multiplayer web game where players take turns linking movies (and TV shows!) by shared cast members. Last one standing wins!
+A fast-paced, horizontally-scalable, multiplayer web game where players take turns linking movies (and TV shows!) by shared cast members. Last one standing wins!
 
-## ✨ Features
+## ✨ New & Advanced Features
 
-### 🎮 Core Gameplay
-- **Real-Time Multiplayer Engine:** Built on Express and Socket.io for instantaneous lobby management and turn-state synchronization across all connected players.
-- **Live TMDB Validation:** Integrates directly with The Movie Database (TMDB) API, validating every submission against live production data for accurate cast chains. Top 5 search candidates are checked to handle title ambiguity and alternate spellings.
-- **Suspenseful Server-Side Timers:** The timer pressure increases as the chain grows longer (dropping from 60s down to 10s). A 5-second AbortSignal timeout on every TMDB fetch prevents frozen timers from stalled network requests.
-- **Randomized Turn Order:** A random player from the lobby is selected to go first every match — no more hosting advantage!
+### 🌐 Public Matchmaking & Discovery
+- **Public Lobby Browser:** Users can now "Solo-Queue" by browsing a live list of public rooms directly from the home screen.
+- **Dynamic Privacy:** Lobby hosts can toggle `Public Room` status at any time to list/unlist their room from the global browser.
+- **Room Capacity:** Supports up to 8 players per lobby for high-energy matchmaking sessions.
 
-### 🏆 Scoring & Persistence
-- **Win Counter:** Each player's total wins are tracked and displayed next to their name in the lobby, persisting across multiple games in the same session.
-- **Per-Match Scores:** Players earn 100 points per valid connection, which resets each new game while the win counter carries forward.
+### ⚡ Stateless Redis Architecture (V2)
+- **Horizontal Scalability:** The backend has been completely refactored from in-memory OOP to a stateless functional architecture using **Redis**.
+- **Socket.io Redis Adapter:** Uses a Pub/Sub bridge to allow multiple server instances to synchronize state perfectly — connect on Server A and play with friends on Server B seamlessly.
+- **Session Persistence:** Lobby states are persisted in a Redis Key-Value store with a 2-hour TTL, ensuring zero-latency game state recovery and auto-cleanup.
 
-### 🔍 Movie Autocomplete Sidebar
-- A dedicated **Search Suggestions** panel sits permanently on the right side of the game board.
-- As you type, a debounced TMDB search fires and populates up to **5 clickable suggestions** complete with:
-  - 🖼️ **Mini movie poster thumbnails** (32px) pulled directly from TMDB
-  - Title and release year
-- Clicking a suggestion auto-fills the guess input, ready to submit.
-- When **Allow TV Shows** is enabled, the autocomplete also searches television series.
+### 🛡️ Enhanced Validation Engine
+- **Full Cast Depth:** The server now validates every submission against the **entire credited cast list**, including obscure cameos and uncredited roles, eliminating "false-failure" feedback.
+- **TV Aggregate Credits:** For TV shows, the engine now queries the TMDB `aggregate_credits` endpoint, scanning every episode of every season to ensure actors from any era are recognized.
+- **Smart UI Slicing:** While the backend validates against 500+ actors, the UI dynamically shrinks the display list to the Top 30 actors + the specific "Matching Actor" to keep the game feed clean.
+- **Retroactive Connections:** If an obscure connecting actor isn't in a movie's main display list, the engine automatically injects them into the previous turn's card to visually prove the connection.
 
-### 🖼️ Movie Posters In-Chain
-- Every successfully validated answer in the game feed displays a **60px poster thumbnail** alongside the player name, movie title, and shared cast list.
-- Shared connecting actors are **bolded** in the cast list for at-a-glance clarity.
-
-### 💬 Lobby Chat
-- A live **text chat panel** sits in the bottom half of the right sidebar.
-- Messages are sent by pressing **Enter** and broadcast instantly to all players in the lobby via Socket.io.
-- Each message shows the sender's player name in accent color.
-
-### ⚙️ Lobby Settings (Host Only)
-The lobby host has access to two game mode toggles before starting a match. All players see the settings update in real-time, but only the host can change them.
-
-| Toggle | Description |
-|---|---|
-| **Hardcore Mode** | Players cannot reuse the same connecting actor from the immediately previous turn. Forces creative lateral thinking each round. |
-| **Allow TV Shows** | Expands valid guesses beyond movies to include television series. Autocomplete and validation both switch to TMDB's `/search/multi` endpoint, normalizing title and air date fields automatically. |
-
-### 🎨 UI & Polish
-- **Premium Dark UI:** Deep OLED blacks, structural minimalism, glassmorphism panels, and crisp typographic hierarchy with *Plus Jakarta Sans*.
-- **Web Audio Soundscapes:** Zero-latency synthesized tones for success chimes, failure buzzes, and high-tension timer sweeps — no audio files required.
-- **Animated Chain Feed:** Each new chain entry slides in with a cubic-bezier spring animation.
-- **Animated Poster Background:** The lobby screen cycles through a collage of top-rated TMDB movie posters for atmosphere.
+### 🎭 UX & Polish
+- **How to Play & Credits:** Dedicated modal overlays accessible from the main header for onboarding new players and checking project credits.
+- **Trophy Win Counters:** Player wins are now displayed with elegant trophy icons (`• 1 🏆`) to track dominance across sessions.
+- **Redis LRU Caching:** Autocomplete searches are cached in Redis for 24 hours to stay under TMDB API rate limits while providing instantaneous suggestions.
+- **Premium Dark Aesthetics:** Refined glassmorphism, Jakarta Sans typography, and smooth CSS transitions.
 
 ---
 
 ## 📦 Setup & Installation
 
-1. Requires **Node.js**.
-2. Create a `.env` file at the project root with your TMDB Read Access Token:
+1. Requires **Node.js** and a **Redis** instance (V6+).
+2. Create a `.env` file at the project root:
    ```
    TMDB_READ_TOKEN=your_token_here
+   REDIS_URL=redis://127.0.0.1:6379
    ```
 3. Install dependencies:
    ```bash
@@ -66,35 +48,21 @@ The lobby host has access to two game mode toggles before starting a match. All 
 
 ---
 
-## 📜 How To Play
-
-1. Enter your **name** and optionally a **Room Code** (leave blank to generate a new room), then hit **Connect to Room**.
-2. Share your Room Code with friends so they can join.
-3. The host configures **game settings** (Hardcore Mode, TV Shows) and clicks **Start Match**.
-4. **Your turn** is indicated by your name highlighting in the left player panel.
-5. Type a movie or TV show title in the input field — use the **Search Suggestions** sidebar to find the right title and poster.
-6. Press **Enter** or click **Submit** to lock in your guess.
-
-### Rules
-
-| Rule | Description |
-|---|---|
-| **Rule 1** | The first player may name **any** valid movie or TV show to start the chain. |
-| **Rule 2** | Every subsequent player must name a title that shares **at least one cast member** with the previous entry. |
-| **Rule 3** | You **cannot reuse** a title already in the chain. |
-| **Rule 4 (Hardcore)** | You **cannot connect** using the same actor that linked the two previous entries. |
-| **Rule 5** | Run out of time or submit an invalid connection → **eliminated**! |
-| **Rule 6** | The **last surviving player** wins the round and earns a Win on the scoreboard! |
-
----
-
 ## 🛠️ Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Server | Node.js, Express |
-| Real-Time | Socket.io |
-| Frontend | Vanilla HTML / CSS / JS |
-| Movie Data | TMDB API (search/movie, search/multi, credits) |
-| Audio | Web Audio API (synthesized, no files) |
-| Hosting | Render.com |
+| **Server** | Node.js, Express |
+| **Database** | Redis (State & API Caching) |
+| **Real-Time** | Socket.io (with Redis Adapter) |
+| **Frontend** | Vanilla HTML5 / CSS3 / ES6+ |
+| **Movie Data** | TMDB API (Multi-Search, Aggregate Credits) |
+| **Audio** | Web Audio API (Synthesized) |
+| **Hosting** | Render.com |
+
+---
+
+## 👨‍💻 Created By
+
+**Bryan Cortez**  
+[Twitter (@ItsBryanFam)](https://x.com/ItsBryanFam) | [Email](mailto:cortezfam7@gmail.com)
