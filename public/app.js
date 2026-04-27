@@ -22,6 +22,8 @@ const inputArea = document.getElementById('input-area');
 const turnIndicator = document.getElementById('turn-indicator');
 const hintText = document.getElementById('hint-text');
 const autocompleteContainer = document.getElementById('autocomplete-container');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
 
 const timerBar = document.getElementById('timer-bar');
 const timeText = document.getElementById('time-text');
@@ -122,7 +124,15 @@ movieInput.addEventListener('input', (e) => {
     }, 400);
 });
 
-// Click outside listener removed since panel is permanent
+chatInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        const msg = chatInput.value.trim();
+        if (msg && currentLobbyId) {
+            socket.emit('sendChat', { lobbyId: currentLobbyId, msg });
+            chatInput.value = '';
+        }
+    }
+});
 
 function submitMovie() {
     const movie = movieInput.value.trim();
@@ -133,6 +143,17 @@ function submitMovie() {
 }
 
 // --- SOCKET EVENTS ---
+
+socket.on('receiveChat', ({ playerName, msg }) => {
+    const hint = chatMessages.querySelector('.empty-hint');
+    if (hint) hint.remove();
+
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    div.innerHTML = `<span class="chat-author">${playerName}:</span>${msg}`;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+});
 
 socket.on('autocompleteResults', (results) => {
     if (!results || results.length === 0) {

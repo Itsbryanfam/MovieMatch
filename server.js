@@ -339,7 +339,17 @@ io.on('connection', (socket) => {
       console.error('Autocomplete Error:', e);
     }
   });
-  
+
+  socket.on('sendChat', ({ lobbyId, msg }) => {
+    const room = lobbies[lobbyId];
+    if (room) {
+      const player = room.players.find(p => p.id === socket.id);
+      if (player) {
+         io.to(lobbyId).emit('receiveChat', { playerName: player.name, msg });
+      }
+    }
+  });
+
   socket.on('joinLobby', ({ name, lobbyId }) => {
     let id = (lobbyId || '').trim().toUpperCase() || generateLobbyId();
     if (!lobbies[id]) {

@@ -93,11 +93,25 @@
         
         <!-- Search Suggestions -->
         <aside class="sidebar right-panel">
-          <div class="sidebar-header">
-            <h3>Autocomplete</h3>
+          <div class="sidebar-half">
+            <div class="sidebar-header">
+              <h3>Search Suggestions</h3>
+            </div>
+            <div id="autocomplete-container" class="autocomplete-panel-list">
+               <div class="empty-hint">Type to search...</div>
+            </div>
           </div>
-          <div id="autocomplete-container" class="autocomplete-panel-list">
-             <div class="empty-hint">Type to search...</div>
+          
+          <div class="sidebar-half chat-half">
+            <div class="sidebar-header">
+              <h3>Lobby Chat</h3>
+            </div>
+            <div id="chat-messages" class="chat-messages">
+                <div class="empty-hint">Start chatting...</div>
+            </div>
+            <div class="chat-input-wrapper">
+              <input type="text" id="chat-input" placeholder="Say something..." autocomplete="off">
+            </div>
           </div>
         </aside>
       </div>
