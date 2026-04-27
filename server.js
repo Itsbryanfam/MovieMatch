@@ -1,0 +1,378 @@
+require('dotenv').config();
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+app.use(express.static('public'));
+
+const lobbies = {};
+
+const TMDB_TOKEN = process.env.TMDB_READ_TOKEN;
+const TMDB_HEADERS = {
+  Authorization: `Bearer ${TMDB_TOKEN}`,
+  accept: 'application/json'
+};
+
+const generateLobbyId = () => Math.random().toString(36).substring(2, 6).toUpperCase();
+
+let cachedPosters = [];
+
+async function fetchBackgroundPosters() {
+  try {
+    const res1 = await fetch(`https://api.themoviedb.org/3/movie/popular?language=en-US&page=1`, { headers: TMDB_HEADERS });
+    const data1 = await res1.json();
+    const res2 = await fetch(`https://api.themoviedb.org/3/movie/top_rated?language=en-US&page=1`, { headers: TMDB_HEADERS });
+    const data2 = await res2.json();
+    
+    const combined = [...(data1.results || []), ...(data2.results || [])];
+    cachedPosters = combined
+      .filter(m => m.poster_path)
+      .map(m => `https://image.tmdb.org/t/p/w200${m.poster_path}`); // w200 is sufficient for background
+      
+    // Shuffle the array to make it random mix of old and new
+    cachedPosters.sort(() => 0.5 - Math.random());
+  } catch (err) {
+    console.error("Failed to fetch posters:", err);
+  }
+}
+
+fetchBackgroundPosters();
+
+class GameRoom {
+  constructor(id, io) {
+    this.id = id;
+    this.io = io;
+    this.players = [];
+    this.status = 'waiting'; // waiting, playing, finished
+    this.currentTurnIndex = 0;
+    this.chain = []; // { player, movie: {title, year, cast} }
+    this.usedMovies = new Set();
+    
+    this.timerMultiplier = 0;
+    this.timeRemaining = 60;
+    this.initialTime = 60;
+    this.timerInterval = null;
+    this.isValidating = false; // Prevents spamming submits
+  }
+
+  addPlayer(socket, name) {
+    if (this.status !== 'waiting') return false;
+    
+    const isHost = this.players.length === 0;
+
+    this.players.push({
+      id: socket.id,
+      name,
+      isHost,
+      isAlive: true,
+      connected: true,
+      score: 0
+    });
+    this.broadcastState();
+    return true;
+  }
+
+  removePlayer(socketId) {
+    const player = this.players.find(p => p.id === socketId);
+    if (player) {
+      player.isAlive = false;
+      player.connected = false;
+      
+      const wasHost = player.isHost;
+
+      if (this.status === 'waiting') {
+        this.players = this.players.filter(p => p.id !== socketId);
+        
+        if (wasHost && this.players.length > 0) {
+            this.players[0].isHost = true;
+        }
+      }
+      if (this.status === 'playing') {
+        this.checkWinCondition();
+        if (this.status === 'playing' && this.players[this.currentTurnIndex]?.id === socketId) {
+          this.nextTurn();
+        }
+      }
+      this.broadcastState();
+    }
+  }
+
+  startGame() {
+    if (this.players.length < 2) return;
+    this.status = 'playing';
+    this.chain = [];
+    this.usedMovies.clear();
+    this.timerMultiplier = 0;
+    this.players.forEach(p => p.isAlive = true);
+    this.currentTurnIndex = 0; 
+    this.isValidating = false;
+    
+    this.resetTimer();
+    this.broadcastState();
+  }
+
+  async submitMovie(socketId, movieName) {
+    if (this.status !== 'playing' || this.isValidating) return;
+    const player = this.players.find(p => p.id === socketId);
+    
+    if (!player || !player.isAlive || this.players[this.currentTurnIndex].id !== socketId) {
+      return;
+    }
+
+    this.isValidating = true;
+
+    try {
+      // 1. Search TMDB
+      const searchRes = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(movieName)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS });
+      const searchData = await searchRes.json();
+      
+      const results = searchData.results || [];
+
+      if (results.length === 0) {
+        this.eliminateCurrentPlayer("Movie not found!");
+        return;
+      }
+
+      // Check top 5 results for a match to help with ambiguity
+      const topCandidates = results.slice(0, 5);
+
+      // 2. Fetch casts concurrently
+      const candidateMovies = await Promise.all(topCandidates.map(async (c) => {
+        try {
+            const credRes = await fetch(`https://api.themoviedb.org/3/movie/${c.id}/credits?language=en-US`, { headers: TMDB_HEADERS });
+            const credData = await credRes.json();
+            return {
+                title: c.title,
+                year: c.release_date ? c.release_date.split('-')[0] : 'Unknown',
+                cast: (credData.cast || []).slice(0, 30).map(actor => actor.name) // keep top 30 actors for fairness
+            };
+        } catch(e) {
+            return { title: c.title, year: 'Unknown', cast: [] };
+        }
+      }));
+
+      let validMatch = null;
+      let failReason = "Invalid movie connection.";
+      const lastMovie = this.chain.length > 0 ? this.chain[this.chain.length - 1].movie : null;
+
+      for (let i = 0; i < candidateMovies.length; i++) {
+          const candidate = candidateMovies[i];
+          
+          if (this.usedMovies.has(candidate.title.toLowerCase())) {
+              if (i === 0) failReason = "Movie already used!";
+              continue;
+          }
+
+          if (!lastMovie) {
+              validMatch = candidate;
+              break;
+          } else {
+              const sharedActors = candidate.cast.filter(actor => 
+                  lastMovie.cast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase())
+              );
+
+              if (sharedActors.length > 0) {
+                  validMatch = candidate;
+                  break;
+              }
+          }
+      }
+
+      if (!validMatch) {
+        this.eliminateCurrentPlayer(failReason);
+        return;
+      }
+
+      // Valid play
+      this.usedMovies.add(validMatch.title.toLowerCase());
+      this.chain.push({
+        playerId: player.id,
+        playerName: player.name,
+        movie: validMatch
+      });
+      player.score += 100;
+
+      this.timerMultiplier++;
+      this.nextTurn();
+
+    } catch (err) {
+      console.error("TMDB API Error:", err);
+      this.eliminateCurrentPlayer("API Error or Timeout!");
+    } finally {
+      this.isValidating = false;
+    }
+  }
+
+  eliminateCurrentPlayer(reason) {
+    const player = this.players[this.currentTurnIndex];
+    if (player) {
+      player.isAlive = false;
+      this.io.to(this.id).emit('notification', `${player.name} eliminated: ${reason}`);
+    }
+
+    this.checkWinCondition();
+    if (this.status === 'playing') {
+      this.nextTurn();
+    }
+  }
+
+  nextTurn() {
+    this.checkWinCondition();
+    if (this.status !== 'playing') return;
+
+    let iterations = 0;
+    do {
+      this.currentTurnIndex = (this.currentTurnIndex + 1) % this.players.length;
+      iterations++;
+    } while (!this.players[this.currentTurnIndex].isAlive && iterations < this.players.length);
+
+    this.resetTimer();
+    this.broadcastState();
+  }
+
+  resetTimer() {
+    clearInterval(this.timerInterval);
+    const reduction = Math.floor(this.timerMultiplier / 2) * 5;
+    this.timeRemaining = Math.max(10, this.initialTime - reduction);
+
+    this.timerInterval = setInterval(() => {
+      // Don't count down if we are waiting for API
+      if (this.isValidating) return;
+
+      this.timeRemaining--;
+      this.io.to(this.id).emit('tick', this.timeRemaining);
+
+      if (this.timeRemaining <= 0) {
+        clearInterval(this.timerInterval);
+        this.eliminateCurrentPlayer("Time's up!");
+      }
+    }, 1000);
+  }
+
+  checkWinCondition() {
+    const alivePlayers = this.players.filter(p => p.isAlive);
+    if (alivePlayers.length === 1 && this.players.length > 1) {
+      this.status = 'finished';
+      clearInterval(this.timerInterval);
+      this.io.to(this.id).emit('notification', `${alivePlayers[0].name} wins!`);
+      this.broadcastState();
+
+      setTimeout(() => {
+        if (this.status === 'finished') {
+          this.status = 'waiting';
+          this.players = this.players.filter(p => p.connected);
+          if (this.players.length > 0 && !this.players.some(p => p.isHost)) {
+              this.players[0].isHost = true;
+          }
+          this.broadcastState();
+        }
+      }, 7000);
+    } else if (alivePlayers.length === 0) {
+        this.status = 'finished';
+        clearInterval(this.timerInterval);
+        this.broadcastState();
+
+        setTimeout(() => {
+          if (this.status === 'finished') {
+            this.status = 'waiting';
+            this.players = this.players.filter(p => p.connected);
+            if (this.players.length > 0 && !this.players.some(p => p.isHost)) {
+                this.players[0].isHost = true;
+            }
+            this.broadcastState();
+          }
+        }, 7000);
+    }
+  }
+
+  broadcastState() {
+    const state = {
+      id: this.id,
+      status: this.status,
+      players: this.players,
+      currentTurnIndex: this.currentTurnIndex,
+      chain: this.chain,
+      timeRemaining: this.timeRemaining
+    };
+    this.io.to(this.id).emit('stateUpdate', state);
+  }
+}
+
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+  
+  if (cachedPosters.length > 0) {
+    socket.emit('posters', cachedPosters);
+  }
+  
+  socket.on('joinLobby', ({ name, lobbyId }) => {
+    let id = lobbyId || generateLobbyId();
+    if (!lobbies[id]) {
+      lobbies[id] = new GameRoom(id, io);
+    }
+    const room = lobbies[id];
+    
+    if (room.status !== 'waiting') {
+      socket.emit('error', 'Lobby is already playing or full.');
+      return;
+    }
+
+    socket.join(id);
+    if (room.addPlayer(socket, name)) {
+      socket.emit('joined', { lobbyId: id, playerId: socket.id });
+    }
+  });
+
+  socket.on('leaveLobby', () => {
+    for (const key in lobbies) {
+      lobbies[key].removePlayer(socket.id);
+      socket.leave(key);
+      if (lobbies[key].players.length === 0) {
+        clearInterval(lobbies[key].timerInterval);
+        delete lobbies[key];
+      }
+    }
+  });
+
+  socket.on('startLobby', (lobbyId) => {
+    const room = lobbies[lobbyId];
+    if (room) {
+      const player = room.players.find(p => p.id === socket.id);
+      if (player && player.isHost) {
+        room.startGame();
+      }
+    }
+  });
+
+  socket.on('submitMovie', async ({ lobbyId, movie }) => {
+    const room = lobbies[lobbyId];
+    if (room && movie.trim().length > 0) {
+      await room.submitMovie(socket.id, movie.trim());
+    }
+  });
+
+  socket.on('sendReaction', ({ lobbyId, emoji }) => {
+    if (lobbies[lobbyId]) {
+      io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    for (const key in lobbies) {
+      lobbies[key].removePlayer(socket.id);
+      if (lobbies[key].players.length === 0) {
+        clearInterval(lobbies[key].timerInterval);
+        delete lobbies[key];
+      }
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
