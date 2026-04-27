@@ -20,20 +20,52 @@
 
     <!-- LOBBY SCREEN -->
     <div id="lobby-screen" class="screen active">
-      <div class="panel lobby-panel">
+      <!-- STAGE 1: SET NAME -->
+      <div id="join-panel" class="panel lobby-panel">
         <div class="panel-header">
-          <h2>Join Lobby</h2>
-          <p>Enter your details to connect</p>
+          <h2>Player Setup</h2>
+          <p>Who's playing tonight?</p>
         </div>
-        <div class="input-group-vertical">
+        <div class="input-group-vertical" style="margin-bottom: 1.5rem;">
           <label for="player-name">Player Name</label>
           <input type="text" id="player-name" placeholder="John Doe" autocomplete="off" />
+        </div>
+        
+        <div class="flex-column" style="display:flex; flex-direction:column; gap: 0.75rem;">
+          <button id="show-public-btn" class="btn-primary">Browse Public Rooms</button>
+          <button id="show-private-btn" class="btn-secondary" style="background:transparent; color: #fff; border: 1px solid rgba(255,255,255,0.2);">Create / Join Private Room</button>
+        </div>
+      </div>
+
+      <!-- STAGE 2A: PRIVATE ROOM -->
+      <div id="private-panel" class="panel hidden lobby-panel">
+        <div class="panel-header">
+          <h2>Private Room</h2>
+          <p>Enter a code to connect</p>
         </div>
         <div class="input-group-vertical">
           <label for="lobby-id-input">Room Code</label>
           <input type="text" id="lobby-id-input" placeholder="Leave blank to create new" autocomplete="off" />
         </div>
-        <button id="join-btn" class="btn-primary">Connect to Room</button>
+        <button id="join-btn" class="btn-primary" style="margin-bottom:0.75rem;">Connect to Room</button>
+        <button id="back-to-join-btn" class="btn-secondary" style="background:transparent; color: #fff; border: 1px solid rgba(255,255,255,0.2);">Back</button>
+      </div>
+
+      <!-- STAGE 2B: PUBLIC ROOMS -->
+      <div id="public-panel" class="panel hidden lobby-panel" style="max-width: 500px; width: 100%;">
+        <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="text-align:left;">
+            <h2>Public Matchmaking</h2>
+            <p>Join an open lobby</p>
+          </div>
+          <button id="refresh-lobbies-btn" class="btn-secondary" style="width:auto; padding: 0.5rem 1rem;">Refresh</button>
+        </div>
+        
+        <div class="public-lobbies-list" id="public-lobbies-list" style="max-height: 350px; overflow-y:auto; margin-bottom: 1rem; display:flex; flex-direction:column; gap: 0.5rem;">
+           <div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">Loading lobbies...</div>
+        </div>
+        
+        <button id="back-to-join-btn-2" class="btn-secondary" style="background:transparent; color: #fff; border: 1px solid rgba(255,255,255,0.2);">Back</button>
       </div>
       
       <div id="waiting-room" class="panel hidden lobby-panel">

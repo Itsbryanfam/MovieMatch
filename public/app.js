@@ -17,6 +17,16 @@ const lobbySettings = document.getElementById('lobby-settings');
 const hardcoreToggle = document.getElementById('hardcore-toggle');
 const tvShowsToggle = document.getElementById('tv-shows-toggle');
 
+const joinPanel = document.getElementById('join-panel');
+const privatePanel = document.getElementById('private-panel');
+const publicPanel = document.getElementById('public-panel');
+const showPublicBtn = document.getElementById('show-public-btn');
+const showPrivateBtn = document.getElementById('show-private-btn');
+const backToJoinBtn = document.getElementById('back-to-join-btn');
+const backToJoinBtn2 = document.getElementById('back-to-join-btn-2');
+const refreshLobbiesBtn = document.getElementById('refresh-lobbies-btn');
+const publicLobbiesList = document.getElementById('public-lobbies-list');
+
 const gamePlayersList = document.getElementById('game-players');
 const chainDisplay = document.getElementById('chain-display');
 const movieInput = document.getElementById('movie-input');
@@ -88,18 +98,58 @@ logo.addEventListener('click', () => {
         lobbyScreen.classList.add('active');
         
         waitingRoom.classList.add('hidden');
-        lobbyPanel.classList.remove('hidden');
+        if(privatePanel) privatePanel.classList.add('hidden');
+        if(publicPanel) publicPanel.classList.add('hidden');
+        if(joinPanel) joinPanel.classList.remove('hidden');
     }
+});
+
+function prepareAudio() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function checkName() {
+    const name = playerNameInput.value.trim();
+    if (!name) {
+        alert('Enter a name first!');
+        return false;
+    }
+    return true;
+}
+
+showPrivateBtn.addEventListener('click', () => {
+    if (!checkName()) return;
+    prepareAudio();
+    joinPanel.classList.add('hidden');
+    privatePanel.classList.remove('hidden');
+});
+
+showPublicBtn.addEventListener('click', () => {
+    if (!checkName()) return;
+    prepareAudio();
+    joinPanel.classList.add('hidden');
+    publicPanel.classList.remove('hidden');
+    socket.emit('requestPublicLobbies');
+});
+
+backToJoinBtn.addEventListener('click', () => {
+    privatePanel.classList.add('hidden');
+    joinPanel.classList.remove('hidden');
+});
+
+backToJoinBtn2.addEventListener('click', () => {
+    publicPanel.classList.add('hidden');
+    joinPanel.classList.remove('hidden');
+});
+
+refreshLobbiesBtn.addEventListener('click', () => {
+    publicLobbiesList.innerHTML = '<div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">Loading lobbies...</div>';
+    socket.emit('requestPublicLobbies');
 });
 
 joinBtn.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
-    if (!name) return alert('Enter a name!');
-    
-    // Resume audio context on first user interaction
-    if (!audioCtx) audioCtx = new AudioCtx();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    
     socket.emit('joinLobby', { 
         name, 
         lobbyId: lobbyIdInput.value.trim() 
@@ -197,13 +247,55 @@ socket.on('joined', (data) => {
     currentLobbyId = data.lobbyId;
     myPlayerId = data.playerId;
     
-    lobbyPanel.classList.add('hidden');
+    if(joinPanel) joinPanel.classList.add('hidden');
+    if(privatePanel) privatePanel.classList.add('hidden');
+    if(publicPanel) publicPanel.classList.add('hidden');
+    
     waitingRoom.classList.remove('hidden');
     lobbyCodeDisplay.innerText = currentLobbyId;
 });
 
 socket.on('error', (msg) => {
     alert(msg);
+});
+
+socket.on('publicLobbiesList', (lobbies) => {
+    if (!publicLobbiesList) return;
+    publicLobbiesList.innerHTML = '';
+    
+    if (!lobbies || lobbies.length === 0) {
+        publicLobbiesList.innerHTML = '<div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">No open lobbies found. Create a private one!</div>';
+        return;
+    }
+    
+    lobbies.forEach(lobby => {
+        const card = document.createElement('div');
+        card.className = 'public-lobby-card';
+        
+        let tagsHTML = '';
+        if (lobby.hardcoreMode) tagsHTML += '<span class="mode-tag">Hardcore</span> ';
+        if (lobby.allowTvShows) tagsHTML += '<span class="mode-tag">TV Shows</span>';
+        
+        card.innerHTML = `
+            <div class="public-lobby-info">
+                <h3>${lobby.hostName}'s Lobby</h3>
+                <div class="public-lobby-stats">
+                    <span>👥 ${lobby.playerCount} / 8</span>
+                    ${tagsHTML ? `<div>${tagsHTML}</div>` : ''}
+                </div>
+            </div>
+            <button class="btn-primary join-public-btn" style="padding: 0.5rem 1rem; width: auto;" data-id="${lobby.id}">Join</button>
+        `;
+        
+        const joinButton = card.querySelector('.join-public-btn');
+        joinButton.addEventListener('click', () => {
+            const name = playerNameInput.value.trim();
+            if (!name) return;
+            socket.emit('joinLobby', { name, lobbyId: lobby.id });
+        });
+        
+        publicLobbiesList.appendChild(card);
+    });
 });
 
 socket.on('posters', (posters) => {

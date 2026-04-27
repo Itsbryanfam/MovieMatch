@@ -387,6 +387,22 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('requestPublicLobbies', () => {
+    const publicList = Object.values(lobbies)
+      .filter(room => room.status === 'waiting' && room.players.length < 8)
+      .map(room => {
+        const host = room.players.find(p => p.isHost);
+        return {
+          id: room.id,
+          hostName: host ? host.name : 'Unknown',
+          playerCount: room.players.length,
+          hardcoreMode: room.hardcoreMode,
+          allowTvShows: room.allowTvShows
+        };
+      });
+    socket.emit('publicLobbiesList', publicList);
+  });
+
   socket.on('joinLobby', ({ name, lobbyId }) => {
     let id = (lobbyId || '').trim().toUpperCase() || generateLobbyId();
     if (!lobbies[id]) {
