@@ -325,6 +325,20 @@ io.on('connection', (socket) => {
   if (cachedPosters.length > 0) {
     socket.emit('posters', cachedPosters);
   }
+
+  socket.on('autocompleteSearch', async (query) => {
+    try {
+      const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS });
+      const data = await res.json();
+      const results = (data.results || []).slice(0, 5).map(m => ({
+          title: m.title,
+          year: m.release_date ? m.release_date.split('-')[0] : '????'
+      }));
+      socket.emit('autocompleteResults', results);
+    } catch (e) {
+      console.error('Autocomplete Error:', e);
+    }
+  });
   
   socket.on('joinLobby', ({ name, lobbyId }) => {
     let id = (lobbyId || '').trim().toUpperCase() || generateLobbyId();

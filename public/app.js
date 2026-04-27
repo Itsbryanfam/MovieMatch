@@ -21,6 +21,7 @@ const submitBtn = document.getElementById('submit-btn');
 const inputArea = document.getElementById('input-area');
 const turnIndicator = document.getElementById('turn-indicator');
 const hintText = document.getElementById('hint-text');
+const autocompleteContainer = document.getElementById('autocomplete-container');
 
 const timerBar = document.getElementById('timer-bar');
 const timeText = document.getElementById('time-text');
@@ -32,6 +33,7 @@ const logo = document.querySelector('.logo');
 let myPlayerId = null;
 let currentLobbyId = null;
 let gameState = null;
+let debounceTimeout = null;
 let AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx;
 
@@ -108,14 +110,54 @@ movieInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') submitMovie();
 });
 
+movieInput.addEventListener('input', (e) => {
+    const query = e.target.value.trim();
+    if (query.length < 2) {
+        autocompleteContainer.style.display = 'none';
+        return;
+    }
+    clearTimeout(debounceTimeout);
+    debounceTimeout = setTimeout(() => {
+        socket.emit('autocompleteSearch', query);
+    }, 400);
+});
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#input-area')) {
+        autocompleteContainer.style.display = 'none';
+    }
+});
+
 function submitMovie() {
     const movie = movieInput.value.trim();
     if (!movie) return;
+    autocompleteContainer.style.display = 'none';
     socket.emit('submitMovie', { lobbyId: currentLobbyId, movie });
     movieInput.value = '';
 }
 
 // --- SOCKET EVENTS ---
+
+socket.on('autocompleteResults', (results) => {
+    if (!results || results.length === 0) {
+        autocompleteContainer.style.display = 'none';
+        return;
+    }
+    autocompleteContainer.innerHTML = '';
+    autocompleteContainer.style.display = 'block';
+    
+    results.forEach(movie => {
+        const div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.innerHTML = `${movie.title} <span class="year">(${movie.year})</span>`;
+        div.addEventListener('click', () => {
+            movieInput.value = movie.title;
+            autocompleteContainer.style.display = 'none';
+            movieInput.focus();
+        });
+        autocompleteContainer.appendChild(div);
+    });
+});
 
 socket.on('joined', (data) => {
     currentLobbyId = data.lobbyId;
