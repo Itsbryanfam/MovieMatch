@@ -236,7 +236,7 @@ input:disabled {
 /* GAME LAYOUT */
 .layout-grid {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px 1fr 260px;
   gap: 1.5rem;
   flex: 1;
   min-height: 0;
@@ -356,7 +356,7 @@ input:disabled {
   border-radius: 12px;
   padding: 1.25rem;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   transition: opacity 0.3s ease;
 }
 
@@ -370,6 +370,8 @@ input:disabled {
   top: 0; left: 0; right: 0;
   height: 3px;
   background: var(--bg-elevated);
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
 }
 
 #timer-bar {
@@ -436,22 +438,19 @@ input:disabled {
   color: var(--text-muted);
 }
 
-/* AUTOCOMPLETE */
-.autocomplete-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: rgba(20, 20, 25, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  border-radius: 8px;
-  margin-top: 8px;
-  max-height: 200px;
+/* AUTOCOMPLETE PANEL */
+.autocomplete-panel-list {
+  padding: 0;
   overflow-y: auto;
-  z-index: 100;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
-  display: none;
+  flex: 1;
+}
+
+.empty-hint {
+  padding: 1.25rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  font-style: italic;
 }
 
 .autocomplete-item {
@@ -471,6 +470,7 @@ input:disabled {
   color: var(--text-muted);
   font-size: 0.85rem;
   margin-left: 8px;
+  display: block;
 }
 
 /* NOTIFICATIONS */

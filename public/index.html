@@ -80,7 +80,6 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
               </button>
             </div>
-            <div id="autocomplete-container" class="autocomplete-dropdown"></div>
             <p id="hint-text" class="hint-text">Waiting...</p>
           </div>
           
@@ -91,6 +90,16 @@
              <button class="reaction-btn">👀</button>
           </div>
         </main>
+        
+        <!-- Search Suggestions -->
+        <aside class="sidebar right-panel">
+          <div class="sidebar-header">
+            <h3>Autocomplete</h3>
+          </div>
+          <div id="autocomplete-container" class="autocomplete-panel-list">
+             <div class="empty-hint">Type to search...</div>
+          </div>
+        </aside>
       </div>
     </div>
 

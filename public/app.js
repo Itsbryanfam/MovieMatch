@@ -113,7 +113,7 @@ movieInput.addEventListener('keypress', (e) => {
 movieInput.addEventListener('input', (e) => {
     const query = e.target.value.trim();
     if (query.length < 2) {
-        autocompleteContainer.style.display = 'none';
+        autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
         return;
     }
     clearTimeout(debounceTimeout);
@@ -122,16 +122,12 @@ movieInput.addEventListener('input', (e) => {
     }, 400);
 });
 
-document.addEventListener('click', (e) => {
-    if (!e.target.closest('#input-area')) {
-        autocompleteContainer.style.display = 'none';
-    }
-});
+// Click outside listener removed since panel is permanent
 
 function submitMovie() {
     const movie = movieInput.value.trim();
     if (!movie) return;
-    autocompleteContainer.style.display = 'none';
+    autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
     socket.emit('submitMovie', { lobbyId: currentLobbyId, movie });
     movieInput.value = '';
 }
@@ -140,11 +136,10 @@ function submitMovie() {
 
 socket.on('autocompleteResults', (results) => {
     if (!results || results.length === 0) {
-        autocompleteContainer.style.display = 'none';
+        autocompleteContainer.innerHTML = '<div class="empty-hint">No results found.</div>';
         return;
     }
     autocompleteContainer.innerHTML = '';
-    autocompleteContainer.style.display = 'block';
     
     results.forEach(movie => {
         const div = document.createElement('div');
@@ -152,7 +147,7 @@ socket.on('autocompleteResults', (results) => {
         div.innerHTML = `${movie.title} <span class="year">(${movie.year})</span>`;
         div.addEventListener('click', () => {
             movieInput.value = movie.title;
-            autocompleteContainer.style.display = 'none';
+            autocompleteContainer.innerHTML = '<div class="empty-hint">Press Submit to lock it in!</div>';
             movieInput.focus();
         });
         autocompleteContainer.appendChild(div);
