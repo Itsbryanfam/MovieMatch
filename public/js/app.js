@@ -216,9 +216,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let debounceTimeout = null;
 
+  let currentSelectedMovie = null;
+
   function submitMovie() {
     const movie = movieInput ? movieInput.value.trim() : '';
     if (!movie) return;
+
+    console.log('🎬 Manual submitMovie called with:', { movie, currentSelectedMovie });
 
     if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
     closeMobileAc();
@@ -226,7 +230,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const socket = getSocket();
     const lobbyId = getCurrentLobbyId();
 
-    if (typeof currentSelectedMovie !== 'undefined' && currentSelectedMovie && currentSelectedMovie.title.toLowerCase() === movie.toLowerCase()) {
+    if (currentSelectedMovie && currentSelectedMovie.title.toLowerCase() === movie.toLowerCase()) {
+      console.log('🎬 Using selected movie ID:', currentSelectedMovie);
       socket.emit('submitMovie', {
         lobbyId,
         movie,
@@ -234,12 +239,11 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaType: currentSelectedMovie.mediaType
       });
     } else {
+      console.log('🎬 No selected movie ID - sending title only');
       socket.emit('submitMovie', { lobbyId, movie });
     }
 
-    if (typeof currentSelectedMovie !== 'undefined') {
-      currentSelectedMovie = null;
-    }
+    currentSelectedMovie = null;
     if (movieInput) movieInput.value = '';
   }
 

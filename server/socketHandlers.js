@@ -369,7 +369,11 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
             for (let i = 0; i < candidateMovies.length; i++) {
                 const candidate = candidateMovies[i];
                 const uniqueKey = `${candidate.mediaType}:${candidate.id}`;
-                if (room.usedMovies.includes(uniqueKey)) { if(i===0) failReason = "Movie already used!"; continue; }
+                console.log('🔍 Server checking duplicate:', { uniqueKey, usedMovies: room.usedMovies });
+                if (room.usedMovies.includes(uniqueKey)) { 
+                  if(i===0) failReason = "Movie already used!"; 
+                  continue; 
+                }
                 if (!lastNode) { validMatch = candidate; break; } 
                 else {
                     const sharedActors = candidate.cast.filter(actor => lastNodeCast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase()));
