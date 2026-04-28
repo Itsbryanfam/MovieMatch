@@ -1833,8 +1833,8 @@ input:disabled {
 }
 
 .solo-mode-ui .layout-grid {
-  grid-template-columns: 1fr 300px !important;
-  max-width: 1100px;
+  grid-template-columns: 1fr 380px !important;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 0 1rem;
 }
