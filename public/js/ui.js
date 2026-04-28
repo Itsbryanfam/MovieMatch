@@ -310,25 +310,39 @@ export function showNotification(msg) {
 }
 
 export function renderAutocompleteResults(results) {
+  console.log('🎬 Received autocomplete results from server:', results);
+
   const isMobile = window.matchMedia('(max-width: 767px)').matches;
   const target = isMobile ? mobileAcDropdown : autocompleteContainer;
+
   if (!results || results.length === 0) {
     target.innerHTML = '<div class="empty-hint">No results found.</div>';
     if (isMobile) mobileAcDropdown.classList.add('open');
     return;
   }
+
   target.innerHTML = '';
+
   results.forEach(movie => {
     const div = document.createElement('div');
     div.className = 'autocomplete-item';
-    div.setAttribute('data-tmdb-id', movie.id);
-    div.setAttribute('data-media-type', movie.mediaType);
+
+    // Ensure we have a real ID
+    const id = movie.id || movie.tmdbId || 'unknown';
+    const mediaType = movie.media_type || movie.mediaType || 'movie';
+
+    div.setAttribute('data-tmdb-id', id);
+    div.setAttribute('data-media-type', mediaType);
+
+    console.log('🎬 Rendering autocomplete item:', { title: movie.title, id, mediaType });
+
     const imgTag = movie.poster 
       ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">` 
       : `<div class="mini-poster placeholder"></div>`;
+
     div.innerHTML = `${imgTag}<div class="ac-text"><div class="ac-title">${movie.title}</div><span class="year">(${movie.year})</span></div>`;
-    
-    // Click handler - submit the selected movie
+
+    // Click handler
     div.addEventListener('click', () => {
       const tmdbId = div.getAttribute('data-tmdb-id');
       const mediaType = div.getAttribute('data-media-type');
@@ -336,25 +350,26 @@ export function renderAutocompleteResults(results) {
 
       console.log('🎬 Autocomplete clicked → sending:', { title, tmdbId, mediaType });
 
-      // Clear input and dropdown
       if (movieInput) movieInput.value = '';
       if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
       closeMobileAc();
 
-      // Submit with correct TMDB ID
       const socket = getSocket();
-      if (socket && tmdbId && mediaType) {
+      const lobbyId = getCurrentLobbyId();
+
+      if (socket && tmdbId && tmdbId !== 'unknown' && mediaType) {
         socket.emit('submitMovie', {
-          lobbyId: getCurrentLobbyId(),
+          lobbyId: lobbyId,
           movie: title,
           tmdbId: parseInt(tmdbId),
           mediaType: mediaType
         });
       }
     });
-    
+
     target.appendChild(div);
   });
+
   if (isMobile) mobileAcDropdown.classList.add('open');
 }
 
