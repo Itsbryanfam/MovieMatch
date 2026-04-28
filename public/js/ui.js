@@ -116,7 +116,7 @@ export function renderLobby(gameState, myPlayerId) {
   lobbyPlayersList.innerHTML = '';
   gameState.players.forEach(p => {
     const li = document.createElement('li');
-    let label = escapeHtml(p.name);
+    let label = p.name;
     if (p.id === myPlayerId) label += ' (You)';
     if (p.isHost) label += ' 👑';
     if (p.wins > 0) label += ` • ${p.wins} 🏆`;
@@ -223,39 +223,69 @@ export function renderGame(gameState, myPlayerId) {
     });
   }
 
-  // FULL CHAIN RENDERING
+  // FULL CHAIN RENDERING (safe DOM — no innerHTML with external data)
   chainDisplay.innerHTML = '';
   let previousActors = [];
   gameState.chain.forEach((item, index) => {
     const div = document.createElement('div');
     div.className = 'chain-item';
-    let castHtml = '';
-    if (index > 0) {
-      const castItems = item.movie.cast.map(c => {
-        if (previousActors.some(pa => pa.toLowerCase() === c.toLowerCase())) {
-          return `<strong>${c}</strong>`;
-        }
-        return c;
-      });
-      castHtml = castItems.join(', ');
-      div.classList.add('shared-highlight');
+    if (index > 0) div.classList.add('shared-highlight');
+
+    // Poster image (validate URL prefix to prevent injection)
+    if (item.movie.poster && item.movie.poster.startsWith('https://image.tmdb.org/')) {
+      const img = document.createElement('img');
+      img.src = item.movie.poster;
+      img.alt = 'Poster';
+      img.className = 'chain-poster';
+      div.appendChild(img);
     } else {
-      castHtml = item.movie.cast.join(', ');
+      const placeholder = document.createElement('div');
+      placeholder.className = 'chain-poster placeholder';
+      div.appendChild(placeholder);
     }
-    const imgTag = item.movie.poster ? `<img src="${item.movie.poster}" alt="Poster" class="chain-poster">` : `<div class="chain-poster placeholder"></div>`;
-    div.innerHTML = `
-      ${imgTag}
-      <div class="chain-content">
-        <div class="player-name">${escapeHtml(item.playerName)}</div>
-        <div class="movie-title">${item.movie.title} <span class="year">(${item.movie.year})</span></div>
-        <div class="movie-cast">Cast: ${castHtml}</div>
-      </div>
-    `;
+
+    // Content container
+    const content = document.createElement('div');
+    content.className = 'chain-content';
+
+    const playerNameDiv = document.createElement('div');
+    playerNameDiv.className = 'player-name';
+    playerNameDiv.textContent = item.playerName;
+    content.appendChild(playerNameDiv);
+
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'movie-title';
+    titleDiv.appendChild(document.createTextNode(item.movie.title + ' '));
+    const yearSpan = document.createElement('span');
+    yearSpan.className = 'year';
+    yearSpan.textContent = '(' + item.movie.year + ')';
+    titleDiv.appendChild(yearSpan);
+    content.appendChild(titleDiv);
+
+    // Cast list — bold matched actors safely with createElement
+    const castDiv = document.createElement('div');
+    castDiv.className = 'movie-cast';
+    castDiv.appendChild(document.createTextNode('Cast: '));
+    const castList = item.movie.cast || [];
+    castList.forEach((actorName, ci) => {
+      if (ci > 0) castDiv.appendChild(document.createTextNode(', '));
+      const isMatched = index > 0 && previousActors.some(pa => pa.toLowerCase() === actorName.toLowerCase());
+      if (isMatched) {
+        const strong = document.createElement('strong');
+        strong.textContent = actorName;
+        castDiv.appendChild(strong);
+      } else {
+        castDiv.appendChild(document.createTextNode(actorName));
+      }
+    });
+    content.appendChild(castDiv);
+
+    div.appendChild(content);
     chainDisplay.appendChild(div);
-    previousActors = item.movie.cast;
-    
+    previousActors = castList;
+
     if (index === gameState.chain.length - 1 && item.playerId !== myPlayerId) {
-        playSuccess();
+      playSuccess();
     }
   });
   chainDisplay.scrollTop = chainDisplay.scrollHeight;
@@ -334,13 +364,30 @@ export function renderAutocompleteResults(results) {
     div.setAttribute('data-tmdb-id', id);
     div.setAttribute('data-media-type', mediaType);
 
-    console.log('🎬 Rendering autocomplete item:', { title: movie.title, id, mediaType });
+    // Poster image (validate URL prefix to prevent injection)
+    if (movie.poster && movie.poster.startsWith('https://image.tmdb.org/')) {
+      const img = document.createElement('img');
+      img.src = movie.poster;
+      img.alt = 'Poster';
+      img.className = 'mini-poster';
+      div.appendChild(img);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'mini-poster placeholder';
+      div.appendChild(placeholder);
+    }
 
-    const imgTag = movie.poster 
-      ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">` 
-      : `<div class="mini-poster placeholder"></div>`;
-
-    div.innerHTML = `${imgTag}<div class="ac-text"><div class="ac-title">${movie.title}</div><span class="year">(${movie.year})</span></div>`;
+    const acText = document.createElement('div');
+    acText.className = 'ac-text';
+    const acTitle = document.createElement('div');
+    acTitle.className = 'ac-title';
+    acTitle.textContent = movie.title;
+    const yearSpan = document.createElement('span');
+    yearSpan.className = 'year';
+    yearSpan.textContent = '(' + movie.year + ')';
+    acText.appendChild(acTitle);
+    acText.appendChild(yearSpan);
+    div.appendChild(acText);
 
     // Click handler
     div.addEventListener('click', () => {
@@ -676,14 +723,34 @@ export function showGameOverBanner(state, myPlayerId) {
 
   const isHost = state.players?.some(p => p.id === myPlayerId && p.isHost);
 
-  banner.innerHTML = `
-    <div class="game-over-title">${winnerLine}</div>
-    <div class="game-over-subtitle">${subLine}</div>
-    <div class="game-over-actions">
-      <button id="share-results-btn" class="btn-primary">🎬 Share Results</button>
-      ${isHost ? '<button id="play-again-btn" class="btn-secondary">↩ Play Again</button>' : ''}
-    </div>
-  `;
+  const titleDiv = document.createElement('div');
+  titleDiv.className = 'game-over-title';
+  titleDiv.textContent = winnerLine;
+
+  const subtitleDiv = document.createElement('div');
+  subtitleDiv.className = 'game-over-subtitle';
+  subtitleDiv.textContent = subLine;
+
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'game-over-actions';
+
+  const shareBtn = document.createElement('button');
+  shareBtn.id = 'share-results-btn';
+  shareBtn.className = 'btn-primary';
+  shareBtn.textContent = '\uD83C\uDFAC Share Results';
+  actionsDiv.appendChild(shareBtn);
+
+  if (isHost) {
+    const playAgainBtn = document.createElement('button');
+    playAgainBtn.id = 'play-again-btn';
+    playAgainBtn.className = 'btn-secondary';
+    playAgainBtn.textContent = '\u21A9 Play Again';
+    actionsDiv.appendChild(playAgainBtn);
+  }
+
+  banner.appendChild(titleDiv);
+  banner.appendChild(subtitleDiv);
+  banner.appendChild(actionsDiv);
 
   chainDisplay.appendChild(banner);
   chainDisplay.scrollTop = chainDisplay.scrollHeight;

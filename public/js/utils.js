@@ -42,3 +42,12 @@ export function prepareAudio() {
   if (!audioCtx) audioCtx = new AudioCtx();
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
+
+export function getStableId() {
+  let id = localStorage.getItem('mm_stableId');
+  if (!id) {
+    id = 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('mm_stableId', id);
+  }
+  return id;
+}

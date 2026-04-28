@@ -27,7 +27,12 @@ async function getAllLobbies(pubClient) {
   const lobbies = [];
   for (const id of ids) {
     const data = await pubClient.get(`lobby:${id}`);
-    if (data) lobbies.push(JSON.parse(data));
+    if (data) {
+      lobbies.push(JSON.parse(data));
+    } else {
+      // Lobby key expired — clean up the stale set entry
+      await pubClient.sRem('activeLobbies', id);
+    }
   }
   return lobbies;
 }

@@ -2,12 +2,17 @@ const redisUtils = require('./redisUtils');
 const gameLogic = require('./gameLogic');
 const pino = require('pino');
 const logger = pino();
-// In-memory map for active turn timeouts (never stored in Redis)
-const activeTurnTimeouts = new Map();
+// Use the shared map from gameLogic so timeouts can be cancelled on disconnect
+const { activeTurnTimeouts } = gameLogic;
 
 function escapeHtml(unsafe) {
   if (!unsafe || typeof unsafe !== 'string') return unsafe;
   return unsafe.replace(/[<>&"']/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;','\'':'&#39;'})[m]);
+}
+
+function clampString(value, maxLen) {
+  if (typeof value !== 'string') return '';
+  return value.slice(0, maxLen);
 }
 
 async function generateLobbyId(pubClient) {
@@ -22,8 +27,12 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
   // Simple per-socket rate limiter (Redis-backed)
   async function rateLimit(socketId, action, limit = 10, windowMs = 10000) {
     const key = `ratelimit:${action}:${socketId}`;
-    const count = await pubClient.incr(key);
-    if (count === 1) await pubClient.expire(key, Math.ceil(windowMs / 1000));
+    const ttlSec = Math.ceil(windowMs / 1000);
+    const results = await pubClient.multi()
+      .incr(key)
+      .expire(key, ttlSec)
+      .exec();
+    const count = results[0];
     return count > limit;
   }
 
@@ -41,6 +50,8 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
 
     // AUTOCOMPLETE (LRU CACHED)
     socket.on('autocompleteSearch', async ({ query, lobbyId }) => {
+          if (typeof query !== 'string' || query.length === 0 || query.length > 100) return;
+          if (await rateLimit(socket.id, 'autocomplete', 20, 10000)) return;
           const room = await redisUtils.getLobby(pubClient, lobbyId);
           if (!room) return;
 
@@ -66,8 +77,10 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
           socket.emit('autocompleteResults', results);
         });
 
-    socket.on('joinLobby', async ({ name, lobbyId }) => {
-      name = escapeHtml(name);
+    socket.on('joinLobby', async ({ name, lobbyId, stableId }) => {
+      name = clampString(name, 24);
+      if (!name || !name.trim()) return socket.emit('error', 'Name cannot be empty.');
+      stableId = (typeof stableId === 'string' && stableId.length > 0 && stableId.length <= 64) ? stableId : socket.id;
       let id = (lobbyId || '').trim().toUpperCase() || await generateLobbyId(pubClient);
       let room = await redisUtils.getLobby(pubClient, id);
       
@@ -82,12 +95,16 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
       }
       if (room.status !== 'waiting') return socket.emit('error', 'Lobby is already playing or full.');
 
+      if (!isNewLobby && room.players.length >= 8) {
+        return socket.emit('error', 'Lobby is full (8 player maximum).');
+      }
+
       const isHost = room.players.length === 0;
       const teamId = room.players.length % 2;
       room.players.push({
-        id: socket.id, name, isHost, isAlive: true, connected: true, score: 0, wins: 0, teamId
+        id: socket.id, name, isHost, isAlive: true, connected: true, score: 0, wins: 0, teamId, stableId
       });
-      const existingWins = await redisUtils.getPlayerWins(pubClient, socket.id);
+      const existingWins = await redisUtils.getPlayerWins(pubClient, stableId);
       room.players[room.players.length - 1].wins = existingWins;
 
       await redisUtils.setSocketLobby(pubClient, socket.id, id);
@@ -192,7 +209,9 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
     });
 
     socket.on('sendChat', async ({ lobbyId, msg }) => {
-        msg = escapeHtml(msg);
+        msg = clampString(msg, 240);
+        if (!msg || !msg.trim()) return;
+        if (await rateLimit(socket.id, 'chat', 5, 5000)) return;
         const room = await redisUtils.getLobby(pubClient, lobbyId);
         if (room) {
           const player = room.players.find(p => p.id === socket.id);
@@ -201,6 +220,8 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
     });
 
     socket.on('sendReaction', async ({ lobbyId, emoji }) => {
+        if (typeof emoji !== 'string' || emoji.length > 8) return;
+        if (await rateLimit(socket.id, 'reaction', 10, 5000)) return;
         const room = await redisUtils.getLobby(pubClient, lobbyId);
         if (room) io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
     });
@@ -208,6 +229,7 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
     socket.on('forceNextTurn', async (lobbyId) => {
         let room = await redisUtils.getLobby(pubClient, lobbyId);
         if (!room || room.status !== 'playing' || room.isValidating) return;
+        if (!room.players.find(p => p.id === socket.id)) return;
         if (!room.turnExpiresAt) return;
         
         const now = Date.now();
@@ -240,17 +262,26 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
             return;
           }
 
-          // Restore connection but respect elimination status
+          // Update player.id to the NEW socket id so future handlers can find them
+          const oldSocketId = player.id;
+          player.id = socket.id;
           player.connected = true;
           // Do NOT force isAlive = true if they were already eliminated
 
           await redisUtils.saveLobby(pubClient, lobbyId, room);
 
+          // Update Redis socket→lobby mapping for the new socket id
+          await redisUtils.setSocketLobby(pubClient, socket.id, lobbyId);
+          // Clean up the old mapping if it still exists
+          if (oldSocketId !== socket.id) {
+            await redisUtils.deleteSocketLobby(pubClient, oldSocketId);
+          }
+
           socket.join(lobbyId);
 
           socket.emit('rejoinSuccess', {
             lobbyId,
-            playerId,
+            playerId: socket.id,
             state: room
           });
 
@@ -258,6 +289,7 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
         });
 
     socket.on('submitMovie', async ({ lobbyId, movie, tmdbId, mediaType }) => {
+        if (typeof movie === 'string' && movie.length > 200) return;
         let room = await redisUtils.getLobby(pubClient, lobbyId);
         if (!room || room.status !== 'playing' || room.isValidating || (!movie && !tmdbId)) return;
         
@@ -504,4 +536,4 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
       });
 }
 
-module.exports = { setupSocketHandlers };
+module.exports = { setupSocketHandlers, clampString };

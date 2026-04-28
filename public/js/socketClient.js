@@ -9,7 +9,7 @@ import {
   chatMessages
 } from './ui.js';
 
-import { prepareAudio, playSuccess, playFail, playTick, escapeHtml } from './utils.js';
+import { prepareAudio, playSuccess, playFail, playTick, escapeHtml, getStableId } from './utils.js';
 
 let socket;
 let currentLobbyId = null;
@@ -84,7 +84,7 @@ export function initSocket() {
         joinButton.addEventListener('click', () => {
             const name = playerNameInput ? playerNameInput.value.trim() : '';
             if (!name) return;
-            socket.emit('joinLobby', { name, lobbyId: lobby.id });
+            socket.emit('joinLobby', { name, lobbyId: lobby.id, stableId: getStableId() });
         });
         
         publicLobbiesList.appendChild(card);

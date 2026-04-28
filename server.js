@@ -11,17 +11,18 @@ const pino = require('pino');
 
 const logger = pino();
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],   // needed for inline scripts + Web Audio
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "https://image.tmdb.org"],
       connectSrc: ["'self'", "wss:", "https://api.themoviedb.org"],
-      fontSrc: ["'self'"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       frameAncestors: ["'none'"],
@@ -47,6 +48,10 @@ pubClient.on('error', (err) => logger.error(err, 'Redis Pub Client Error'));
 subClient.on('error', (err) => logger.error(err, 'Redis Sub Client Error'));
 
 const TMDB_TOKEN = process.env.TMDB_READ_TOKEN;
+if (!TMDB_TOKEN) {
+  console.error('FATAL: TMDB_READ_TOKEN environment variable is required. Set it in your .env file.');
+  process.exit(1);
+}
 const TMDB_HEADERS = { Authorization: `Bearer ${TMDB_TOKEN}`, accept: 'application/json' };
 
 let io;

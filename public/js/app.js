@@ -2,7 +2,7 @@
 // Thin entry point — imports everything and wires up the app
 import { initUIElements, closeMobileAc, openShareModal } from './ui.js';
 import { initSocket, getSocket, getCurrentLobbyId, getGameState } from './socketClient.js';
-import { prepareAudio } from './utils.js';
+import { prepareAudio, getStableId } from './utils.js';
 
 // Initialize everything when the page loads
 document.addEventListener('DOMContentLoaded', () => {
@@ -132,7 +132,8 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('mm_playerName', name);
       socket.emit('joinLobby', { 
           name, 
-          lobbyId: lobbyIdInput.value.trim() 
+          lobbyId: lobbyIdInput.value.trim(),
+          stableId: getStableId()
       });
 
       // Hide private room modal immediately

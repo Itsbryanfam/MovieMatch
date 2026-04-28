@@ -6,6 +6,7 @@ const activeTurnTimeouts = new Map();
 function broadcastState(io, id, state) {
   const clientState = {
     ...state,
+    players: state.players.map(({ stableId, ...rest }) => rest),
     chain: state.chain.map(item => ({
       playerId: item.playerId,
       playerName: item.playerName,
@@ -112,7 +113,7 @@ async function checkWinCondition(io, pubClient, id, state) {
       const winningPlayers = state.players.filter(p => p.teamId === winningTeamId);
       winningPlayers.forEach(p => { 
         p.wins = (p.wins || 0) + 1; 
-        redisUtils.incrementPlayerWins(pubClient, p.id).catch(e => console.error(e));
+        redisUtils.incrementPlayerWins(pubClient, p.stableId || p.id).catch(e => console.error(e));
       });
       const teamLabel = winningTeamId === 0 ? '🔴 Red' : '🔵 Blue';
       state.winner = {
@@ -174,7 +175,7 @@ async function checkWinCondition(io, pubClient, id, state) {
     state.turnExpiresAt = null;
     const winner = alivePlayers[0];
     winner.wins = (winner.wins || 0) + 1;
-    await redisUtils.incrementPlayerWins(pubClient, winner.id);
+    await redisUtils.incrementPlayerWins(pubClient, winner.stableId || winner.id);
     state.winner = { name: winner.name, score: winner.score, id: winner.id };
     io.to(id).emit('notification', `${winner.name} wins!`);
     await redisUtils.saveLobby(pubClient, id, state);
@@ -282,4 +283,5 @@ module.exports = {
   checkWinCondition,
   startGame,
   validateConnection,
+  activeTurnTimeouts,
 };
