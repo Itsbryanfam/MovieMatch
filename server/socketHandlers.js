@@ -230,6 +230,39 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
         }
     });
 
+    socket.on('rejoinLobby', async ({ lobbyId, playerId }) => {
+          const room = await redisUtils.getLobby(pubClient, lobbyId);
+          if (!room) {
+            socket.emit('rejoinFailed', 'Lobby no longer exists');
+            return;
+          }
+
+          const player = room.players.find(p => p.id === playerId);
+          if (!player) {
+            socket.emit('rejoinFailed', 'Player not found in lobby');
+            return;
+          }
+
+          // Restore player
+          player.connected = true;
+          player.isAlive = true; // or keep previous state if eliminated
+
+          await redisUtils.saveLobby(pubClient, lobbyId, room);
+
+          // Re-join Socket.io room
+          socket.join(lobbyId);
+
+          // Send current state back to reconnected player
+          socket.emit('rejoinSuccess', {
+            lobbyId,
+            playerId,
+            state: room
+          });
+
+          // Broadcast updated state to everyone
+          gameLogic.broadcastState(io, lobbyId, room);
+        });
+
     socket.on('submitMovie', async ({ lobbyId, movie, tmdbId, mediaType }) => {
         let room = await redisUtils.getLobby(pubClient, lobbyId);
         if (!room || room.status !== 'playing' || room.isValidating || (!movie && !tmdbId)) return;

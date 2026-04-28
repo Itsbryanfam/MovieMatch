@@ -250,6 +250,29 @@ async function startGame(io, pubClient, id, state) {
   broadcastState(io, id, state);
 }
 
+// Pure validation function for testing
+function validateConnection(lastNodeCast, candidateCast, hardcoreMode, previousSharedActors, usedMovies) {
+  const sharedActors = candidateCast.filter(actor => 
+    lastNodeCast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase())
+  );
+
+  if (sharedActors.length === 0) {
+    return { valid: false, reason: "Invalid movie connection." };
+  }
+
+  if (hardcoreMode && previousSharedActors.length > 0) {
+    const newSharedActors = sharedActors.filter(actor => 
+      !previousSharedActors.some(pActor => pActor.toLowerCase() === actor.toLowerCase())
+    );
+    if (newSharedActors.length === 0) {
+      return { valid: false, reason: "Hardcore Mode: You cannot reuse the exact same connecting actor!" };
+    }
+    return { valid: true, matchedActors: newSharedActors };
+  }
+
+  return { valid: true, matchedActors: sharedActors };
+}
+
 module.exports = {
   broadcastState,
   eliminateTeam,
@@ -257,5 +280,6 @@ module.exports = {
   nextTurn,
   resetTimer,
   checkWinCondition,
-  startGame
+  startGame,
+  validateConnection,
 };

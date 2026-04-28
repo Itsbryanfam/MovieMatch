@@ -11,6 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // 2. Start socket connection
   const socket = initSocket();
+
+  // Enable reconnection logging
+  console.log('🔌 Reconnection support enabled');
   
   // Small safety delay to ensure DOM is fully ready for background elements
   setTimeout(() => {

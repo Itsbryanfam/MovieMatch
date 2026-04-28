@@ -19,7 +19,13 @@ let turnInterval = null;
 let lastTickSound = 0;
 
 export function initSocket() {
-  socket = io();
+  socket = io({
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 20000,
+  });
 
   socket.on('joined', (data) => {
     currentLobbyId = data.lobbyId;
@@ -213,6 +219,39 @@ export function initSocket() {
     el.style.bottom = '120px';
     board.appendChild(el);
     setTimeout(() => el.remove(), 2500);
+  });
+
+  // === NEW: Reconnection handling ===
+  socket.on('reconnect', () => {
+    console.log('🔄 Reconnected to server');
+    const lobbyId = getCurrentLobbyId();
+    const playerId = getMyPlayerId();
+    
+    if (lobbyId && playerId) {
+      console.log(`🔄 Attempting to rejoin lobby ${lobbyId}`);
+      socket.emit('rejoinLobby', { lobbyId, playerId });
+    }
+  });
+
+  socket.on('rejoinSuccess', (data) => {
+    console.log('✅ Rejoined lobby successfully', data);
+    // Update local state
+    currentLobbyId = data.lobbyId;
+    myPlayerId = data.playerId;
+    gameState = data.state;
+    
+    // Refresh UI
+    if (data.state.status === 'playing') {
+      renderGame(data.state, myPlayerId);
+    } else {
+      renderLobby(data.state, myPlayerId);
+    }
+  });
+
+  socket.on('rejoinFailed', (msg) => {
+    console.warn('❌ Rejoin failed:', msg);
+    // Optional: show notification
+    showNotification(msg || 'Could not rejoin game');
   });
 
   return socket;
