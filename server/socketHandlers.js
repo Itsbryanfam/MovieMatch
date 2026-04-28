@@ -2,7 +2,8 @@ const redisUtils = require('./redisUtils');
 const gameLogic = require('./gameLogic');
 const pino = require('pino');
 const logger = pino();
-
+// In-memory map for active turn timeouts (never stored in Redis)
+const activeTurnTimeouts = new Map();
 
 function escapeHtml(unsafe) {
   if (!unsafe || typeof unsafe !== 'string') return unsafe;
@@ -18,11 +19,22 @@ async function generateLobbyId(pubClient) {
 }
 
 function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
+  // Simple per-socket rate limiter (Redis-backed)
+  async function rateLimit(socketId, action, limit = 10, windowMs = 10000) {
+    const key = `ratelimit:${action}:${socketId}`;
+    const count = await pubClient.incr(key);
+    if (count === 1) await pubClient.expire(key, Math.ceil(windowMs / 1000));
+    return count > limit;
+  }
+
   io.on('connection', (socket) => {
     if (cachedPosters && cachedPosters.length > 0) socket.emit('posters', cachedPosters);
 
     // AUTOCOMPLETE (LRU CACHED)
     socket.on('autocompleteSearch', async ({ query, lobbyId }) => {
+        if (await rateLimit(socket.id, 'autocomplete', 15, 5000)) {
+          return;
+        }
       try {
         const room = await redisUtils.getLobby(pubClient, lobbyId);
         const allowTv = room ? room.allowTvShows : false;
@@ -206,6 +218,11 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
     socket.on('submitMovie', async ({ lobbyId, movie, tmdbId, mediaType }) => {
         let room = await redisUtils.getLobby(pubClient, lobbyId);
         if (!room || room.status !== 'playing' || room.isValidating || (!movie && !tmdbId)) return;
+        
+        if (await rateLimit(socket.id, 'submitMovie', 8, 10000)) {
+          return; // silently drop spam
+        }
+
         const player = room.players.find(p => p.id === socket.id);
         if (!player || !player.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
         
@@ -273,13 +290,22 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
                   const mediaType = c.media_type || 'movie';
                   const title = mediaType === 'tv' ? c.name : c.title;
                   const date = mediaType === 'tv' ? c.first_air_date : c.release_date;
-                  let endpoint = `https://api.themoviedb.org/3/movie/${c.id}/credits`;
-                  if (mediaType === 'tv') endpoint = `https://api.themoviedb.org/3/tv/${c.id}/aggregate_credits`;
-                  
-                  const credRes = await fetch(`${endpoint}?language=en-US`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
-                  const credData = await credRes.json();
-                  return { id: c.id, title, year: date ? date.split('-')[0] : 'Unknown', cast: (credData.cast || []).map(actor => actor.name), poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null, mediaType: mediaType };
-              } catch(e) { return { id: c.id, title: c.name || c.title, year: 'Unknown', cast: [], poster: null, mediaType: c.media_type || 'movie'}; }
+
+                  // Use cached credits (this was the main performance/rate-limit issue)
+                  const credData = await redisUtils.getOrFetchCredits(pubClient, c.id, mediaType, TMDB_HEADERS);
+
+                  return { 
+                    id: c.id, 
+                    title, 
+                    year: date ? date.split('-')[0] : 'Unknown', 
+                    cast: (credData.cast || []).map(actor => actor.name), 
+                    poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null, 
+                    mediaType: mediaType 
+                  };
+              } catch(e) { 
+                  console.error("Credits fetch error:", e);
+                  return { id: c.id, title: c.name || c.title, year: 'Unknown', cast: [], poster: null, mediaType: c.media_type || 'movie'}; 
+              }
             }));
 
             room = await redisUtils.getLobby(pubClient, lobbyId);
@@ -358,25 +384,42 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
     });
 
 
-        // === HANDLE DISCONNECT (correctly placed at the end of connection handler) ===
+// === HANDLE DISCONNECT / LEAVE (final improved version) ===
         async function handleDisconnect(socketId) {
-          const lobbyId = await redisUtils.getSocketLobby(pubClient, socketId);
-          if (!lobbyId) return;
-          await redisUtils.deleteSocketLobby(pubClient, socketId);
-          
-          const room = await redisUtils.getLobby(pubClient, lobbyId);
-          if (!room) return;
+          try {
+            const lobbyId = await redisUtils.getSocketLobby(pubClient, socketId);
+            if (!lobbyId) return;
 
-          const player = room.players.find(p => p.id === socketId);
-          if (player) {
+            // Always leave the Socket.io room (explicit cleanup)
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) socket.leave(lobbyId);
+
+            await redisUtils.deleteSocketLobby(pubClient, socketId);
+
+            const room = await redisUtils.getLobby(pubClient, lobbyId);
+            if (!room) return;
+
+            const player = room.players.find(p => p.id === socketId);
+            if (!player) return;
+
+            // === TIMEOUT CLEANUP ===
+            if (activeTurnTimeouts.has(lobbyId)) {
+              clearTimeout(activeTurnTimeouts.get(lobbyId));
+              activeTurnTimeouts.delete(lobbyId);
+            }
+
             player.isAlive = false;
             player.connected = false;
+
             const wasHost = player.isHost;
 
             if (room.status === 'waiting') {
               room.players = room.players.filter(p => p.id !== socketId);
-              if (wasHost && room.players.length > 0) room.players[0].isHost = true;
+              if (wasHost && room.players.length > 0) {
+                room.players[0].isHost = true;
+              }
             }
+
             await redisUtils.saveLobby(pubClient, lobbyId, room);
 
             if (room.players.length === 0) {
@@ -385,15 +428,23 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
             }
 
             if (room.status === 'playing') {
-              await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
-              const liveRoom = await redisUtils.getLobby(pubClient, lobbyId);
-              if (liveRoom && liveRoom.status === 'playing' && liveRoom.players[liveRoom.currentTurnIndex]?.id === socketId) {
-                await gameLogic.nextTurn(io, pubClient, lobbyId, liveRoom);
+              const isCurrentTurnPlayer = room.players[room.currentTurnIndex]?.id === socketId;
+
+              if (isCurrentTurnPlayer) {
+                // Only eliminate if it was actually their turn
+                await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Player disconnected");
+              } else {
+                // Non-current player disconnected → just mark them dead and check win condition
+                await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
+                const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+                if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
               }
+            } else {
+              const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+              if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
             }
-            
-            const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
-            if(finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+          } catch (err) {
+            console.error(`[handleDisconnect] Error for socket ${socketId}:`, err);
           }
         }
 

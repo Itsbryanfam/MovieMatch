@@ -1,5 +1,8 @@
 const redisUtils = require('./redisUtils');
 
+// In-memory map for active turn timeouts (never stored in Redis)
+const activeTurnTimeouts = new Map();
+
 function broadcastState(io, id, state) {
   const clientState = {
     ...state,
@@ -48,6 +51,12 @@ async function nextTurn(io, pubClient, id, state) {
   await checkWinCondition(io, pubClient, id, state);
   if (state.status !== 'playing') return;
 
+  // Clear any existing timeout
+  if (activeTurnTimeouts.has(id)) {
+    clearTimeout(activeTurnTimeouts.get(id));
+    activeTurnTimeouts.delete(id);
+  }
+
   let iterations = 0;
   do {
     state.currentTurnIndex = (state.currentTurnIndex + 1) % state.players.length;
@@ -55,6 +64,25 @@ async function nextTurn(io, pubClient, id, state) {
   } while (!state.players[state.currentTurnIndex].isAlive && iterations < state.players.length);
 
   resetTimer(state);
+
+  // === SERVER-SIDE HARD TIMEOUT ===
+  const turnTimeMs = state.turnTime || 45000;
+  const timeoutId = setTimeout(async () => {
+    try {
+      const liveRoom = await redisUtils.getLobby(pubClient, id);
+      if (liveRoom && liveRoom.status === 'playing' &&
+          liveRoom.turnExpiresAt && Date.now() > liveRoom.turnExpiresAt) {
+        await eliminateCurrentPlayer(io, pubClient, id, liveRoom, "Turn timed out");
+      }
+    } catch (err) {
+      console.error("Timeout handler error:", err);
+    } finally {
+      activeTurnTimeouts.delete(id); // cleanup even on error
+    }
+  }, turnTimeMs + 4000);
+
+  activeTurnTimeouts.set(id, timeoutId);
+
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
 }

@@ -13,7 +13,22 @@ const logger = pino();
 const app = express();
 const server = http.createServer(app);
 
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],   // needed for inline scripts + Web Audio
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "https://image.tmdb.org"],
+      connectSrc: ["'self'", "wss:", "https://api.themoviedb.org"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // needed for some browser features
+}));
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000' }));
 
 const limiter = rateLimit({

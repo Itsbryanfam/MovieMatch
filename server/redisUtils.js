@@ -61,6 +61,41 @@ async function setPlayerWins(pubClient, playerId, wins) {
   await pubClient.setEx(`playerWins:${playerId}`, 30 * 24 * 60 * 60, wins.toString());
 }
 
+/**
+ * Get credits from Redis cache or fetch from TMDB and cache for 30 days
+ */
+async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
+  const cacheKey = `credits:${mediaType}:${tmdbId}`;
+  
+  // Try cache first
+  const cached = await pubClient.get(cacheKey);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  // Fetch from TMDB
+  const url = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}/credits?language=en-US`;
+  if (mediaType === 'tv') {
+    // Use the correct endpoint for TV shows (aggregate_credits)
+    const tvUrl = `https://api.themoviedb.org/3/tv/${tmdbId}/aggregate_credits?language=en-US`;
+    const response = await fetch(tvUrl, { headers });
+    if (!response.ok) throw new Error(`TMDB credits failed: ${response.status}`);
+    const credits = await response.json();
+    await pubClient.set(cacheKey, JSON.stringify(credits), { EX: 2592000 }); // 30 days
+    return credits;
+  }
+
+  const response = await fetch(url, { headers });
+  if (!response.ok) throw new Error(`TMDB credits failed: ${response.status}`);
+  
+  const credits = await response.json();
+
+  // Cache for 30 days
+  await pubClient.set(cacheKey, JSON.stringify(credits), { EX: 2592000 }); // 30 days in seconds
+
+  return credits;
+}
+
 module.exports = {
   getLobby,
   saveLobby,
@@ -73,5 +108,6 @@ module.exports = {
   deleteSocketLobby,
   getPlayerWins,
   incrementPlayerWins,
-  setPlayerWins
+  setPlayerWins,
+  getOrFetchCredits
 };
