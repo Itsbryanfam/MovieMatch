@@ -131,6 +131,10 @@ document.addEventListener('DOMContentLoaded', () => {
           name, 
           lobbyId: lobbyIdInput.value.trim() 
       });
+
+      // Hide private room modal immediately
+      const privatePanel = document.getElementById('private-panel');
+      if (privatePanel) privatePanel.classList.add('hidden');
   });
 
   startBtn?.addEventListener('click', () => {

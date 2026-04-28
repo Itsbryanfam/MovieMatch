@@ -24,8 +24,29 @@ export function initSocket() {
   socket.on('joined', (data) => {
     currentLobbyId = data.lobbyId;
     myPlayerId = data.playerId;
+
+    // === FIX DOUBLE UI: Hide all join/modals and show only the waiting room ===
+    const joinPanel = document.getElementById('join-panel');
+    const privatePanel = document.getElementById('private-panel');
+    const publicPanel = document.getElementById('public-panel');
+    const waitingRoom = document.getElementById('waiting-room');
+    const lobbyScreen = document.getElementById('lobby-screen');
+    const heroScreen = document.getElementById('hero-screen');
+
+    if (joinPanel) joinPanel.classList.add('hidden');
+    if (privatePanel) privatePanel.classList.add('hidden');
+    if (publicPanel) publicPanel.classList.add('hidden');
     if (waitingRoom) waitingRoom.classList.remove('hidden');
+    if (lobbyScreen) lobbyScreen.classList.add('active');
+    if (heroScreen) heroScreen.classList.remove('active');
+
     if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = currentLobbyId;
+  });
+
+  // Extra safety - close any lingering private room modal
+  socket.on('joined', () => {
+    const privateRoomModal = document.querySelector('.private-room-modal'); // or whatever the modal class/id is
+    if (privateRoomModal) privateRoomModal.classList.add('hidden');
   });
 
   socket.on('error', (msg) => alert(msg));
