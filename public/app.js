@@ -75,6 +75,7 @@ let myPlayerId = null;
 let currentLobbyId = null;
 let gameState = null;
 let debounceTimeout = null;
+let currentSelectedMovie = null;
 let AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx;
 
@@ -329,6 +330,8 @@ function renderAutocompleteResults(results) {
     results.forEach(movie => {
         const div = document.createElement('div');
         div.className = 'autocomplete-item';
+        div.setAttribute('data-tmdb-id', movie.id);
+        div.setAttribute('data-media-type', movie.mediaType);
         const imgTag = movie.poster
             ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">`
             : `<div class="mini-poster placeholder"></div>`;
@@ -340,12 +343,22 @@ function renderAutocompleteResults(results) {
             </div>
         `;
         div.addEventListener('click', () => {
-            movieInput.value = movie.title;
-            // Desktop: show prompt
-            autocompleteContainer.innerHTML = '<div class="empty-hint">Press Submit to lock it in!</div>';
-            // Mobile: close dropdown
-            closeMobileAc();
-            movieInput.focus();
+            const tmdbId = div.getAttribute('data-tmdb-id');
+            const mediaType = div.getAttribute('data-media-type');
+
+            if (tmdbId && mediaType) {
+                socket.emit('submitMovie', { 
+                    lobbyId: currentLobbyId, 
+                    movie: movie.title, 
+                    tmdbId: parseInt(tmdbId), 
+                    mediaType: mediaType 
+                });
+                movieInput.value = '';
+                autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+                closeMobileAc();
+            } else {
+                movieInput.value = movie.title;
+            }
         });
         target.appendChild(div);
     });
@@ -358,7 +371,19 @@ function submitMovie() {
     if (!movie) return;
     autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
     closeMobileAc();
-    socket.emit('submitMovie', { lobbyId: currentLobbyId, movie });
+    
+    if (currentSelectedMovie && currentSelectedMovie.title.toLowerCase() === movie.toLowerCase()) {
+        socket.emit('submitMovie', { 
+            lobbyId: currentLobbyId, 
+            movie, 
+            tmdbId: currentSelectedMovie.id, 
+            mediaType: currentSelectedMovie.mediaType 
+        });
+    } else {
+        socket.emit('submitMovie', { lobbyId: currentLobbyId, movie });
+    }
+    
+    currentSelectedMovie = null;
     movieInput.value = '';
 }
 

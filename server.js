@@ -307,6 +307,7 @@ async function startApp() {
         const res = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(2000) });
         const data = await res.json();
         const results = (data.results || []).filter(m => m.media_type !== 'person').slice(0, 5).map(m => ({
+            id: m.id,
             title: m.media_type === 'tv' ? m.name : (m.title || m.name),
             year: (m.media_type === 'tv' ? m.first_air_date : m.release_date)?.split('-')[0] || '????',
             poster: m.poster_path ? `https://image.tmdb.org/t/p/w92${m.poster_path}` : null,
@@ -460,31 +461,71 @@ async function startApp() {
         }
     });
 
-    socket.on('submitMovie', async ({ lobbyId, movie }) => {
+    socket.on('submitMovie', async ({ lobbyId, movie, tmdbId, mediaType }) => {
         let room = await getLobby(lobbyId);
-        if (!room || room.status !== 'playing' || room.isValidating || movie.trim().length === 0) return;
+        if (!room || room.status !== 'playing' || room.isValidating || (!movie && !tmdbId)) return;
         const player = room.players.find(p => p.id === socket.id);
         if (!player || !player.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
         
         room.isValidating = true; 
         await saveLobby(lobbyId, room);
 
-        try {
-            const searchType = room.allowTvShows ? 'multi' : 'movie';
-            const searchRes = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(movie)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
-            const searchData = await searchRes.json();
-            const results = (searchData.results || []).filter(r => r.media_type !== 'person');
+        function levenshtein(a, b) {
+            const matrix = [];
+            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1];
+                    else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+                }
+            }
+            return matrix[b.length][a.length];
+        }
 
-            if (results.length === 0) {
-                // Must fetch lobby again to modify because of async wait
+        try {
+            let topCandidates = [];
+            
+            if (tmdbId && mediaType) {
+                const lookupUrl = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}?language=en-US`;
+                const detailsRes = await fetch(lookupUrl, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
+                const detailsData = await detailsRes.json();
+                if (detailsData && detailsData.id) {
+                    topCandidates = [{
+                        id: detailsData.id,
+                        media_type: mediaType,
+                        name: detailsData.name,
+                        title: detailsData.title || detailsData.name,
+                        release_date: detailsData.release_date,
+                        first_air_date: detailsData.first_air_date,
+                        poster_path: detailsData.poster_path
+                    }];
+                }
+            }
+            
+            if (topCandidates.length === 0 && movie) {
+                const searchType = room.allowTvShows ? 'multi' : 'movie';
+                const searchRes = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(movie)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
+                const searchData = await searchRes.json();
+                let results = (searchData.results || []).filter(r => r.media_type !== 'person');
+                
+                results.sort((a, b) => {
+                    const titleA = (a.media_type === 'tv' ? a.name : a.title || a.name || '').toLowerCase();
+                    const titleB = (b.media_type === 'tv' ? b.name : b.title || b.name || '').toLowerCase();
+                    const target = movie.toLowerCase();
+                    return levenshtein(titleA, target) - levenshtein(titleB, target);
+                });
+                
+                topCandidates = results.slice(0, 5);
+            }
+
+            if (topCandidates.length === 0) {
                 room = await getLobby(lobbyId);
                 room.isValidating = false;
                 await saveLobby(lobbyId, room);
                 await eliminateCurrentPlayer(lobbyId, room, "Title not found!");
                 return;
             }
-
-            const topCandidates = results.slice(0, 5);
             const candidateMovies = await Promise.all(topCandidates.map(async (c) => {
               try {
                   const mediaType = c.media_type || 'movie';
@@ -495,8 +536,8 @@ async function startApp() {
                   
                   const credRes = await fetch(`${endpoint}?language=en-US`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) });
                   const credData = await credRes.json();
-                  return { title, year: date ? date.split('-')[0] : 'Unknown', cast: (credData.cast || []).map(actor => actor.name), poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null, mediaType };
-              } catch(e) { return { title: c.name || c.title, year: 'Unknown', cast: [], poster: null, mediaType: c.media_type || 'movie'}; }
+                  return { id: c.id, title, year: date ? date.split('-')[0] : 'Unknown', cast: (credData.cast || []).map(actor => actor.name), poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null, mediaType: mediaType };
+              } catch(e) { return { id: c.id, title: c.name || c.title, year: 'Unknown', cast: [], poster: null, mediaType: c.media_type || 'movie'}; }
             }));
 
             room = await getLobby(lobbyId);
@@ -512,7 +553,8 @@ async function startApp() {
 
             for (let i = 0; i < candidateMovies.length; i++) {
                 const candidate = candidateMovies[i];
-                if (room.usedMovies.includes(candidate.title.toLowerCase())) { if(i===0) failReason = "Movie already used!"; continue; }
+                const uniqueKey = `${candidate.mediaType}:${candidate.id}`;
+                if (room.usedMovies.includes(uniqueKey)) { if(i===0) failReason = "Movie already used!"; continue; }
                 if (!lastNode) { validMatch = candidate; break; } 
                 else {
                     const sharedActors = candidate.cast.filter(actor => lastNodeCast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase()));
@@ -552,7 +594,8 @@ async function startApp() {
             validMatch.cast = displayCast;
 
             // Valid play
-            room.usedMovies.push(validMatch.title.toLowerCase());
+            const uniqueMatchKey = `${validMatch.mediaType}:${validMatch.id}`;
+            room.usedMovies.push(uniqueMatchKey);
             room.chain.push({ playerId: player.id, playerName: player.name, movie: validMatch, fullCast: fullCastList, matchedActors });
             const pIndex = room.players.findIndex(p => p.id === socket.id);
             if(pIndex > -1) room.players[pIndex].score += 100;
