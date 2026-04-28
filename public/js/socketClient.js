@@ -27,32 +27,25 @@ export function initSocket() {
     timeout: 20000,
   });
 
+  // === ALL SOCKET LISTENERS ===
   socket.on('joined', (data) => {
     currentLobbyId = data.lobbyId;
     myPlayerId = data.playerId;
-
-    // === FIX DOUBLE UI: Hide all join/modals and show only the waiting room ===
+    // Hide join screens and show waiting room
     const joinPanel = document.getElementById('join-panel');
     const privatePanel = document.getElementById('private-panel');
     const publicPanel = document.getElementById('public-panel');
-    const waitingRoom = document.getElementById('waiting-room');
-    const lobbyScreen = document.getElementById('lobby-screen');
-    const heroScreen = document.getElementById('hero-screen');
+    const waitingRoomEl = document.getElementById('waiting-room');
+    const lobbyScreenEl = document.getElementById('lobby-screen');
+    const heroScreenEl = document.getElementById('hero-screen');
 
     if (joinPanel) joinPanel.classList.add('hidden');
     if (privatePanel) privatePanel.classList.add('hidden');
     if (publicPanel) publicPanel.classList.add('hidden');
-    if (waitingRoom) waitingRoom.classList.remove('hidden');
-    if (lobbyScreen) lobbyScreen.classList.add('active');
-    if (heroScreen) heroScreen.classList.remove('active');
-
+    if (waitingRoomEl) waitingRoomEl.classList.remove('hidden');
+    if (lobbyScreenEl) lobbyScreenEl.classList.add('active');
+    if (heroScreenEl) heroScreenEl.classList.remove('active');
     if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = currentLobbyId;
-  });
-
-  // Extra safety - close any lingering private room modal
-  socket.on('joined', () => {
-    const privateRoomModal = document.querySelector('.private-room-modal'); // or whatever the modal class/id is
-    if (privateRoomModal) privateRoomModal.classList.add('hidden');
   });
 
   socket.on('error', (msg) => alert(msg));
@@ -155,7 +148,7 @@ export function initSocket() {
                 if (tr > 0 && Math.floor(Date.now() / 1000) > lastTickSound) {
                    playTick();
                    lastTickSound = Math.floor(Date.now() / 1000);
-                }
+                 }
             } else if (tr <= 30) {
                 timerBar.style.backgroundColor = 'var(--timer-yellow)';
             } else {
@@ -221,12 +214,11 @@ export function initSocket() {
     setTimeout(() => el.remove(), 2500);
   });
 
-  // === NEW: Reconnection handling ===
+  // === RECONNECTION HANDLING ===
   socket.on('reconnect', () => {
     console.log('🔄 Reconnected to server');
     const lobbyId = getCurrentLobbyId();
     const playerId = getMyPlayerId();
-    
     if (lobbyId && playerId) {
       console.log(`🔄 Attempting to rejoin lobby ${lobbyId}`);
       socket.emit('rejoinLobby', { lobbyId, playerId });
@@ -235,22 +227,20 @@ export function initSocket() {
 
   socket.on('rejoinSuccess', (data) => {
     console.log('✅ Rejoined lobby successfully', data);
-    // Update local state
     currentLobbyId = data.lobbyId;
     myPlayerId = data.playerId;
     gameState = data.state;
-    
-    // Refresh UI
+
     if (data.state.status === 'playing') {
       renderGame(data.state, myPlayerId);
     } else {
       renderLobby(data.state, myPlayerId);
     }
+    showNotification('✅ Reconnected to game!');
   });
 
   socket.on('rejoinFailed', (msg) => {
     console.warn('❌ Rejoin failed:', msg);
-    // Optional: show notification
     showNotification(msg || 'Could not rejoin game');
   });
 

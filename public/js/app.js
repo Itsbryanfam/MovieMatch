@@ -217,13 +217,30 @@ document.addEventListener('DOMContentLoaded', () => {
   let debounceTimeout = null;
 
   function submitMovie() {
-      const movie = movieInput ? movieInput.value.trim() : '';
-      if (!movie) return;
-      if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
-      closeMobileAc();
-      
-      socket.emit('submitMovie', { lobbyId: getCurrentLobbyId(), movie });
-      if (movieInput) movieInput.value = '';
+    const movie = movieInput ? movieInput.value.trim() : '';
+    if (!movie) return;
+
+    if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+    closeMobileAc();
+
+    const socket = getSocket();
+    const lobbyId = getCurrentLobbyId();
+
+    if (typeof currentSelectedMovie !== 'undefined' && currentSelectedMovie && currentSelectedMovie.title.toLowerCase() === movie.toLowerCase()) {
+      socket.emit('submitMovie', {
+        lobbyId,
+        movie,
+        tmdbId: currentSelectedMovie.id,
+        mediaType: currentSelectedMovie.mediaType
+      });
+    } else {
+      socket.emit('submitMovie', { lobbyId, movie });
+    }
+
+    if (typeof currentSelectedMovie !== 'undefined') {
+      currentSelectedMovie = null;
+    }
+    if (movieInput) movieInput.value = '';
   }
 
   submitBtn?.addEventListener('click', submitMovie);

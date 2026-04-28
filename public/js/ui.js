@@ -333,13 +333,13 @@ export function renderAutocompleteResults(results) {
       const tmdbId = div.getAttribute('data-tmdb-id');
       const mediaType = div.getAttribute('data-media-type');
       const title = movie.title;
-      
+
       // Clear input and dropdown
       if (movieInput) movieInput.value = '';
       if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
       closeMobileAc();
-      
-      // Submit via socket
+
+      // Submit with correct TMDB ID (this is the critical fix)
       const socket = getSocket();
       if (socket && tmdbId && mediaType) {
         socket.emit('submitMovie', {

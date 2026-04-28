@@ -243,23 +243,20 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
             return;
           }
 
-          // Restore player
+          // Restore connection but respect elimination status
           player.connected = true;
-          player.isAlive = true; // or keep previous state if eliminated
+          // Do NOT force isAlive = true if they were already eliminated
 
           await redisUtils.saveLobby(pubClient, lobbyId, room);
 
-          // Re-join Socket.io room
           socket.join(lobbyId);
 
-          // Send current state back to reconnected player
           socket.emit('rejoinSuccess', {
             lobbyId,
             playerId,
             state: room
           });
 
-          // Broadcast updated state to everyone
           gameLogic.broadcastState(io, lobbyId, room);
         });
 
