@@ -1,5 +1,6 @@
 // ====================== UI.JS ======================
 import { escapeHtml, playSuccess, playFail, playTick, prepareAudio } from './utils.js';
+import { getSocket, getCurrentLobbyId } from './socketClient.js';
 
 export const MODE_DESCRIPTIONS = {
     classic: 'Last player standing wins. Timer shrinks each round.',
@@ -322,9 +323,34 @@ export function renderAutocompleteResults(results) {
     div.className = 'autocomplete-item';
     div.setAttribute('data-tmdb-id', movie.id);
     div.setAttribute('data-media-type', movie.mediaType);
-    const imgTag = movie.poster ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">` : `<div class="mini-poster placeholder"></div>`;
+    const imgTag = movie.poster 
+      ? `<img src="${movie.poster}" alt="Poster" class="mini-poster">` 
+      : `<div class="mini-poster placeholder"></div>`;
     div.innerHTML = `${imgTag}<div class="ac-text"><div class="ac-title">${movie.title}</div><span class="year">(${movie.year})</span></div>`;
-    div.addEventListener('click', () => { /* handled via app.js */ });
+    
+    // Click handler - submit the selected movie
+    div.addEventListener('click', () => {
+      const tmdbId = div.getAttribute('data-tmdb-id');
+      const mediaType = div.getAttribute('data-media-type');
+      const title = movie.title;
+      
+      // Clear input and dropdown
+      if (movieInput) movieInput.value = '';
+      if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+      closeMobileAc();
+      
+      // Submit via socket
+      const socket = getSocket();
+      if (socket && tmdbId && mediaType) {
+        socket.emit('submitMovie', {
+          lobbyId: getCurrentLobbyId(),
+          movie: title,
+          tmdbId: parseInt(tmdbId),
+          mediaType: mediaType
+        });
+      }
+    });
+    
     target.appendChild(div);
   });
   if (isMobile) mobileAcDropdown.classList.add('open');
