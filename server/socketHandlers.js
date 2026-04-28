@@ -41,33 +41,30 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
 
     // AUTOCOMPLETE (LRU CACHED)
     socket.on('autocompleteSearch', async ({ query, lobbyId }) => {
-        if (await rateLimit(socket.id, 'autocomplete', 15, 5000)) {
-          return;
-        }
-      try {
-        const room = await redisUtils.getLobby(pubClient, lobbyId);
-        const allowTv = room ? room.allowTvShows : false;
-        const searchType = allowTv ? 'multi' : 'movie';
-        const cacheKey = `TMDB_SEARCH:${searchType}:${query.toLowerCase()}`;
-        
-        const cached = await pubClient.get(cacheKey);
-        if(cached) return socket.emit('autocompleteResults', JSON.parse(cached));
-        
-        const res = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(2000) });
-        const data = await res.json();
-        const results = (data.results || []).filter(m => m.media_type !== 'person').slice(0, 5).map(m => ({
-            id: m.id,
-            title: m.media_type === 'tv' ? m.name : (m.title || m.name),
-            year: (m.media_type === 'tv' ? m.first_air_date : m.release_date)?.split('-')[0] || '????',
-            poster: m.poster_path ? `https://image.tmdb.org/t/p/w92${m.poster_path}` : null,
-            mediaType: m.media_type || 'movie'
-        }));
-        await pubClient.setEx(cacheKey, 86400, JSON.stringify(results));
-        socket.emit('autocompleteResults', results);
-      } catch (e) {
-        logger.error(e, 'Autocomplete search failed');
-      }
-    });
+          const room = await redisUtils.getLobby(pubClient, lobbyId);
+          if (!room) return;
+
+          const searchType = room.allowTvShows ? 'multi' : 'movie';
+          const searchRes = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { 
+            headers: TMDB_HEADERS, 
+            signal: AbortSignal.timeout(5000) 
+          });
+
+          const searchData = await searchRes.json();
+          let results = (searchData.results || []).filter(r => r.media_type !== 'person');
+
+          // Ensure each result has id, title, year, poster, and mediaType
+          results = results.slice(0, 5).map(r => ({
+            id: r.id,
+            title: r.title || r.name || 'Unknown Title',
+            year: (r.release_date || r.first_air_date || '').split('-')[0] || 'Unknown',
+            poster: r.poster_path ? `https://image.tmdb.org/t/p/w92${r.poster_path}` : null,
+            mediaType: r.media_type || (r.title ? 'movie' : 'tv'),
+            media_type: r.media_type || (r.title ? 'movie' : 'tv')  // keep both for safety
+          }));
+
+          socket.emit('autocompleteResults', results);
+        });
 
     socket.on('joinLobby', async ({ name, lobbyId }) => {
       name = escapeHtml(name);
