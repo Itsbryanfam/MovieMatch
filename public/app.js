@@ -1,5 +1,10 @@
 const socket = io();
 
+function escapeHtml(unsafe) {
+  if (!unsafe || typeof unsafe !== 'string') return unsafe;
+  return unsafe.replace(/[<>&"']/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;','\'':'&#39;'})[m]);
+}
+
 // UI Elements
 const lobbyScreen = document.getElementById('lobby-screen');
 const heroScreen = document.getElementById('hero-screen');
@@ -395,7 +400,7 @@ socket.on('receiveChat', ({ playerName, msg }) => {
 
     const div = document.createElement('div');
     div.className = 'chat-msg';
-    div.innerHTML = `<span class="chat-author">${playerName}:</span>${msg}`;
+    div.innerHTML = `<span class="chat-author">${escapeHtml(playerName)}:</span>${escapeHtml(msg)}`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 });
@@ -440,7 +445,7 @@ socket.on('publicLobbiesList', (lobbies) => {
         
         card.innerHTML = `
             <div class="public-lobby-info">
-                <h3>${lobby.hostName}'s Lobby</h3>
+                <h3>${escapeHtml(lobby.hostName)}'s Lobby</h3>
                 <div class="public-lobby-stats">
                     <span>👥 ${lobby.playerCount} / 8</span>
                     ${tagsHTML ? `<div>${tagsHTML}</div>` : ''}
@@ -644,7 +649,7 @@ function renderTeamScreen(amIHost) {
         gameState.players.filter(p => p.teamId === teamId).forEach(p => {
             const li = document.createElement('li');
             li.className = 'team-player-chip' + (p.id === myPlayerId ? ' is-me' : '');
-            let label = p.name;
+            let label = escapeHtml(p.name);
             if (p.id === myPlayerId) label += ' (You)';
             if (p.isHost) label += '<span class="chip-host"> 👑</span>';
             li.innerHTML = label;
@@ -711,7 +716,7 @@ function renderGame() {
             gameState.players.filter(p => p.teamId === teamId).forEach((p, i) => {
                 const li = document.createElement('li');
                 const idx = gameState.players.indexOf(p);
-                li.innerHTML = `<span>${p.name}</span> <span>${p.score}</span>`;
+                li.innerHTML = `<span>${escapeHtml(p.name)}</span> <span>${p.score}</span>`;
                 if (!p.isAlive) li.classList.add('eliminated');
                 if (idx === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
                 gamePlayersList.appendChild(li);
@@ -723,7 +728,7 @@ function renderGame() {
     } else {
         gameState.players.forEach((p, index) => {
             const li = document.createElement('li');
-            li.innerHTML = `<span>${p.name}</span> <span>${p.score}</span>`;
+            li.innerHTML = `<span>${escapeHtml(p.name)}</span> <span>${p.score}</span>`;
             if (!p.isAlive) li.classList.add('eliminated');
             if (index === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
             gamePlayersList.appendChild(li);
@@ -756,7 +761,7 @@ function renderGame() {
         div.innerHTML = `
             ${imgTag}
             <div class="chain-content">
-                <div class="player-name">${item.playerName}</div>
+                <div class="player-name">${escapeHtml(item.playerName)}</div>
                 <div class="movie-title">${item.movie.title} <span class="year">(${item.movie.year})</span></div>
                 <div class="movie-cast">Cast: ${castHtml}</div>
             </div>
