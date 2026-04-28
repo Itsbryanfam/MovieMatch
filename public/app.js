@@ -656,6 +656,13 @@ function renderTeamScreen(amIHost) {
 function renderGame() {
     const mode = gameState.gameMode || 'classic';
 
+    // Solo mode layout toggle
+    if (mode === 'solo') {
+        gameScreen.classList.add('solo-mode-ui');
+    } else {
+        gameScreen.classList.remove('solo-mode-ui');
+    }
+
     // Speed mode: warm timer always
     if (mode === 'speed') {
         gameScreen.classList.add('speed-mode');

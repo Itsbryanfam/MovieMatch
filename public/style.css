@@ -1814,3 +1814,35 @@ input:disabled {
     font-size: 1.4rem;
   }
 }
+
+/* Solo Mode UI Adjustments */
+.solo-mode-ui .sidebar {
+  display: none !important;
+}
+
+.solo-mode-ui .reaction-bar {
+  display: none !important;
+}
+
+.solo-mode-ui .mobile-tabs {
+  display: none !important;
+}
+
+.solo-mode-ui .layout-grid {
+  grid-template-columns: 1fr !important;
+  max-width: 750px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.solo-mode-ui .feed-container {
+  border-color: rgba(129, 140, 248, 0.2);
+  box-shadow: 0 8px 32px rgba(129, 140, 248, 0.05);
+}
+
+.solo-mode-ui .chain-badge {
+  font-size: 1.1rem;
+  background: var(--accent-glow);
+  padding: 0.25rem 0.75rem;
+  border: 1px solid rgba(129, 140, 248, 0.4);
+}

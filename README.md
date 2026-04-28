@@ -4,6 +4,12 @@ A fast-paced, horizontally-scalable, multiplayer web game where players take tur
 
 ## ✨ New & Advanced Features
 
+### 🎮 Multiple Game Modes
+- **Classic Mode:** Last player standing wins. Timer escalates aggressively.
+- **Team Mode (2v2):** Choose sides in the lobby! Teams submit back-to-back. If one member fails, the entire team is wiped out.
+- **Solo Challenge:** Test your personal movie knowledge. Try to build the longest chain possible against the clock.
+- **Speed Round:** Flat, ruthless 15-second timer. Ideal for fast party-style gameplay.
+
 ### 🌐 Public Matchmaking & Discovery
 - **Public Lobby Browser:** Users can now "Solo-Queue" by browsing a live list of public rooms directly from the home screen.
 - **Dynamic Privacy:** Lobby hosts can toggle `Public Room` status at any time to list/unlist their room from the global browser.
