@@ -60,8 +60,14 @@ async function fetchBackgroundPosters() {
     const data2 = await res2.json();
     
     const combined = [...(data1.results || []), ...(data2.results || [])];
-    cachedPosters = combined.filter(m => m.poster_path).map(m => `https://image.tmdb.org/t/p/w200${m.poster_path}`);
-    cachedPosters.sort(() => 0.5 - Math.random());
+    const posters = combined.filter(m => m.poster_path).map(m => `https://image.tmdb.org/t/p/w200${m.poster_path}`);
+    posters.sort(() => 0.5 - Math.random());
+    
+    // Cache posters globally so new connections and 'requestPosters' can access them
+    global.cachedPosters = posters;
+
+    // Send to all currently connected clients
+    if (io) io.emit('posters', posters);
   } catch (err) {
     logger.error(err, 'Failed to fetch background posters');
   }

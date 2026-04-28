@@ -6,11 +6,17 @@ import { prepareAudio } from './utils.js';
 
 // Initialize everything when the page loads
 document.addEventListener('DOMContentLoaded', () => {
-  // 1. Initialize all DOM references
+  // 1. Initialize all DOM references FIRST
   initUIElements();
-
+  
   // 2. Start socket connection
   const socket = initSocket();
+  
+  // Small safety delay to ensure DOM is fully ready for background elements
+  setTimeout(() => {
+    // Request posters on load (in case the server already sent them)
+    if (socket) socket.emit('requestPosters');
+  }, 300);
 
   // 3. All event listeners that were at the bottom of the old app.js
   const playerNameInput = document.getElementById('player-name');

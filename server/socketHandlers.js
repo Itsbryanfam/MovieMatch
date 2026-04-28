@@ -28,7 +28,16 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
   }
 
   io.on('connection', (socket) => {
-    if (cachedPosters && cachedPosters.length > 0) socket.emit('posters', cachedPosters);
+    // Immediately send cached posters to any new client
+    if (global.cachedPosters && global.cachedPosters.length > 0) {
+      socket.emit('posters', global.cachedPosters);
+    }
+
+    socket.on('requestPosters', () => {
+      if (global.cachedPosters && global.cachedPosters.length > 0) {
+        socket.emit('posters', global.cachedPosters);
+      }
+    });
 
     // AUTOCOMPLETE (LRU CACHED)
     socket.on('autocompleteSearch', async ({ query, lobbyId }) => {
@@ -90,6 +99,12 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
       await redisUtils.saveLobby(pubClient, id, room);
       socket.join(id);
       socket.emit('joined', { lobbyId: id, playerId: socket.id });
+
+      // Send background posters to the new player
+      if (global.cachedPosters && global.cachedPosters.length > 0) {
+        socket.emit('posters', global.cachedPosters);
+      }
+
       gameLogic.broadcastState(io, id, room);
     });
 

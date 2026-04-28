@@ -72,26 +72,29 @@ export function initSocket() {
   });
 
   socket.on('posters', (posters) => {
-    if (!posterCarousel) return;
-    posterCarousel.innerHTML = '';
+    // Try exported reference first, then fallback to direct DOM lookup
+    let carousel = posterCarousel || document.getElementById('poster-carousel');
+    if (!carousel) return;
     
+    carousel.innerHTML = '';
+   
     const rows = 4;
     const postersPerRow = Math.ceil(posters.length / rows);
-    
+   
     for (let i = 0; i < rows; i++) {
         const rowDiv = document.createElement('div');
         rowDiv.className = 'poster-row';
-        
+       
         const rowPosters = posters.slice(i * postersPerRow, (i + 1) * postersPerRow);
         const seamlessPosters = [...rowPosters, ...rowPosters, ...rowPosters, ...rowPosters, ...rowPosters];
-        
+       
         seamlessPosters.forEach(url => {
             const img = document.createElement('img');
             img.src = url;
             rowDiv.appendChild(img);
         });
-        
-        posterCarousel.appendChild(rowDiv);
+       
+        carousel.appendChild(rowDiv);
     }
   });
 
