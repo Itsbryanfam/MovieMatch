@@ -481,10 +481,17 @@ export function generateShareCard(state) {
         ctx.fillStyle = COLORS.accent;
         ctx.textAlign = 'center';
         ctx.fillText(`🏆 ${state.winner.name} wins!`, W / 2, winnerY + 36);
-
         ctx.font = '500 14px "Plus Jakarta Sans", sans-serif';
         ctx.fillStyle = COLORS.muted;
-        ctx.fillText(`${chainLen} connections  •  ${state.winner.score} pts`, W / 2, winnerY + 60);
+        ctx.fillText(`${chainLen} connections • ${state.winner.score} pts`, W / 2, winnerY + 60);
+    } else if (state.gameMode === 'solo') {
+        ctx.font = 'bold 26px "Plus Jakarta Sans", sans-serif';
+        ctx.fillStyle = COLORS.text;
+        ctx.textAlign = 'center';
+        ctx.fillText(`🎬 Solo Over`, W / 2, winnerY + 36);
+        ctx.font = '500 14px "Plus Jakarta Sans", sans-serif';
+        ctx.fillStyle = COLORS.muted;
+        ctx.fillText(`Final Chain: ${chainLen} connections`, W / 2, winnerY + 60);
     } else {
         ctx.font = 'bold 24px "Plus Jakarta Sans", sans-serif';
         ctx.fillStyle = COLORS.text;
@@ -620,34 +627,47 @@ export function resetMobileTab() {
     if (chatPanel) chatPanel.classList.remove('mobile-visible');
 }
 
-export function showGameOverBanner(winner, myPlayerId) {
-    const banner = document.createElement('div');
-    banner.className = 'game-over-banner';
-    let winnerLine, subLine;
+export function showGameOverBanner(state, myPlayerId) {
+  const banner = document.createElement('div');
+  banner.className = 'game-over-banner';
 
-    if (winner?.isSolo) {
-        winnerLine = `🎬 Solo Complete!`;
-        subLine = `🔗 Chain Length: ${winner.chainLength} link${winner.chainLength !== 1 ? 's' : ''}`;
-    } else if (winner?.isTeamWin) {
-        winnerLine = `🏆 ${winner.name} wins!`;
-        const memberNames = (winner.players || []).join(' & ');
-        subLine = `${memberNames} • ${winner.score} pts`;
-    } else if (winner) {
-        winnerLine = `🏆 ${winner.name} wins!`;
-        subLine = `${winner.score} pts`;
+  const isSolo = state.gameMode === 'solo';
+  const winner = state.winner;
+
+  let winnerLine, subLine;
+
+  if (isSolo) {
+    if (winner && winner.isSolo) {
+      winnerLine = `🎬 Solo Complete!`;
+      subLine = `🔗 Chain Length: ${winner.chainLength} link${winner.chainLength !== 1 ? 's' : ''}`;
     } else {
-        winnerLine = '🎬 Game Over!';
-        subLine = `Thanks for playing!`;
+      // Solo loss case
+      winnerLine = `🎬 Solo Over`;
+      subLine = `🔗 Final Chain: ${state.chain.length} connection${state.chain.length !== 1 ? 's' : ''}`;
     }
+  } else if (winner?.isTeamWin) {
+    winnerLine = `🏆 ${winner.name} wins!`;
+    const memberNames = (winner.players || []).join(' & ');
+    subLine = `${memberNames} • ${winner.score} pts`;
+  } else if (winner) {
+    winnerLine = `🏆 ${winner.name} wins!`;
+    subLine = `${winner.score} pts • ${state.chain.length} connections`;
+  } else {
+    winnerLine = '🎬 Game Over!';
+    subLine = `${state.chain.length} connections total`;
+  }
 
-    banner.innerHTML = `
-        <div class="game-over-title">${winnerLine}</div>
-        <div class="game-over-subtitle">${subLine}</div>
-        <div class="game-over-actions">
-            <button id="share-results-btn" class="btn-primary">🎬 Share Results</button>
-            <button id="play-again-btn" class="btn-secondary">↩ Play Again</button>
-        </div>
-    `;
-    chainDisplay.appendChild(banner);
-    chainDisplay.scrollTop = chainDisplay.scrollHeight;
+  const isHost = state.players?.some(p => p.id === myPlayerId && p.isHost);
+
+  banner.innerHTML = `
+    <div class="game-over-title">${winnerLine}</div>
+    <div class="game-over-subtitle">${subLine}</div>
+    <div class="game-over-actions">
+      <button id="share-results-btn" class="btn-primary">🎬 Share Results</button>
+      ${isHost ? '<button id="play-again-btn" class="btn-secondary">↩ Play Again</button>' : ''}
+    </div>
+  `;
+
+  chainDisplay.appendChild(banner);
+  chainDisplay.scrollTop = chainDisplay.scrollHeight;
 }
