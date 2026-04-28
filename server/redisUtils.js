@@ -46,6 +46,21 @@ async function deleteSocketLobby(pubClient, socketId) {
   await pubClient.del(`socket:${socketId}`);
 }
 
+// Persistent wins (30-day TTL)
+async function getPlayerWins(pubClient, playerId) {
+  const wins = await pubClient.get(`playerWins:${playerId}`);
+  return wins ? parseInt(wins, 10) : 0;
+}
+
+async function incrementPlayerWins(pubClient, playerId, amount = 1) {
+  await pubClient.incrBy(`playerWins:${playerId}`, amount);
+  await pubClient.expire(`playerWins:${playerId}`, 30 * 24 * 60 * 60); // 30 days
+}
+
+async function setPlayerWins(pubClient, playerId, wins) {
+  await pubClient.setEx(`playerWins:${playerId}`, 30 * 24 * 60 * 60, wins.toString());
+}
+
 module.exports = {
   getLobby,
   saveLobby,
@@ -55,5 +70,8 @@ module.exports = {
   getAllLobbies,
   getSocketLobby,
   setSocketLobby,
-  deleteSocketLobby
+  deleteSocketLobby,
+  getPlayerWins,
+  incrementPlayerWins,
+  setPlayerWins
 };

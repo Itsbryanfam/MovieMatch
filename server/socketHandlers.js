@@ -3,8 +3,6 @@ const gameLogic = require('./gameLogic');
 const pino = require('pino');
 const logger = pino();
 
-const TMDB_TOKEN = process.env.TMDB_READ_TOKEN;
-const TMDB_HEADERS = { Authorization: `Bearer ${TMDB_TOKEN}`, accept: 'application/json' };
 
 function escapeHtml(unsafe) {
   if (!unsafe || typeof unsafe !== 'string') return unsafe;
@@ -19,7 +17,7 @@ async function generateLobbyId(pubClient) {
   return id;
 }
 
-function setupSocketHandlers(io, pubClient, cachedPosters) {
+function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
   io.on('connection', (socket) => {
     if (cachedPosters && cachedPosters.length > 0) socket.emit('posters', cachedPosters);
 
@@ -71,6 +69,8 @@ function setupSocketHandlers(io, pubClient, cachedPosters) {
       room.players.push({
         id: socket.id, name, isHost, isAlive: true, connected: true, score: 0, wins: 0, teamId
       });
+      const existingWins = await redisUtils.getPlayerWins(pubClient, socket.id);
+      room.players[room.players.length - 1].wins = existingWins;
 
       await redisUtils.setSocketLobby(pubClient, socket.id, id);
       if (isNewLobby) await redisUtils.addToActiveLobbies(pubClient, id);
@@ -357,52 +357,54 @@ function setupSocketHandlers(io, pubClient, cachedPosters) {
         }
     });
 
-    async function handleDisconnect(socketId) {
-      const lobbyId = await redisUtils.getSocketLobby(pubClient, socketId);
-      if (!lobbyId) return;
-      await redisUtils.deleteSocketLobby(pubClient, socketId);
-      
-      const room = await redisUtils.getLobby(pubClient, lobbyId);
-      if (!room) return;
 
-      const player = room.players.find(p => p.id === socketId);
-      if (player) {
-        player.isAlive = false;
-        player.connected = false;
-        const wasHost = player.isHost;
+        // === HANDLE DISCONNECT (correctly placed at the end of connection handler) ===
+        async function handleDisconnect(socketId) {
+          const lobbyId = await redisUtils.getSocketLobby(pubClient, socketId);
+          if (!lobbyId) return;
+          await redisUtils.deleteSocketLobby(pubClient, socketId);
+          
+          const room = await redisUtils.getLobby(pubClient, lobbyId);
+          if (!room) return;
 
-        if (room.status === 'waiting') {
-          room.players = room.players.filter(p => p.id !== socketId);
-          if (wasHost && room.players.length > 0) room.players[0].isHost = true;
-        }
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
+          const player = room.players.find(p => p.id === socketId);
+          if (player) {
+            player.isAlive = false;
+            player.connected = false;
+            const wasHost = player.isHost;
 
-        if (room.players.length === 0) {
-          await redisUtils.deleteLobby(pubClient, lobbyId);
-          return;
-        }
+            if (room.status === 'waiting') {
+              room.players = room.players.filter(p => p.id !== socketId);
+              if (wasHost && room.players.length > 0) room.players[0].isHost = true;
+            }
+            await redisUtils.saveLobby(pubClient, lobbyId, room);
 
-        if (room.status === 'playing') {
-          await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
-          const liveRoom = await redisUtils.getLobby(pubClient, lobbyId);
-          if (liveRoom && liveRoom.status === 'playing' && liveRoom.players[liveRoom.currentTurnIndex]?.id === socketId) {
-            await gameLogic.nextTurn(io, pubClient, lobbyId, liveRoom);
+            if (room.players.length === 0) {
+              await redisUtils.deleteLobby(pubClient, lobbyId);
+              return;
+            }
+
+            if (room.status === 'playing') {
+              await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
+              const liveRoom = await redisUtils.getLobby(pubClient, lobbyId);
+              if (liveRoom && liveRoom.status === 'playing' && liveRoom.players[liveRoom.currentTurnIndex]?.id === socketId) {
+                await gameLogic.nextTurn(io, pubClient, lobbyId, liveRoom);
+              }
+            }
+            
+            const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+            if(finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
           }
         }
-        
-        const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
-        if(finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
-      }
-    }
 
-    socket.on('disconnect', () => handleDisconnect(socket.id));
-    
-    socket.on('leaveLobby', async () => {
-        const lobbyId = await redisUtils.getSocketLobby(pubClient, socket.id);
-        if (lobbyId) socket.leave(lobbyId);
-        await handleDisconnect(socket.id);
-    });
-  });
+        socket.on('disconnect', () => handleDisconnect(socket.id));
+        
+        socket.on('leaveLobby', async () => {
+            const lobbyId = await redisUtils.getSocketLobby(pubClient, socket.id);
+            if (lobbyId) socket.leave(lobbyId);
+            await handleDisconnect(socket.id);
+        });
+      });
 }
 
 module.exports = { setupSocketHandlers };

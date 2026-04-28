@@ -68,7 +68,7 @@ async function startApp() {
     cors: { origin: process.env.FRONTEND_URL || 'http://localhost:3000' }
   });
 
-  setupSocketHandlers(io, pubClient, cachedPosters);
+  setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS);
 
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
