@@ -72,7 +72,27 @@ function broadcastState(id, state) {
 }
 
 // --- PURE GAME LOGIC ---
+
+async function eliminateTeam(id, state, teamId, reason) {
+  const teamLabel = teamId === 0 ? '🔴 Red' : '🔵 Blue';
+  io.to(id).emit('notification', `Team ${teamLabel} eliminated: ${reason}`);
+  state.players.forEach(p => {
+    if (p.teamId === teamId) p.isAlive = false;
+  });
+  await checkWinCondition(id, state);
+  if (state.status === 'playing') {
+    await nextTurn(id, state);
+  }
+}
+
 async function eliminateCurrentPlayer(id, state, reason) {
+  // In team mode, eliminate the whole team
+  if (state.gameMode === 'team') {
+    const player = state.players[state.currentTurnIndex];
+    const teamId = player ? player.teamId : 0;
+    await eliminateTeam(id, state, teamId, reason);
+    return;
+  }
   const player = state.players[state.currentTurnIndex];
   if (player) {
     player.isAlive = false;
@@ -100,25 +120,94 @@ async function nextTurn(id, state) {
 }
 
 function resetTimer(state) {
+  // Speed Round: always 15s flat
+  if (state.gameMode === 'speed') {
+    state.turnExpiresAt = Date.now() + 15000;
+    return;
+  }
   const reduction = Math.floor(state.timerMultiplier / 2) * 5;
   const timeRemaining = Math.max(10, 60 - reduction);
   state.turnExpiresAt = Date.now() + (timeRemaining * 1000);
 }
 
 async function checkWinCondition(id, state) {
+  // --- TEAM MODE ---
+  if (state.gameMode === 'team') {
+    const teamAlive = [false, false];
+    state.players.forEach(p => {
+      if (p.isAlive && p.teamId !== undefined) teamAlive[p.teamId] = true;
+    });
+    const aliveTeams = teamAlive.filter(Boolean).length;
+    if (aliveTeams <= 1) {
+      state.status = 'finished';
+      state.turnExpiresAt = null;
+      const winningTeamId = teamAlive[0] ? 0 : 1;
+      const winningPlayers = state.players.filter(p => p.teamId === winningTeamId);
+      winningPlayers.forEach(p => { p.wins = (p.wins || 0) + 1; });
+      const teamLabel = winningTeamId === 0 ? '🔴 Red' : '🔵 Blue';
+      state.winner = {
+        name: `Team ${teamLabel}`,
+        teamId: winningTeamId,
+        players: winningPlayers.map(p => p.name),
+        score: winningPlayers.reduce((sum, p) => sum + p.score, 0),
+        isTeamWin: true
+      };
+      io.to(id).emit('notification', `Team ${teamLabel} wins!`);
+      await saveLobby(id, state);
+      broadcastState(id, state);
+      setTimeout(async () => {
+        const liveState = await getLobby(id);
+        if (liveState && liveState.status === 'finished') {
+          liveState.status = 'waiting';
+          liveState.players = liveState.players.filter(p => p.connected);
+          if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) liveState.players[0].isHost = true;
+          await saveLobby(id, liveState);
+          broadcastState(id, liveState);
+        }
+      }, 7000);
+    }
+    return;
+  }
+
+  // --- SOLO MODE ---
+  if (state.gameMode === 'solo') {
+    const alive = state.players.filter(p => p.isAlive);
+    if (alive.length === 0) {
+      state.status = 'finished';
+      state.turnExpiresAt = null;
+      const solo = state.players[0];
+      state.winner = {
+        name: solo ? solo.name : 'Solo Player',
+        chainLength: state.chain.length,
+        isSolo: true,
+        score: state.chain.length
+      };
+      await saveLobby(id, state);
+      broadcastState(id, state);
+      setTimeout(async () => {
+        const liveState = await getLobby(id);
+        if (liveState && liveState.status === 'finished') {
+          liveState.status = 'waiting';
+          liveState.players = liveState.players.filter(p => p.connected);
+          await saveLobby(id, liveState);
+          broadcastState(id, liveState);
+        }
+      }, 7000);
+    }
+    return;
+  }
+
+  // --- CLASSIC / SPEED ---
   const alivePlayers = state.players.filter(p => p.isAlive);
   if (alivePlayers.length === 1 && state.players.length > 1) {
     state.status = 'finished';
     state.turnExpiresAt = null;
-    
     const winner = alivePlayers[0];
     winner.wins += 1;
     state.winner = { name: winner.name, score: winner.score, id: winner.id };
-
     io.to(id).emit('notification', `${winner.name} wins!`);
     await saveLobby(id, state);
     broadcastState(id, state);
-
     setTimeout(async () => {
       const liveState = await getLobby(id);
       if (liveState && liveState.status === 'finished') {
@@ -130,41 +219,61 @@ async function checkWinCondition(id, state) {
       }
     }, 7000);
   } else if (alivePlayers.length === 0) {
-      state.status = 'finished';
-      state.turnExpiresAt = null;
-      await saveLobby(id, state);
-      broadcastState(id, state);
-
-      setTimeout(async () => {
-        const liveState = await getLobby(id);
-        if (liveState && liveState.status === 'finished') {
-          liveState.status = 'waiting';
-          liveState.players = liveState.players.filter(p => p.connected);
-          if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) liveState.players[0].isHost = true;
-          await saveLobby(id, liveState);
-          broadcastState(id, liveState);
-        }
-      }, 7000);
+    state.status = 'finished';
+    state.turnExpiresAt = null;
+    await saveLobby(id, state);
+    broadcastState(id, state);
+    setTimeout(async () => {
+      const liveState = await getLobby(id);
+      if (liveState && liveState.status === 'finished') {
+        liveState.status = 'waiting';
+        liveState.players = liveState.players.filter(p => p.connected);
+        if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) liveState.players[0].isHost = true;
+        await saveLobby(id, liveState);
+        broadcastState(id, liveState);
+      }
+    }, 7000);
   }
 }
 
 async function startGame(id, state) {
-  if (state.players.length < 2) {
-    io.to(id).emit('error', "Need at least 2 players!");
-    return;
+  const mode = state.gameMode || 'classic';
+
+  // Solo: allow 1 player
+  if (mode === 'solo') {
+    if (state.players.length < 1) {
+      io.to(id).emit('error', 'Need at least 1 player!');
+      return;
+    }
+  } else if (mode === 'team') {
+    // Each team must have at least 1 player
+    const team0 = state.players.filter(p => p.teamId === 0);
+    const team1 = state.players.filter(p => p.teamId === 1);
+    if (team0.length === 0 || team1.length === 0) {
+      io.to(id).emit('error', 'Each team needs at least 1 player!');
+      return;
+    }
+    // Sort players: all team 0 first, then team 1 (keeps back-to-back within team)
+    state.players.sort((a, b) => (a.teamId ?? 0) - (b.teamId ?? 0));
+  } else {
+    if (state.players.length < 2) {
+      io.to(id).emit('error', 'Need at least 2 players!');
+      return;
+    }
   }
+
   state.status = 'playing';
   state.chain = [];
   state.usedMovies = [];
   state.timerMultiplier = 0;
   state.previousSharedActors = [];
-  state.players.forEach(p => {
-      p.isAlive = true;
-      p.score = 0;
-  });
-  state.currentTurnIndex = Math.floor(Math.random() * state.players.length);
+  state.players.forEach(p => { p.isAlive = true; p.score = 0; });
+  state.currentTurnIndex = 0; // Always start at index 0 (team 0 p1 in team mode, or solo player)
+  if (mode === 'classic' || mode === 'speed') {
+    state.currentTurnIndex = Math.floor(Math.random() * state.players.length);
+  }
   state.isValidating = false;
-  
+
   resetTimer(state);
   await saveLobby(id, state);
   broadcastState(id, state);
@@ -216,20 +325,45 @@ async function startApp() {
         room = {
           id, status: 'waiting', players: [], currentTurnIndex: 0, chain: [],
           usedMovies: [], hardcoreMode: false, previousSharedActors: [], 
-          allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null, isValidating: false
+          allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
+          isValidating: false, gameMode: 'classic'
         };
       }
       if (room.status !== 'waiting') return socket.emit('error', 'Lobby is already playing or full.');
 
       const isHost = room.players.length === 0;
+      // Auto-assign team: even index -> team 0 (Red), odd -> team 1 (Blue)
+      const teamId = room.players.length % 2;
       room.players.push({
-        id: socket.id, name, isHost, isAlive: true, connected: true, score: 0, wins: 0
+        id: socket.id, name, isHost, isAlive: true, connected: true, score: 0, wins: 0, teamId
       });
       socketLobbyMap.set(socket.id, id);
       await saveLobby(id, room);
       socket.join(id);
       socket.emit('joined', { lobbyId: id, playerId: socket.id });
       broadcastState(id, room);
+    });
+
+    socket.on('setGameMode', async ({ lobbyId, mode }) => {
+      const validModes = ['classic', 'team', 'solo', 'speed'];
+      if (!validModes.includes(mode)) return;
+      const room = await getLobby(lobbyId);
+      if (!room || room.status !== 'waiting') return;
+      if (!room.players.find(p => p.id === socket.id)?.isHost) return;
+      room.gameMode = mode;
+      await saveLobby(lobbyId, room);
+      broadcastState(lobbyId, room);
+    });
+
+    socket.on('assignTeam', async ({ lobbyId, teamId }) => {
+      if (teamId !== 0 && teamId !== 1) return;
+      const room = await getLobby(lobbyId);
+      if (!room || room.status !== 'waiting') return;
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player) return;
+      player.teamId = teamId;
+      await saveLobby(lobbyId, room);
+      broadcastState(lobbyId, room);
     });
 
     socket.on('requestPublicLobbies', async () => {

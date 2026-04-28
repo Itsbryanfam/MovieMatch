@@ -192,6 +192,31 @@
         <div class="players-list-container">
           <ul id="lobby-players"></ul>
         </div>
+
+        <!-- MODE SELECTOR -->
+        <div id="mode-selector" class="mode-selector">
+          <p class="mode-selector-label">Game Mode</p>
+          <div class="mode-chips">
+            <button class="mode-chip active" data-mode="classic" id="mode-chip-classic">
+              <span class="mode-chip-icon">⚔️</span>
+              <span class="mode-chip-name">Classic</span>
+            </button>
+            <button class="mode-chip" data-mode="team" id="mode-chip-team">
+              <span class="mode-chip-icon">🤝</span>
+              <span class="mode-chip-name">Team</span>
+            </button>
+            <button class="mode-chip" data-mode="solo" id="mode-chip-solo">
+              <span class="mode-chip-icon">🎯</span>
+              <span class="mode-chip-name">Solo</span>
+            </button>
+            <button class="mode-chip" data-mode="speed" id="mode-chip-speed">
+              <span class="mode-chip-icon">⚡</span>
+              <span class="mode-chip-name">Speed</span>
+            </button>
+          </div>
+          <p class="mode-description" id="mode-description">Last player standing wins. Timer shrinks each round.</p>
+        </div>
+
         <div class="lobby-settings" id="lobby-settings" style="display:none;">
           <label class="setting-toggle">
             <input type="checkbox" id="hardcore-toggle" disabled>
@@ -204,6 +229,31 @@
         </div>
 
         <button id="start-btn" class="btn-primary" style="display:none;">Start Match</button>
+      </div>
+
+      <!-- TEAM ASSIGNMENT SCREEN -->
+      <div id="team-screen" class="panel hidden lobby-panel team-screen-panel">
+        <div class="panel-header" style="position:relative;">
+          <h2>🤝 Team Battle</h2>
+          <p>Pick your side — Room: <span id="team-lobby-code" class="accent-text"></span></p>
+        </div>
+        <div class="team-columns">
+          <div class="team-column team-red">
+            <div class="team-column-header">🔴 Red</div>
+            <ul class="team-player-list" id="team-red-list"></ul>
+            <button class="btn-join-team" id="join-red-btn">◀ Join Red</button>
+          </div>
+          <div class="team-column team-blue">
+            <div class="team-column-header">🔵 Blue</div>
+            <ul class="team-player-list" id="team-blue-list"></ul>
+            <button class="btn-join-team" id="join-blue-btn">Join Blue ▶</button>
+          </div>
+        </div>
+        <p class="team-hint" id="team-hint">Teams need at least 1 player each.</p>
+        <div style="display:flex; gap:0.75rem; margin-top:0.5rem;">
+          <button id="team-back-btn" class="btn-secondary" style="flex:1;">← Back</button>
+          <button id="team-start-btn" class="btn-primary" style="flex:2; display:none;">Start Match</button>
+        </div>
       </div>
     </div>
 

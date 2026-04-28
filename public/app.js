@@ -57,6 +57,19 @@ const notificationOverlay = document.getElementById('notification-overlay');
 const notificationText = document.getElementById('notification-text');
 const logo = document.querySelector('.logo');
 
+// Mode selector elements
+const teamScreen = document.getElementById('team-screen');
+const modeChips = document.querySelectorAll('.mode-chip');
+const modeDescription = document.getElementById('mode-description');
+const teamLobbyCode = document.getElementById('team-lobby-code');
+const teamRedList = document.getElementById('team-red-list');
+const teamBlueList = document.getElementById('team-blue-list');
+const joinRedBtn = document.getElementById('join-red-btn');
+const joinBlueBtn = document.getElementById('join-blue-btn');
+const teamBackBtn = document.getElementById('team-back-btn');
+const teamStartBtn = document.getElementById('team-start-btn');
+const teamHint = document.getElementById('team-hint');
+
 // State
 let myPlayerId = null;
 let currentLobbyId = null;
@@ -223,6 +236,36 @@ window.addEventListener('DOMContentLoaded', () => {
             heroDemo.classList.add('animate-demo');
         }, 500);
     }
+});
+
+// --- MODE SELECTOR ---
+const MODE_DESCRIPTIONS = {
+    classic: 'Last player standing wins. Timer shrinks each round.',
+    team: 'Teams submit back-to-back. One failure eliminates the whole team.',
+    solo: 'One player vs the chain. Survive as long as you can!',
+    speed: '⚡ 15 seconds flat every turn. No exceptions. Chaos guaranteed.'
+};
+
+modeChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+        const mode = chip.dataset.mode;
+        socket.emit('setGameMode', { lobbyId: currentLobbyId, mode });
+    });
+});
+
+// --- TEAM SCREEN ---
+joinRedBtn?.addEventListener('click', () => {
+    socket.emit('assignTeam', { lobbyId: currentLobbyId, teamId: 0 });
+});
+joinBlueBtn?.addEventListener('click', () => {
+    socket.emit('assignTeam', { lobbyId: currentLobbyId, teamId: 1 });
+});
+teamBackBtn?.addEventListener('click', () => {
+    teamScreen.classList.add('hidden');
+    waitingRoom.classList.remove('hidden');
+});
+teamStartBtn?.addEventListener('click', () => {
+    socket.emit('startLobby', currentLobbyId);
 });
 
 hardcoreToggle.addEventListener('change', (e) => {
@@ -494,38 +537,56 @@ socket.on('notification', (msg) => {
 // --- RENDER FUNCTIONS ---
 
 function renderLobby() {
-    lobbyPlayersList.innerHTML = '';
-    
-    let amIHost = false;
+    const mode = gameState.gameMode || 'classic';
+    const amIHost = !!gameState.players.find(p => p.id === myPlayerId && p.isHost);
 
+    // Sync mode chips
+    modeChips.forEach(chip => {
+        chip.classList.toggle('active', chip.dataset.mode === mode);
+        chip.disabled = !amIHost;
+    });
+    if (modeDescription) modeDescription.innerText = MODE_DESCRIPTIONS[mode] || '';
+
+    // If Team mode, show team screen; otherwise show waiting room
+    if (mode === 'team') {
+        waitingRoom.classList.add('hidden');
+        teamScreen.classList.remove('hidden');
+        renderTeamScreen(amIHost);
+        return;
+    } else {
+        teamScreen.classList.add('hidden');
+        waitingRoom.classList.remove('hidden');
+    }
+
+    // Lobby code
+    lobbyCodeDisplay.innerText = gameState.id || '';
+
+    // Players list
+    lobbyPlayersList.innerHTML = '';
     gameState.players.forEach(p => {
         const li = document.createElement('li');
         let label = p.name;
-        if (p.id === myPlayerId) {
-            label += ' (You)';
-            if (p.isHost) amIHost = true;
-        }
-        if (p.isHost) {
-            label += ' 👑';
-        }
-        if (p.wins > 0) {
-            label += ` • ${p.wins} 🏆`;
-        }
+        if (p.id === myPlayerId) label += ' (You)';
+        if (p.isHost) label += ' 👑';
+        if (p.wins > 0) label += ` • ${p.wins} 🏆`;
         li.innerText = label;
         lobbyPlayersList.appendChild(li);
     });
-    
+
     lobbySettings.style.display = 'flex';
     hardcoreToggle.checked = gameState.hardcoreMode || false;
     hardcoreToggle.disabled = !amIHost;
     tvShowsToggle.checked = gameState.allowTvShows || false;
     tvShowsToggle.disabled = !amIHost;
-    if(publicRoomToggle) {
+    if (publicRoomToggle) {
+        // Solo can't be public
         publicRoomToggle.checked = gameState.isPublic || false;
-        publicRoomToggle.disabled = !amIHost;
+        publicRoomToggle.disabled = !amIHost || mode === 'solo';
     }
 
-    if (gameState.players.length >= 2) {
+    // Start button
+    const canStart = mode === 'solo' ? gameState.players.length >= 1 : gameState.players.length >= 2;
+    if (canStart) {
         startBtn.style.display = 'block';
         if (amIHost) {
             startBtn.innerText = 'Start Match';
@@ -547,16 +608,95 @@ function renderLobby() {
     }
 }
 
-function renderGame() {
-    // Render Players Sidebar
-    gamePlayersList.innerHTML = '';
-    gameState.players.forEach((p, index) => {
-        const li = document.createElement('li');
-        li.innerHTML = `<span>${p.name}</span> <span>${p.score}</span>`;
-        if (!p.isAlive) li.classList.add('eliminated');
-        if (index === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
-        gamePlayersList.appendChild(li);
+function renderTeamScreen(amIHost) {
+    if (!teamLobbyCode || !teamRedList || !teamBlueList) return;
+    teamLobbyCode.innerText = gameState.id || '';
+
+    const myTeamId = gameState.players.find(p => p.id === myPlayerId)?.teamId;
+
+    [teamRedList, teamBlueList].forEach((list, teamId) => {
+        list.innerHTML = '';
+        gameState.players.filter(p => p.teamId === teamId).forEach(p => {
+            const li = document.createElement('li');
+            li.className = 'team-player-chip' + (p.id === myPlayerId ? ' is-me' : '');
+            let label = p.name;
+            if (p.id === myPlayerId) label += ' (You)';
+            if (p.isHost) label += '<span class="chip-host"> 👑</span>';
+            li.innerHTML = label;
+            list.appendChild(li);
+        });
     });
+
+    // Disable join buttons for non-host's own team (don't let you click the team you're already on)
+    if (joinRedBtn) joinRedBtn.disabled = myTeamId === 0;
+    if (joinBlueBtn) joinBlueBtn.disabled = myTeamId === 1;
+
+    // Start button: host only, each team has ≥1
+    const team0 = gameState.players.filter(p => p.teamId === 0);
+    const team1 = gameState.players.filter(p => p.teamId === 1);
+    const teamsReady = team0.length >= 1 && team1.length >= 1;
+
+    if (teamHint) {
+        teamHint.innerText = teamsReady
+            ? `${team0.length} vs ${team1.length} — Ready to start!`
+            : 'Teams need at least 1 player each.';
+    }
+
+    if (teamStartBtn) {
+        if (amIHost) {
+            teamStartBtn.style.display = teamsReady ? 'block' : 'none';
+        } else {
+            teamStartBtn.style.display = 'none';
+            if (teamHint && teamsReady) teamHint.innerText += ' Waiting for host...';
+        }
+    }
+}
+
+
+function renderGame() {
+    const mode = gameState.gameMode || 'classic';
+
+    // Speed mode: warm timer always
+    if (mode === 'speed') {
+        gameScreen.classList.add('speed-mode');
+    } else {
+        gameScreen.classList.remove('speed-mode');
+    }
+
+    // --- SIDEBAR ---
+    gamePlayersList.innerHTML = '';
+
+    if (mode === 'team') {
+        // Two labeled sections: Red | Blue
+        [0, 1].forEach(teamId => {
+            const teamLabel = teamId === 0 ? '🔴 Red' : '🔵 Blue';
+            const header = document.createElement('li');
+            header.style.cssText = 'font-size:0.65rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:' + (teamId === 0 ? '#f87171' : '#60a5fa') + ';padding:0.5rem 0 0.2rem;border-top:1px solid var(--border-subtle);margin-top:0.35rem;';
+            if (teamId === 0) header.style.borderTop = 'none';
+            header.innerText = teamLabel;
+            gamePlayersList.appendChild(header);
+
+            gameState.players.filter(p => p.teamId === teamId).forEach((p, i) => {
+                const li = document.createElement('li');
+                const idx = gameState.players.indexOf(p);
+                li.innerHTML = `<span>${p.name}</span> <span>${p.score}</span>`;
+                if (!p.isAlive) li.classList.add('eliminated');
+                if (idx === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
+                gamePlayersList.appendChild(li);
+            });
+        });
+    } else if (mode === 'solo') {
+        // Solo: just show chain badge, hide sidebar list
+        gamePlayersList.innerHTML = '<li style="color:var(--text-muted);font-size:0.8rem;">Solo Run</li>';
+    } else {
+        gameState.players.forEach((p, index) => {
+            const li = document.createElement('li');
+            li.innerHTML = `<span>${p.name}</span> <span>${p.score}</span>`;
+            if (!p.isAlive) li.classList.add('eliminated');
+            if (index === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
+            gamePlayersList.appendChild(li);
+        });
+    }
 
     // Render Chain
     chainDisplay.innerHTML = '';
@@ -603,13 +743,24 @@ function renderGame() {
 
     // Update Input Area
     const activePlayer = gameState.players[gameState.currentTurnIndex];
+
+    // Solo: show chain badge in turn indicator
+    if (mode === 'solo') {
+        turnIndicator.innerHTML = `🔗 Chain: <span class="chain-badge">${gameState.chain.length}</span>`;
+    }
+
     if (gameState.status === 'playing') {
         if (activePlayer && activePlayer.id === myPlayerId) {
             inputArea.classList.remove('disabled-area');
             movieInput.disabled = false;
             submitBtn.disabled = false;
             movieInput.focus();
-            turnIndicator.innerText = "It's your turn!";
+            if (mode === 'team') {
+                const teamLabel = (activePlayer.teamId === 0 ? '🔴 Red' : '🔵 Blue');
+                turnIndicator.innerText = `${teamLabel} — It's your turn!`;
+            } else if (mode !== 'solo') {
+                turnIndicator.innerText = "It's your turn!";
+            }
             if (gameState.chain.length > 0) {
                 hintText.innerText = "Name a movie sharing an actor with the previous one!";
             } else {
@@ -619,7 +770,12 @@ function renderGame() {
             inputArea.classList.add('disabled-area');
             movieInput.disabled = true;
             submitBtn.disabled = true;
-            turnIndicator.innerText = `Waiting for ${activePlayer?.name}...`;
+            if (mode === 'team') {
+                const teamLabel = activePlayer?.teamId === 0 ? '🔴 Red' : '🔵 Blue';
+                turnIndicator.innerText = `${teamLabel} — Waiting for ${activePlayer?.name}...`;
+            } else {
+                turnIndicator.innerText = `Waiting for ${activePlayer?.name}...`;
+            }
             hintText.innerText = "Their time is ticking...";
         }
     } else {
@@ -742,12 +898,23 @@ function showGameOverBanner(winner) {
     const banner = document.createElement('div');
     banner.className = 'game-over-banner';
 
-    const winnerLine = winner
-        ? `🏆 ${winner.name} wins!`
-        : '🎬 Game Over!';
-    const subLine = winner
-        ? `${gameState.chain.length} connection${gameState.chain.length !== 1 ? 's' : ''} • ${winner.score} pts`
-        : `${gameState.chain.length} connections total`;
+    const mode = gameState.gameMode || 'classic';
+    let winnerLine, subLine;
+
+    if (winner?.isSolo) {
+        winnerLine = `🎬 Solo Complete!`;
+        subLine = `🔗 Chain Length: ${winner.chainLength} link${winner.chainLength !== 1 ? 's' : ''}`;
+    } else if (winner?.isTeamWin) {
+        winnerLine = `🏆 ${winner.name} wins!`;
+        const memberNames = (winner.players || []).join(' & ');
+        subLine = `${memberNames} • ${winner.score} pts • ${gameState.chain.length} connections`;
+    } else if (winner) {
+        winnerLine = `🏆 ${winner.name} wins!`;
+        subLine = `${gameState.chain.length} connection${gameState.chain.length !== 1 ? 's' : ''} • ${winner.score} pts`;
+    } else {
+        winnerLine = '🎬 Game Over!';
+        subLine = `${gameState.chain.length} connections total`;
+    }
 
     const isHost = gameState.players.find(p => p.id === myPlayerId)?.isHost;
 

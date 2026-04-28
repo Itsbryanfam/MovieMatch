@@ -305,6 +305,220 @@ body {
   box-shadow: 0 4px 24px rgba(0,0,0,0.4);
 }
 
+/* =============================================
+   MODE SELECTOR
+   ============================================= */
+.mode-selector {
+  margin: 1.25rem 0 1rem;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 1.25rem;
+}
+
+.mode-selector-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin-bottom: 0.6rem;
+}
+
+.mode-chips {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.mode-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.6rem 0.25rem;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+  color: var(--text-muted);
+}
+
+.mode-chip:hover:not(:disabled) {
+  border-color: rgba(255,255,255,0.2);
+  color: var(--text-main);
+  background: var(--bg-elevated);
+}
+
+.mode-chip.active {
+  border-color: var(--accent-primary);
+  background: var(--accent-glow);
+  color: var(--accent-primary);
+  box-shadow: 0 0 12px rgba(129, 140, 248, 0.2);
+}
+
+.mode-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mode-chip-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.mode-chip-name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.mode-description {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  min-height: 1.2em;
+}
+
+/* =============================================
+   TEAM SCREEN
+   ============================================= */
+.team-screen-panel {
+  max-width: 500px;
+}
+
+.team-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.team-column {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 140px;
+}
+
+.team-column.team-red {
+  border-color: rgba(248, 113, 113, 0.3);
+}
+.team-column.team-red .team-column-header {
+  color: #f87171;
+}
+
+.team-column.team-blue {
+  border-color: rgba(96, 165, 250, 0.3);
+}
+.team-column.team-blue .team-column-header {
+  color: #60a5fa;
+}
+
+.team-column-header {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.25rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.team-player-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.team-player-chip {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.team-player-chip.is-me {
+  border-color: rgba(129, 140, 248, 0.4);
+  color: var(--accent-primary);
+}
+
+.team-player-chip .chip-host {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.btn-join-team {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: auto;
+}
+
+.team-column.team-red .btn-join-team:hover {
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+}
+
+.team-column.team-blue .btn-join-team:hover {
+  border-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
+}
+
+.btn-join-team:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.team-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+/* Chain badge for solo mode */
+.chain-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+/* Speed mode: timer always warm */
+.speed-mode #timer-bar {
+  background: var(--status-warning) !important;
+}
+
+
 .panel-header {
   margin-bottom: 2rem;
 }
