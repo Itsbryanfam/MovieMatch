@@ -290,6 +290,7 @@ function renderChainItems(gameState, myPlayerId) {
     // Remove stale game-over banner or empty hint if the game just (re-)started
     chainDisplay.querySelector('.game-over-banner')?.remove();
     chainDisplay.querySelector('.empty-hint')?.remove();
+    chainDisplay.querySelector('.empty-board-hint')?.remove();
   }
 
   // Track which actors were in the previous node so we can bold shared ones
