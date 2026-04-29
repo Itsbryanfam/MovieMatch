@@ -74,16 +74,22 @@ async function autocompleteSearch(ctx, socket, { query, lobbyId }) {
 async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
   const { io, pubClient, TMDB_HEADERS, logger } = ctx;
 
+  // Pre-lock quick-reject (avoids contending on the lock when clearly invalid)
   let room = await redisUtils.getLobby(pubClient, lobbyId);
   if (!room || room.status !== 'playing' || room.isValidating || (!movie && !tmdbId)) return;
-
-  const player = room.players.find(p => p.id === socket.id);
-  if (!player || !player.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
+  const preCheck = room.players.find(p => p.id === socket.id);
+  if (!preCheck || !preCheck.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
 
   const lockAcquired = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
   if (!lockAcquired) return;
 
   try {
+    // Re-read after acquiring lock — disconnects may have mutated state during acquisition
+    room = await redisUtils.getLobby(pubClient, lobbyId);
+    if (!room || room.status !== 'playing' || room.isValidating) return;
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player || !player.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
+
     room.isValidating = true;
     await redisUtils.saveLobby(pubClient, lobbyId, room);
 
@@ -209,7 +215,6 @@ async function enrichWithCredits(candidates, pubClient, headers, logger) {
 }
 
 function validateChainConnection(room, candidateMovies) {
-  let matchedActors = [];
   let failReason = "Invalid movie connection.";
   const lastNode = room.chain.length > 0 ? room.chain[room.chain.length - 1] : null;
   const lastNodeCast = lastNode ? lastNode.movie.cast : [];
@@ -226,28 +231,16 @@ function validateChainConnection(room, candidateMovies) {
     // First movie in chain — always valid
     if (!lastNode) return { match: candidate, matchedActors: [] };
 
-    const sharedActors = candidate.cast.filter(actor =>
-      lastNodeCast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase())
+    const result = gameLogic.validateConnection(
+      lastNodeCast, candidate.cast, room.hardcoreMode, room.previousSharedActors, []
     );
 
-    if (sharedActors.length > 0) {
-      // Hardcore mode: can't reuse the same connecting actor as the previous turn
-      if (room.hardcoreMode && room.previousSharedActors.length > 0) {
-        const newSharedActors = sharedActors.filter(actor =>
-          !room.previousSharedActors.some(pActor => pActor.toLowerCase() === actor.toLowerCase())
-        );
-        if (newSharedActors.length === 0) {
-          failReason = "Hardcore Mode: You cannot reuse the exact same connecting actor from the previous turn!";
-          continue;
-        }
-        room.previousSharedActors = newSharedActors;
-        matchedActors = newSharedActors;
-      } else {
-        room.previousSharedActors = sharedActors;
-        matchedActors = sharedActors;
-      }
-      return { match: candidate, matchedActors };
+    if (result.valid) {
+      room.previousSharedActors = result.matchedActors;
+      return { match: candidate, matchedActors: result.matchedActors };
     }
+
+    if (i === 0) failReason = result.reason;
   }
 
   return { match: null, reason: failReason };
@@ -303,20 +296,10 @@ async function forceNextTurn(ctx, socket, lobbyId) {
   if (!room.players.find(p => p.id === socket.id)) return;
   if (!room.turnExpiresAt) return;
 
-  const now = Date.now();
-  if (now >= room.turnExpiresAt) {
+  // Only act if the timer has genuinely expired; the server-side hard timeout
+  // in nextTurn already handles elimination when the timer runs out naturally.
+  if (Date.now() >= room.turnExpiresAt) {
     await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Time's up!");
-  } else {
-    const delay = (room.turnExpiresAt - now) + 500;
-    if (delay > 0 && delay < 65000) {
-      setTimeout(async () => {
-        const freshRoom = await redisUtils.getLobby(pubClient, lobbyId);
-        if (!freshRoom || freshRoom.status !== 'playing' || freshRoom.isValidating) return;
-        if (freshRoom.turnExpiresAt === room.turnExpiresAt && Date.now() >= freshRoom.turnExpiresAt) {
-          await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, freshRoom, "Time's up!");
-        }
-      }, delay);
-    }
   }
 }
 
