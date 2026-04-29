@@ -395,10 +395,42 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
 let notificationTimeout = null;
 export function showNotification(msg) {
   notificationText.innerText = msg;
-  notificationOverlay.classList.remove('hidden');
-  
+  notificationOverlay.classList.remove('hidden', 'is-exiting');
+
   if (notificationTimeout) clearTimeout(notificationTimeout);
-  notificationTimeout = setTimeout(() => notificationOverlay.classList.add('hidden'), 3000);
+  notificationTimeout = setTimeout(() => {
+    notificationOverlay.classList.add('is-exiting');
+    setTimeout(() => {
+      notificationOverlay.classList.add('hidden');
+      notificationOverlay.classList.remove('is-exiting', 'notification--elimination');
+    }, 300);
+  }, 3000);
+}
+
+export function showEliminationFlash() {
+  const el = document.createElement('div');
+  el.className = 'elimination-flash';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1500);
+}
+
+export function showSelfEliminationScreen() {
+  const el = document.createElement('div');
+  el.className = 'self-elim-screen';
+  el.innerHTML = `
+    <div class="self-elim-icon">💀</div>
+    <div class="self-elim-title">You've Been Eliminated</div>
+    <div class="self-elim-sub">Spectating from here on out</div>
+  `;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+export function showWinFlash() {
+  const el = document.createElement('div');
+  el.className = 'win-flash';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2300);
 }
 
 export function renderAutocompleteResults(results) {
