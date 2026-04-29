@@ -67,6 +67,10 @@ async function nextTurn(io, pubClient, id, state) {
     iterations++;
   } while (!state.players[state.currentTurnIndex].isAlive && iterations < state.players.length);
 
+  // Guard: all players ended up dead — checkWinCondition should have caught this,
+  // but if not, don't arm a new timer on a dead player.
+  if (!state.players[state.currentTurnIndex].isAlive) return;
+
   resetTimer(state);
 
   // === SERVER-SIDE HARD TIMEOUT ===
@@ -154,11 +158,13 @@ async function checkWinCondition(io, pubClient, id, state) {
 
       const winningTeamId = teamAlive[0] ? 0 : 1;
       const winningPlayers = state.players.filter(p => p.teamId === winningTeamId);
-      winningPlayers.forEach(p => { 
-        p.wins = (p.wins || 0) + 1; 
-        redisUtils.incrementPlayerWins(pubClient, p.stableId || p.id).catch(e => logger.error(e, 'Failed to increment team player wins'));
-        redisUtils.recordWin(pubClient, p.stableId || p.id, p.name).catch(e => logger.error(e, 'Failed to record team win'));
-      });
+      await Promise.all(winningPlayers.map(async p => {
+        p.wins = (p.wins || 0) + 1;
+        await Promise.all([
+          redisUtils.incrementPlayerWins(pubClient, p.stableId || p.id),
+          redisUtils.recordWin(pubClient, p.stableId || p.id, p.name),
+        ]);
+      }));
       const teamLabel = winningTeamId === 0 ? '🔴 Red' : '🔵 Blue';
       state.winner = {
         name: `Team ${teamLabel}`,
@@ -187,6 +193,13 @@ async function checkWinCondition(io, pubClient, id, state) {
       state.turnExpiresAt = null;
 
       const solo = state.players[0];
+      if (solo) {
+        solo.wins = (solo.wins || 0) + 1;
+        await Promise.all([
+          redisUtils.incrementPlayerWins(pubClient, solo.stableId || solo.id),
+          redisUtils.recordWin(pubClient, solo.stableId || solo.id, solo.name),
+        ]);
+      }
       state.winner = {
         name: solo ? solo.name : 'Solo Player',
         chainLength: state.chain.length,
@@ -294,7 +307,7 @@ function validateConnection(lastNodeCast, candidateCast, hardcoreMode, previousS
       !previousSharedActors.some(pActor => pActor.toLowerCase() === actor.toLowerCase())
     );
     if (newSharedActors.length === 0) {
-      return { valid: false, reason: "Hardcore Mode: You cannot reuse the exact same connecting actor!" };
+      return { valid: false, reason: "Hardcore Mode: You cannot reuse the exact same connecting actor from the previous turn!" };
     }
     return { valid: true, matchedActors: newSharedActors };
   }

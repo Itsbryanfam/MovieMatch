@@ -9,8 +9,6 @@ const mockRedis = {
   set: jest.fn().mockResolvedValue('OK')
 };
 
-gameLogic.getOrFetchCredits = (redis, id, type, headers) => redisUtils.getOrFetchCredits(redis, id, type, headers);
-
 describe('MovieMatch Validation Engine', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -54,19 +52,17 @@ describe('MovieMatch Validation Engine', () => {
     expect(usedMovies.includes('movie:999')).toBe(false);
   });
 
-  // TV endpoint test using real function
+  // TV endpoint test — calls redisUtils.getOrFetchCredits directly
   test('TV shows correctly call aggregate_credits endpoint', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ cast: [{ name: 'Actor' }] })
     });
 
-    await gameLogic.getOrFetchCredits(mockRedis, 123, 'tv', {});
+    await redisUtils.getOrFetchCredits(mockRedis, 123, 'tv', {});
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/tv/123/aggregate_credits'),
       expect.any(Object)
     );
   });
-
-  // More real-world tests can be added here later
 });

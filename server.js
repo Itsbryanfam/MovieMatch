@@ -44,8 +44,10 @@ app.use(express.static('public'));
 app.post('/api/admin/flush-credits', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
   if (secret !== process.env.ADMIN_SECRET) {
+    logger.warn({ ip: req.ip, path: req.path }, 'Admin auth failed');
     return res.status(403).json({ error: 'Forbidden' });
   }
+  logger.info({ ip: req.ip, action: 'flush-credits' }, 'Admin action');
   try {
     let cursor = '0';
     let deleted = 0;
@@ -68,8 +70,10 @@ app.post('/api/admin/flush-credits', async (req, res) => {
 app.get('/api/admin/redis-stats', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
   if (secret !== process.env.ADMIN_SECRET) {
+    logger.warn({ ip: req.ip, path: req.path }, 'Admin auth failed');
     return res.status(403).json({ error: 'Forbidden' });
   }
+  logger.info({ ip: req.ip, action: 'redis-stats' }, 'Admin action');
   try {
     const info = await pubClient.info('memory');
     const dbSize = await pubClient.dbSize();
@@ -123,10 +127,8 @@ async function fetchBackgroundPosters() {
     const posters = combined.filter(m => m.poster_path).map(m => `https://image.tmdb.org/t/p/w200${m.poster_path}`);
     posters.sort(() => 0.5 - Math.random());
     
-    // Cache posters globally so new connections and 'requestPosters' can access them
-    global.cachedPosters = posters;
+    posterCache.setPosters(posters);
 
-    // Send to all currently connected clients
     if (io) io.emit('posters', posters);
   } catch (err) {
     logger.error(err, 'Failed to fetch background posters');
@@ -135,6 +137,7 @@ async function fetchBackgroundPosters() {
 
 const { setupSocketHandlers } = require('./server/socketHandlers');
 const redisUtils = require('./server/redisUtils');
+const posterCache = require('./server/posterCache');
 
 async function startApp() {
   try {

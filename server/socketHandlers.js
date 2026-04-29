@@ -17,6 +17,7 @@
 const gameLogic = require('./gameLogic');
 const lobbySystem = require('./systems/lobbySystem');
 const matchSystem = require('./systems/matchSystem');
+const posterCache = require('./posterCache');
 const pino = require('pino');
 const logger = pino();
 
@@ -57,9 +58,8 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
   io.on('connection', (socket) => {
 
     // Send cached posters on connect
-    if (global.cachedPosters && global.cachedPosters.length > 0) {
-      socket.emit('posters', global.cachedPosters);
-    }
+    const cached = posterCache.getPosters();
+    if (cached.length > 0) socket.emit('posters', cached);
 
     // Global error boundary — wraps every handler registered below
     const _origOn = socket.on.bind(socket);
@@ -78,9 +78,8 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // -----------------------------------------------------------------------
 
     socket.on('requestPosters', () => {
-      if (global.cachedPosters && global.cachedPosters.length > 0) {
-        socket.emit('posters', global.cachedPosters);
-      }
+      const cached = posterCache.getPosters();
+      if (cached.length > 0) socket.emit('posters', cached);
     });
 
     // -----------------------------------------------------------------------
