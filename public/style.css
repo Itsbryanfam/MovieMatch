@@ -43,8 +43,8 @@ body {
   width: 120vw; height: 130vh;
   z-index: 0;
   overflow: hidden;
-  opacity: 0.04; /* Darker, more ambient */
-  filter: grayscale(100%) blur(5px); /* Forces visual depth */
+  opacity: 0.25; /* Restored cinematic visibility */
+  /* Removed grayscale and background blur to allow UI to act as the glass */
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -54,6 +54,7 @@ body {
   transition: transform 0.2s ease-out; /* Smooths JS parallax jitter */
   will-change: transform;
 }
+
 
 .poster-row {
   display: flex;
@@ -806,8 +807,10 @@ input:disabled {
 
 .feed-container {
   flex: 1;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  background: rgba(15, 23, 42, 0.65); /* Translucent dark wash */
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px); /* Safari support */
+  border: 1px solid rgba(255, 255, 255, 0.1); /* Glass edge highlight */
   border-radius: 12px;
   padding: 1.5rem 1.5rem 1.5rem 3.5rem; /* Expanded left padding for timeline */
   overflow-y: auto;
@@ -816,11 +819,14 @@ input:disabled {
   gap: 1.25rem; /* Increased gap for visual breathing room */
   scroll-behavior: smooth;
   position: relative;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); /* Deep drop shadow for floating effect */
 }
 
 .chain-item {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: rgba(30, 41, 59, 0.7); /* Translucent elevation */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   padding: 1rem 1.25rem;
   border-radius: 8px;
   animation: dropInNode 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -830,6 +836,7 @@ input:disabled {
   align-items: flex-start;
   position: relative; /* Anchor for timeline elements */
 }
+
 
 /* The Connecting Line */
 .chain-item::before {
