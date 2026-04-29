@@ -1,7 +1,7 @@
 // ====================== APP.JS ======================
 // Thin entry point — imports everything and wires up the app
 import { 
-  initUIElements, closeMobileAc, openShareModal, showNotification,
+  initUIElements, closeMobileAc, openShareModal, showNotification, showToast,
   playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
   tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
@@ -14,7 +14,7 @@ import {
   copyCardBtn, shareCanvas, shareModal
 } from './ui.js';
 import { initSocket, getSocket, getCurrentLobbyId, getGameState, leaveLobby } from './socketClient.js';
-import { prepareAudio, getStableId } from './utils.js';
+import { prepareAudio, getStableId, unlockAudioGlobally } from './utils.js';
 
 // Initialize everything when the page loads
 document.addEventListener('DOMContentLoaded', () => {
@@ -23,6 +23,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // 2. Start socket connection
   const socket = initSocket();
+
+  // Ensure audio works even if user auto-joins via URL params
+  unlockAudioGlobally();
 
   // Enable reconnection logging
   console.log('🔌 Reconnection support enabled');
@@ -68,14 +71,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   showPrivateBtn?.addEventListener('click', () => {
       if (!checkName()) return;
-      prepareAudio();
       joinPanel.classList.add('hidden');
       privatePanel.classList.remove('hidden');
   });
 
   showPublicBtn?.addEventListener('click', () => {
       if (!checkName()) return;
-      prepareAudio();
       joinPanel.classList.add('hidden');
       publicPanel.classList.remove('hidden');
       socket.emit('requestPublicLobbies');
@@ -97,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
       socket.emit('requestPublicLobbies');
   });
 
-  joinBtn?.addEventListener('click', () => {
+  function handleJoinRoomSubmit() {
       const name = playerNameInput ? playerNameInput.value.trim() : '';
       if (!name) {
           showNotification('Enter a name first!');
@@ -107,14 +108,30 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
       }
       localStorage.setItem('mm_playerName', name);
-      socket.emit('joinLobby', { 
+      getSocket().emit('joinLobby', { 
           name, 
-          lobbyId: lobbyIdInput.value.trim(),
+          lobbyId: lobbyIdInput ? lobbyIdInput.value.trim() : '',
           stableId: getStableId()
       });
 
-      // Hide private room modal immediately
       if (privatePanel) privatePanel.classList.add('hidden');
+  }
+
+  joinBtn?.addEventListener('click', handleJoinRoomSubmit);
+  
+  lobbyIdInput?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') handleJoinRoomSubmit();
+  });
+  
+  playerNameInput?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+          // If private panel is visible, submit. Otherwise, just save name.
+          if (privatePanel && !privatePanel.classList.contains('hidden')) {
+              handleJoinRoomSubmit();
+          } else if (lobbyIdInput && !privatePanel.classList.contains('hidden') === false) {
+              // Optionally auto-transition to next screen here if desired in the future
+          }
+      }
   });
 
   startBtn?.addEventListener('click', () => {
@@ -124,7 +141,6 @@ document.addEventListener('DOMContentLoaded', () => {
   heroPlayBtn?.addEventListener('click', () => {
       heroScreen.classList.remove('active');
       lobbyScreen.classList.add('active');
-      prepareAudio();
   });
 
   heroCodeBtn?.addEventListener('click', () => showJoinPrompt());
@@ -165,7 +181,6 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('mm_playerName', name);
       if (playerNameInput) playerNameInput.value = name;
       overlay.remove();
-      prepareAudio();
       heroScreen.classList.remove('active');
       lobbyScreen.classList.add('active');
       socket.emit('joinLobby', { name, lobbyId: roomCode, stableId: getStableId() });
@@ -346,35 +361,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let debounceTimeout = null;
 
-  let currentSelectedMovie = null;
-
   function submitMovie() {
     const movie = movieInput ? movieInput.value.trim() : '';
     if (!movie) return;
 
-    console.log('🎬 Manual submitMovie called with:', { movie, currentSelectedMovie });
-
     if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
     closeMobileAc();
 
-    const socket = getSocket();
-    const lobbyId = getCurrentLobbyId();
+    getSocket().emit('submitMovie', { lobbyId: getCurrentLobbyId(), movie });
 
-    if (currentSelectedMovie && currentSelectedMovie.title.toLowerCase() === movie.toLowerCase()) {
-      console.log('🎬 Using selected movie ID:', currentSelectedMovie);
-      socket.emit('submitMovie', {
-        lobbyId,
-        movie,
-        tmdbId: currentSelectedMovie.id,
-        mediaType: currentSelectedMovie.mediaType
-      });
-    } else {
-      console.log('🎬 No selected movie ID - sending title only');
-      socket.emit('submitMovie', { lobbyId, movie });
+    if (movieInput) {
+      movieInput.value = '';
+      movieInput.disabled = true;
     }
-
-    currentSelectedMovie = null;
-    if (movieInput) movieInput.value = '';
+    if (submitBtn) submitBtn.disabled = true;
+    if (hintText) hintText.innerText = 'Validating connection...';
   }
 
   submitBtn?.addEventListener('click', submitMovie);
@@ -395,14 +396,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 400);
   });
 
-  chatInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-          const msg = chatInput.value.trim();
-          if (msg) {
-              socket.emit('sendChat', { lobbyId: getCurrentLobbyId(), msg });
-              chatInput.value = '';
-          }
+  const chatSendBtn = document.getElementById('chat-send-btn');
+  
+  function handleChatSend() {
+      const msg = chatInput ? chatInput.value.trim() : '';
+      if (msg) {
+          getSocket().emit('sendChat', { lobbyId: getCurrentLobbyId(), msg });
+          if (chatInput) chatInput.value = '';
       }
+  }
+  
+  chatSendBtn?.addEventListener('click', handleChatSend);
+  chatInput?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') handleChatSend();
   });
 
   const reactionBtns = document.querySelectorAll('.reaction-btn');
@@ -418,10 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     howToPlayBtn?.addEventListener('click', () => howToPlayModal?.classList.remove('hidden'));
   creditsBtn?.addEventListener('click', () => creditsModal?.classList.remove('hidden'));
-  closeHowToPlay?.addEventListener('click', () => howToPlayModal?.classList.add('hidden'));
-  closeCredits?.addEventListener('click', () => creditsModal?.classList.add('hidden'));
-  howToPlayModal?.addEventListener('click', (e) => { if (e.target === howToPlayModal) howToPlayModal.classList.add('hidden'); });
-  creditsModal?.addEventListener('click', (e) => { if (e.target === creditsModal) creditsModal.classList.add('hidden'); });
+
 
   async function loadLeaderboard() {
     leaderboardModal.classList.remove('hidden');
@@ -471,14 +474,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   leaderboardBtn?.addEventListener('click', loadLeaderboard);
-  closeLeaderboard?.addEventListener('click', () => leaderboardModal?.classList.add('hidden'));
-  leaderboardModal?.addEventListener('click', (e) => { if (e.target === leaderboardModal) leaderboardModal.classList.add('hidden'); });
+  // Unified Modal Management (Handles all Modals)
+  document.body.addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal-overlay')) {
+          e.target.classList.add('hidden');
+      }
+      if (e.target.closest('.modal-close')) {
+          const overlay = e.target.closest('.modal-overlay');
+          if (overlay) overlay.classList.add('hidden');
+      }
+  });
 
-    document.addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-          howToPlayModal?.classList.add('hidden');
-          creditsModal?.classList.add('hidden');
-          leaderboardModal?.classList.add('hidden');
+          document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
       }
   });
 
@@ -504,6 +513,8 @@ document.addEventListener('DOMContentLoaded', () => {
               if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
               if (playersPanel) playersPanel.classList.add('mobile-visible');
           } else if (tab === 'chat') {
+              const badge = document.getElementById('chat-badge');
+              if (badge) badge.style.display = 'none';
               if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
               if (chatPanel) chatPanel.classList.add('mobile-visible');
           }
@@ -521,14 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
   });
 
-  function showToast(msg) {
-      const toast = document.querySelector('.copy-toast') || document.createElement('div');
-      toast.className = 'copy-toast';
-      toast.textContent = msg;
-      if (!toast.parentElement) document.body.appendChild(toast);
-      toast.classList.add('visible');
-      setTimeout(() => toast.classList.remove('visible'), 2500);
-  }
+
 
   downloadCardBtn?.addEventListener('click', () => {
       const link = document.createElement('a');

@@ -51,3 +51,13 @@ export function getStableId() {
   }
   return id;
 }
+
+export function unlockAudioGlobally() {
+  const unlock = () => {
+    prepareAudio();
+    document.body.removeEventListener('click', unlock);
+    document.body.removeEventListener('touchstart', unlock);
+  };
+  document.body.addEventListener('click', unlock, { once: true });
+  document.body.addEventListener('touchstart', unlock, { once: true });
+}

@@ -636,6 +636,24 @@ input:disabled {
   font-weight: 500;
 }
 
+/* GAME BOARD TEAM HEADERS */
+.game-team-header {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.5rem 0 0.2rem;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 0.35rem;
+}
+
+.game-team-header.first-team {
+  border-top: none;
+}
+
+.game-team-header.team-red-text { color: #f87171; }
+.game-team-header.team-blue-text { color: #60a5fa; }
+
 .accent-text {
   color: var(--accent-primary);
 }

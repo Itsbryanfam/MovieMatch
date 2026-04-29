@@ -212,8 +212,25 @@ export function initSocket() {
     div.className = 'chat-msg';
     const badge = fromSpectator ? ' 👁' : '';
     div.innerHTML = `<span class="chat-author">${escapeHtml(playerName)}${badge}:</span>${escapeHtml(msg)}`;
+    // Check if user is scrolled near the bottom (within 50px) BEFORE appending
+    const isNearBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 50;
+    
     chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    // Only auto-scroll if they were already at the bottom
+    if (isNearBottom) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Trigger mobile unread badge
+    const chatPanel = document.querySelector('[data-panel="chat"]');
+    const isMobileVisible = chatPanel && chatPanel.classList.contains('mobile-visible');
+    const isDesktop = window.innerWidth > 767;
+    
+    if (!isDesktop && !isMobileVisible) {
+        const badgeEl = document.getElementById('chat-badge');
+        if (badgeEl) badgeEl.style.display = 'block';
+    }
   });
 
   socket.on('receiveReaction', ({ emoji }) => {
@@ -230,6 +247,14 @@ export function initSocket() {
   });
 
   // === RECONNECTION HANDLING ===
+  socket.on('disconnect', (reason) => {
+    console.warn('⚠️ Socket disconnected:', reason);
+    const banner = document.getElementById('offline-banner');
+    if (banner && reason !== 'io client disconnect') {
+        banner.classList.remove('hidden');
+    }
+  });
+
   socket.on('reconnect', () => {
     console.log('🔄 Reconnected to server');
     const lobbyId = getCurrentLobbyId();
@@ -237,11 +262,17 @@ export function initSocket() {
     if (lobbyId && playerId) {
       console.log(`🔄 Attempting to rejoin lobby ${lobbyId}`);
       socket.emit('rejoinLobby', { lobbyId, playerId });
+    } else {
+      const banner = document.getElementById('offline-banner');
+      if (banner) banner.classList.add('hidden');
     }
   });
 
   socket.on('rejoinSuccess', (data) => {
     console.log('✅ Rejoined lobby successfully', data);
+    const banner = document.getElementById('offline-banner');
+    if (banner) banner.classList.add('hidden');
+    
     currentLobbyId = data.lobbyId;
     myPlayerId = data.playerId;
     gameState = data.state;

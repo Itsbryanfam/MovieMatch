@@ -135,8 +135,9 @@ export function renderLobby(gameState, myPlayerId) {
   }
 
   const canStart = mode === 'solo' ? gameState.players.length >= 1 : gameState.players.length >= 2;
+  startBtn.style.display = 'block'; // Always keep the button in the layout
+  
   if (canStart) {
-    startBtn.style.display = 'block';
     if (amIHost) {
       startBtn.innerText = 'Start Match';
       startBtn.disabled = false;
@@ -145,7 +146,8 @@ export function renderLobby(gameState, myPlayerId) {
       startBtn.disabled = true;
     }
   } else {
-    startBtn.style.display = 'none';
+    startBtn.innerText = 'Waiting for players...';
+    startBtn.disabled = true;
   }
 }
 
@@ -199,8 +201,9 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     [0, 1].forEach(teamId => {
       const teamLabel = teamId === 0 ? '🔴 Red' : '🔵 Blue';
       const header = document.createElement('li');
-      header.style.cssText = 'font-size:0.65rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:' + (teamId === 0 ? '#f87171' : '#60a5fa') + ';padding:0.5rem 0 0.2rem;border-top:1px solid var(--border-subtle);margin-top:0.35rem;';
-      if (teamId === 0) header.style.borderTop = 'none';
+      header.className = 'game-team-header';
+      if (teamId === 0) header.classList.add('team-red-text', 'first-team');
+      if (teamId === 1) header.classList.add('team-blue-text');
       header.innerText = teamLabel;
       gamePlayersList.appendChild(header);
       gameState.players.filter(p => p.teamId === teamId).forEach((p) => {
@@ -231,22 +234,38 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     gamePlayersList.appendChild(specLi);
   }
 
+  // Smooth scroll active player into view in the sidebar
+  setTimeout(() => {
+      const activeLi = gamePlayersList.querySelector('.active-turn');
+      if (activeLi) {
+          activeLi.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+  }, 50);
+
   // EFFICIENT CHAIN RENDERING
-  const currentDisplayedCount = chainDisplay.children.length;
+  const currentChainItems = chainDisplay.querySelectorAll('.chain-item');
+  const currentDisplayedCount = currentChainItems.length;
 
   // Clear if game restarted or changed
-  if (gameState.chain.length === 0 || gameState.chain.length < currentDisplayedCount) {
+  // Render empty state or clear out stale data
+  if (gameState.chain.length === 0 && gameState.status === 'playing') {
+    chainDisplay.innerHTML = '<div class="empty-hint" style="margin:auto; display:flex; flex-direction:column; align-items:center; gap:0.5rem; color:var(--text-muted);"><span style="font-size:2rem;">🎬</span><span style="font-size:1.1rem; font-weight:600;">The board is empty</span><span style="font-size:0.9rem; opacity:0.8;">Waiting for the first move...</span></div>';
+  } else if (gameState.chain.length === 0 || gameState.chain.length < currentDisplayedCount) {
     chainDisplay.innerHTML = '';
+  } else if (gameState.status === 'playing') {
+    // Prevent banner from polluting the view if a game resets suddenly
+    const existingBanner = chainDisplay.querySelector('.game-over-banner');
+    if (existingBanner) existingBanner.remove();
   }
 
   // Get previous actors for highlighting
   let previousActors = [];
-  if (chainDisplay.children.length > 0 && gameState.chain[chainDisplay.children.length - 1]) {
-    previousActors = gameState.chain[chainDisplay.children.length - 1].movie.cast || [];
+  if (currentDisplayedCount > 0 && gameState.chain[currentDisplayedCount - 1]) {
+    previousActors = gameState.chain[currentDisplayedCount - 1].movie.cast || [];
   }
 
   // Only render NEW items
-  for (let index = chainDisplay.children.length; index < gameState.chain.length; index++) {
+  for (let index = currentDisplayedCount; index < gameState.chain.length; index++) {
     const item = gameState.chain[index];
     const div = document.createElement('div');
     div.className = 'chain-item';
@@ -324,7 +343,10 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
       inputArea.classList.remove('disabled-area');
       movieInput.disabled = false;
       submitBtn.disabled = false;
-      movieInput.focus();
+      // Only auto-focus on desktop to prevent mobile keyboard layout thrashing
+      if (window.innerWidth > 767) {
+          movieInput.focus();
+      }
       if (mode === 'team') {
         const teamLabel = (activePlayer.teamId === 0 ? '🔴 Red' : '🔵 Blue');
         turnIndicator.innerText = `${teamLabel} — It's your turn!`;
@@ -357,10 +379,13 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
   }
 }
 
+let notificationTimeout = null;
 export function showNotification(msg) {
   notificationText.innerText = msg;
   notificationOverlay.classList.remove('hidden');
-  setTimeout(() => notificationOverlay.classList.add('hidden'), 3000);
+  
+  if (notificationTimeout) clearTimeout(notificationTimeout);
+  notificationTimeout = setTimeout(() => notificationOverlay.classList.add('hidden'), 3000);
 }
 
 export function renderAutocompleteResults(results) {
@@ -426,6 +451,15 @@ export function renderAutocompleteResults(results) {
             tmdbId: parseInt(id),
             mediaType: mediaType
           });
+
+          if (movieInput) {
+            movieInput.value = '';
+            movieInput.disabled = true;
+          }
+          if (submitBtn) submitBtn.disabled = true;
+          if (hintText) hintText.innerText = 'Validating connection...';
+          if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+          closeMobileAc();
         }
       });
 
