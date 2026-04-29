@@ -1,6 +1,6 @@
 // ====================== APP.JS ======================
 // Thin entry point — imports everything and wires up the app
-import { initUIElements, closeMobileAc, openShareModal } from './ui.js';
+import { initUIElements, closeMobileAc, openShareModal, showNotification } from './ui.js';
 import { initSocket, getSocket, getCurrentLobbyId, getGameState, leaveLobby } from './socketClient.js';
 import { prepareAudio, getStableId } from './utils.js';
 
@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function checkName() {
       const name = playerNameInput ? playerNameInput.value.trim() : '';
       if (!name) {
-          alert('Enter a name first!');
+          showNotification('Enter a name first!');
           return false;
       }
       return true;
@@ -132,7 +132,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   joinBtn?.addEventListener('click', () => {
-      const name = playerNameInput.value.trim();
+      const name = playerNameInput ? playerNameInput.value.trim() : '';
+      if (!name) {
+          showNotification('Enter a name first!');
+          if (privatePanel) privatePanel.classList.add('hidden');
+          if (joinPanel) joinPanel.classList.remove('hidden');
+          if (playerNameInput) playerNameInput.focus();
+          return;
+      }
       localStorage.setItem('mm_playerName', name);
       socket.emit('joinLobby', { 
           name, 
@@ -141,7 +148,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       // Hide private room modal immediately
-      const privatePanel = document.getElementById('private-panel');
       if (privatePanel) privatePanel.classList.add('hidden');
   });
 
