@@ -224,7 +224,7 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
       });
     });
   } else if (mode === 'solo') {
-    gamePlayersList.innerHTML = '<li style="color:var(--text-muted);font-size:0.8rem;">Solo Run</li>';
+    gamePlayersList.innerHTML = '<li class="solo-run-label">Solo Run</li>';
   } else {
     gameState.players.forEach((p, index) => {
       const li = document.createElement('li');
@@ -238,7 +238,7 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
   // Spectator count
   if (gameState.spectatorCount > 0) {
     const specLi = document.createElement('li');
-    specLi.style.cssText = 'color:var(--text-muted);font-size:0.75rem;text-align:center;padding:0.5rem 0;';
+    specLi.className = 'spectator-count';
     specLi.textContent = '👁 ' + gameState.spectatorCount + ' watching';
     gamePlayersList.appendChild(specLi);
   }
@@ -257,7 +257,7 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
 
   // Render empty state or clear out stale data
   if (gameState.chain.length === 0 && gameState.status === 'playing') {
-    chainDisplay.innerHTML = '<div class="empty-hint" style="margin:auto; display:flex; flex-direction:column; align-items:center; gap:0.5rem; color:var(--text-muted);"><span style="font-size:2rem;">🎬</span><span style="font-size:1.1rem; font-weight:600;">The board is empty</span><span style="font-size:0.9rem; opacity:0.8;">Waiting for the first move...</span></div>';
+    chainDisplay.innerHTML = '<div class="empty-board-hint"><span class="empty-board-icon">🎬</span><span class="empty-board-title">The board is empty</span><span class="empty-board-sub">Waiting for the first move...</span></div>';
   } else if (gameState.chain.length === 0 || gameState.chain.length < currentDisplayedCount) {
     chainDisplay.innerHTML = '';
   } else if (gameState.status === 'playing') {
