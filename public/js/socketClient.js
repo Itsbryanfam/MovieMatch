@@ -19,7 +19,7 @@ import {
   chatMessages
 } from './ui.js';
 
-import { prepareAudio, playSuccess, playFail, playTick, escapeHtml, getStableId } from './utils.js';
+import { prepareAudio, playSuccess, playFail, playTick, vibrate, escapeHtml, getStableId } from './utils.js';
 
 import {
   getSocket, setSocket, getCurrentLobbyId, getMyPlayerId, getGameState,
@@ -215,6 +215,7 @@ export function initSocket() {
         void inputArea.offsetWidth;
         inputArea.classList.add('your-turn-flash');
       }
+      vibrate(40); // brief tap to draw attention if user tabbed away
     }
 
     document.title = (isNowMyTurn && !getIsSpectator())
@@ -297,6 +298,7 @@ export function initSocket() {
     if (!selfElimActive) showNotification(msg);
     if (msg.includes('eliminated')) {
       playFail();
+      vibrate([200, 100, 200]); // attention-grabbing pattern on elimination
       showEliminationFlash();
       if (!selfElimActive) {
         const overlay = document.getElementById('notification-overlay');
@@ -312,6 +314,7 @@ export function initSocket() {
       playSuccess();
       setTimeout(playSuccess, 300);
       setTimeout(playSuccess, 600);
+      vibrate([60, 80, 60, 80, 60]); // celebration pattern on win
       showWinFlash();
     }
   });

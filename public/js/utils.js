@@ -59,6 +59,18 @@ export function playTick() {
   playTone(1000, 'square', 0.05);
 }
 
+// ---------------------------------------------------------------------------
+// HAPTICS
+// ---------------------------------------------------------------------------
+// navigator.vibrate is supported on Android Chrome and most Android browsers,
+// silently no-op'd on iOS Safari. We gate on the existing `muted` flag so the
+// audio mute toggle covers vibration too — one fewer setting to maintain.
+export function vibrate(pattern) {
+  if (muted) return;
+  if (typeof navigator === 'undefined' || !navigator.vibrate) return;
+  try { navigator.vibrate(pattern); } catch {}
+}
+
 export function prepareAudio() {
   if (!audioCtx) audioCtx = new AudioCtx();
   if (audioCtx.state === 'suspended') audioCtx.resume();

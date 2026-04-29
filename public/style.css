@@ -68,8 +68,14 @@ body {
   justify-content: center;
   align-items: center;
   overflow: hidden;
+  /* Block pull-to-refresh — without this, scrolling chat or chain to the top
+     and continuing to drag triggers a full page reload mid-game. */
+  overscroll-behavior-y: contain;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Kill the default mobile gray-flash on tap. Per-element :active states
+     handle visual feedback where it matters. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* POSTER CAROUSEL BACKGROUND */
@@ -653,7 +659,9 @@ input {
   border-radius: var(--radius-md);
   color: var(--text-main);
   font-family: inherit;
-  font-size: 0.95rem;
+  /* 16px literal (not rem) prevents iOS Safari from auto-zooming on focus.
+     iOS only zooms when computed input font-size is < 16px and never zooms back. */
+  font-size: 16px;
   transition: all 0.2s ease;
   outline: none;
 }
@@ -909,6 +917,7 @@ input:disabled {
   border: 1px solid rgba(255, 255, 255, 0.1); /* Glass edge highlight */
   border-radius: var(--radius-xl);
   padding: 1.5rem 1.5rem 1.5rem 3.5rem; /* Expanded left padding for timeline */
+  overscroll-behavior: contain; /* Don't chain scroll back to body */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1207,6 +1216,7 @@ input:disabled {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -1239,7 +1249,8 @@ input:disabled {
   width: 100%;
   flex: 1;
   padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
+  /* 16px to prevent iOS auto-zoom on focus. */
+  font-size: 16px;
   border-radius: var(--radius-sm);
   background: var(--bg-base);
   border: 1px solid var(--border-focus);
@@ -1433,16 +1444,18 @@ input:disabled {
 
 .modal-close {
   position: absolute;
-  top: 1.25rem;
-  right: 1.25rem;
+  top: 1rem;
+  right: 1rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
-  width: 32px;
-  height: 32px;
+  /* 44x44 minimum tap target — at 32px the close was tough to thumb-tap
+     in the corner of small phones. */
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1957,7 +1970,9 @@ input:disabled {
   }
 
   .chain-item .movie-cast {
-    font-size: 0.8rem;
+    /* Bumped from 0.8rem (~12.8px) — was hard to read with muted text color
+       on small phones in bright light. */
+    font-size: 0.9rem;
   }
 
   /* Buttons */
@@ -2506,3 +2521,65 @@ input:disabled {
 
 .btn-kick:hover { background: rgba(248, 113, 113, 0.15); }
 .btn-kick:active { background: rgba(248, 113, 113, 0.25); }
+
+/* =============================================
+   ACCESSIBILITY — REDUCED MOTION
+   =============================================
+   Honor the OS-level "reduce motion" preference. The animations across
+   this app are decorative (entrance flourishes, infinite poster scroll,
+   timer pulses, win celebration) — none of them carry information.
+   Neutralizing them via near-zero durations is the standard pattern. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* The infinite poster carousel can't be neutralized via duration alone —
+     a 0.01ms infinite animation still re-renders constantly. Kill it. */
+  #poster-carousel,
+  .poster-row {
+    animation: none !important;
+  }
+}
+
+/* =============================================
+   MOBILE TOAST — clear the fixed tab bar
+   ============================================= */
+@media (max-width: 767px) {
+  .copy-toast {
+    /* The fixed mobile tab bar sits at ~bottom: 0.5rem, ~52px tall.
+       Lift the toast above it so it's not hidden behind. */
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* =============================================
+   LANDSCAPE ON SHORT-HEIGHT PHONES
+   =============================================
+   iPhone SE landscape is 667x375 (≈320px usable after browser chrome).
+   Default mobile portrait spacing + min-height: 60vh on the chain feed
+   forces overflow squeezing. This block compresses vertical chrome
+   without redesigning the layout. Wider landscape phones (>=768px wide)
+   already get the tablet 2-column layout; this layers on top. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .app-header { margin-bottom: 0.4rem; }
+  .logo { font-size: 1rem; }
+  .nav-link-btn { padding: 0.25rem 0.5rem; font-size: 0.7rem; }
+
+  .lobby-panel { padding: 1rem; }
+  #lobby-screen { padding-bottom: 0.5rem; }
+
+  .feed-container { min-height: 30vh; }
+  .game-board { gap: 0.5rem; }
+  .input-area { padding: 0.6rem 0.75rem; }
+
+  .hero-demo { padding: 0.6rem; gap: 0.3rem; }
+  .hero-demo .demo-poster { width: 36px; height: 52px; }
+
+  /* Shorter tab bar so it eats less of the limited vertical space. */
+  .mobile-tabs { padding: 2px; }
+  .mobile-tab { padding: 0.35rem 0.4rem; min-height: 36px; font-size: 0.75rem; }
+  #game-screen { padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
+}
