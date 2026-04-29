@@ -170,16 +170,78 @@ document.addEventListener('DOMContentLoaded', () => {
       prepareAudio();
   });
 
-  function checkUrlParams() {
-      const params = new URLSearchParams(window.location.search);
-      const roomId = params.get('room') || params.get('lobby');
-      if (roomId) {
-          if (lobbyIdInput) lobbyIdInput.value = roomId.toUpperCase();
-          heroScreen.classList.remove('active');
-          lobbyScreen.classList.add('active');
-          joinPanel.classList.add('hidden');
-          privatePanel.classList.remove('hidden');
+  function showNamePrompt(roomCode) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:1000;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--surface,#18181b);border-radius:1rem;padding:2rem;max-width:340px;width:90%;text-align:center;border:1px solid rgba(255,255,255,0.08);';
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin:0 0 0.25rem;font-size:1.25rem;color:var(--text,#f8fafc);';
+    title.textContent = 'Join Game';
+
+    const subtitle = document.createElement('p');
+    subtitle.style.cssText = 'margin:0 0 1.5rem;color:var(--text-muted,#94a3b8);font-size:0.9rem;';
+    subtitle.textContent = 'Room ' + roomCode;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Enter your name';
+    input.autocomplete = 'off';
+    input.maxLength = 24;
+    input.style.cssText = 'width:100%;padding:0.75rem 1rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:var(--text,#f8fafc);font-size:1rem;box-sizing:border-box;margin-bottom:1rem;outline:none;font-family:inherit;';
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Join Game';
+    btn.style.cssText = 'width:100%;padding:0.75rem;border-radius:0.5rem;border:none;background:var(--accent,#818cf8);color:white;font-size:1rem;font-weight:600;cursor:pointer;font-family:inherit;';
+
+    function submit() {
+      const name = input.value.trim();
+      if (!name) {
+        input.style.borderColor = '#f87171';
+        input.focus();
+        return;
       }
+      localStorage.setItem('mm_playerName', name);
+      if (playerNameInput) playerNameInput.value = name;
+      overlay.remove();
+      prepareAudio();
+      heroScreen.classList.remove('active');
+      lobbyScreen.classList.add('active');
+      socket.emit('joinLobby', { name, lobbyId: roomCode, stableId: getStableId() });
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    btn.addEventListener('click', submit);
+    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') submit(); });
+
+    card.appendChild(title);
+    card.appendChild(subtitle);
+    card.appendChild(input);
+    card.appendChild(btn);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    setTimeout(() => input.focus(), 100);
+  }
+
+  function checkUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get('room') || params.get('lobby');
+    if (!roomId) return;
+
+    const code = roomId.toUpperCase();
+    const savedName = localStorage.getItem('mm_playerName');
+
+    if (savedName) {
+      if (playerNameInput) playerNameInput.value = savedName;
+      heroScreen.classList.remove('active');
+      lobbyScreen.classList.add('active');
+      socket.emit('joinLobby', { name: savedName, lobbyId: code, stableId: getStableId() });
+      window.history.replaceState({}, '', window.location.pathname);
+    } else {
+      showNamePrompt(code);
+    }
   }
   checkUrlParams();
 
