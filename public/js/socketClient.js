@@ -13,6 +13,7 @@ import {
   showNotification, renderAutocompleteResults, closeMobileAc,
   openShareModal, showGameOverBanner, resetMobileTab,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
+  showGhostAttempt,
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
@@ -318,6 +319,14 @@ export function initSocket() {
       showWinFlash();
     }
   });
+
+  // -----------------------------------------------------------------------
+  // FAILED ATTEMPTS — render a transient ghost card so other players can
+  // see what was tried before someone got eliminated, without polluting
+  // the chain history.
+  // -----------------------------------------------------------------------
+
+  socket.on('attemptFailed', showGhostAttempt);
 
   // -----------------------------------------------------------------------
   // AUTOCOMPLETE

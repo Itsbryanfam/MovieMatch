@@ -124,6 +124,18 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
       const result = validateChainConnection(room, candidateMovies);
 
       if (!result.match) {
+        // Broadcast the failed attempt to everyone in the room before
+        // eliminating the player. Without this, only the failing player
+        // sees what they tried — others just see "X was eliminated" and
+        // have to ask aloud what was attempted. Skipped for "Title not
+        // found" upstream (those are usually typos, not strategy).
+        const triedTitle = candidateMovies[0]?.title || movie || 'Unknown';
+        io.to(lobbyId).emit('attemptFailed', {
+          playerName: player.name,
+          movieTitle: triedTitle,
+          reason: result.reason,
+        });
+
         room.isValidating = false;
         await redisUtils.saveLobby(pubClient, lobbyId, room);
         await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, result.reason);

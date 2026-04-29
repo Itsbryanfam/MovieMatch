@@ -2523,6 +2523,82 @@ input:disabled {
 .btn-kick:active { background: rgba(248, 113, 113, 0.25); }
 
 /* =============================================
+   GHOST ATTEMPT — transient failed-submission card
+   =============================================
+   Appears below the current chain head when someone makes an invalid
+   submission. Visually distinct from chain items via four signals so
+   it's never mistaken for actual chain content:
+     1. Indented (margin-left) so it visibly hangs off the chain
+     2. Dimmed (opacity) so it reads as secondary
+     3. Red-tinted left border vs. the chain's accent color
+     4. Smaller font + italic title vs. the chain's regular text */
+.ghost-attempt {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-left: 2rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-left: 3px solid var(--status-danger);
+  border-radius: var(--radius-md);
+  opacity: 0.75;
+  animation: ghostAttemptEnter 0.25s ease-out forwards;
+  font-size: 0.85rem;
+  max-width: calc(100% - 2rem);
+}
+
+.ghost-attempt-icon {
+  color: var(--status-danger);
+  font-weight: 700;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.ghost-attempt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.ghost-attempt-title {
+  color: var(--text-main);
+  font-style: italic;
+  line-height: 1.35;
+}
+
+.ghost-attempt-title em {
+  font-weight: 600;
+  font-style: italic;
+}
+
+.ghost-attempt-reason {
+  color: var(--status-danger);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+}
+
+@keyframes ghostAttemptEnter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 0.75; transform: translateY(0); }
+}
+
+/* Mobile: less indent so card doesn't get cramped */
+@media (max-width: 767px) {
+  .ghost-attempt {
+    margin-left: 0.75rem;
+    max-width: calc(100% - 0.75rem);
+    padding: 0.5rem 0.7rem;
+    font-size: 0.8rem;
+  }
+}
+
+/* =============================================
    ACCESSIBILITY — REDUCED MOTION
    =============================================
    Honor the OS-level "reduce motion" preference. The animations across

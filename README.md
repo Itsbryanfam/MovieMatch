@@ -6,7 +6,7 @@
 [![Express](https://img.shields.io/badge/Express-5-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
-[![Tests](https://img.shields.io/badge/tests-63%20passing-brightgreen?style=flat-square)](/)
+[![Tests](https://img.shields.io/badge/tests-69%20passing-brightgreen?style=flat-square)](/)
 
 **Real-time multiplayer trivia game — chain movies and TV shows through shared cast members. Last player standing wins.**
 
@@ -61,7 +61,7 @@ Every submission is validated server-side against live TMDB cast data, preventin
 - XSS protection — all user content written via DOM APIs, never `innerHTML`
 - Graceful shutdown with Redis drain on `SIGTERM`/`SIGINT`
 - In-memory poster cache with 30-minute background refresh
-- 63 tests across 8 suites covering game logic, socket integration, reconnection, validation, and client-side DOM rendering
+- 69 tests across 9 suites covering game logic, socket integration, reconnection, validation, and client-side DOM rendering
 
 ---
 
@@ -109,7 +109,7 @@ FRONTEND_URL=http://localhost:3000
 
 ```bash
 npm start        # production
-npm test         # run test suite (63 tests — server + client)
+npm test         # run test suite (69 tests — server + client)
 ```
 
 Open [http://localhost:3000](http://localhost:3000).

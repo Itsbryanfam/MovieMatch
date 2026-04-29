@@ -299,6 +299,11 @@ function renderChainItems(gameState, myPlayerId) {
     previousActors = gameState.chain[currentDisplayedCount - 1].movie.cast || [];
   }
 
+  // A new chain item is about to be appended → previous attempts are stale
+  if (gameState.chain.length > currentDisplayedCount) {
+    clearGhostAttempt();
+  }
+
   for (let index = currentDisplayedCount; index < gameState.chain.length; index++) {
     const item = gameState.chain[index];
     const div = document.createElement('div');
@@ -458,6 +463,56 @@ export function showWinFlash() {
   el.className = 'win-flash';
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2300);
+}
+
+// ---------------------------------------------------------------------------
+// GHOST ATTEMPT — transient card showing a player's failed submission so
+// other players can see what was tried. Auto-clears after 8s, replaced if
+// another attempt fails, and removed when the chain advances (handled by
+// renderChainItems — see clearGhostAttempt call there).
+// ---------------------------------------------------------------------------
+let ghostAttemptTimer = null;
+
+export function showGhostAttempt({ playerName, movieTitle, reason }) {
+  if (!chainDisplay) return;
+  // Replace any existing ghost so only the latest attempt is visible
+  clearGhostAttempt();
+
+  const ghost = document.createElement('div');
+  ghost.className = 'ghost-attempt';
+
+  const icon = document.createElement('span');
+  icon.className = 'ghost-attempt-icon';
+  icon.textContent = '✗';
+
+  const body = document.createElement('div');
+  body.className = 'ghost-attempt-body';
+
+  const title = document.createElement('div');
+  title.className = 'ghost-attempt-title';
+  title.innerHTML = escapeHtml(playerName) + ' tried <em>' + escapeHtml(movieTitle) + '</em>';
+
+  const reasonEl = document.createElement('div');
+  reasonEl.className = 'ghost-attempt-reason';
+  reasonEl.textContent = reason || 'Invalid connection';
+
+  body.appendChild(title);
+  body.appendChild(reasonEl);
+  ghost.appendChild(icon);
+  ghost.appendChild(body);
+
+  chainDisplay.appendChild(ghost);
+  chainDisplay.scrollTop = chainDisplay.scrollHeight;
+
+  ghostAttemptTimer = setTimeout(clearGhostAttempt, 8000);
+}
+
+export function clearGhostAttempt() {
+  if (ghostAttemptTimer) {
+    clearTimeout(ghostAttemptTimer);
+    ghostAttemptTimer = null;
+  }
+  chainDisplay?.querySelectorAll('.ghost-attempt').forEach(el => el.remove());
 }
 
 export function renderAutocompleteResults(results) {
