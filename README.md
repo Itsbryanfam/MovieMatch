@@ -24,6 +24,7 @@
 | **Team (2v2)** | 🤝 | Teams submit back-to-back. One mistake eliminates the whole team. |
 | **Solo Challenge** | 🎯 | Build the longest chain possible against the clock. |
 | **Speed Round** | ⚡ | Brutal 15-second flat timer for pure chaos. |
+| **Spectator** | 👁 | Join mid-game as a viewer. Auto-promoted to player when the round ends. |
 
 ---
 
@@ -40,15 +41,20 @@
 
 ### 🌐 Matchmaking & Social
 * **Public Lobby Browser** — Browse and join open games instantly.
-* **Interactive Chat & Reactions** — Trash talk or cheer with real-time emoji bursts.
+* **Spectator Mode** — Join mid-game to watch, then auto-join the next round. Share lobby links freely.
+* **Interactive Chat & Reactions** — Trash talk or cheer with real-time emoji bursts. Spectators can chat too.
 * **Shareable Chain Recaps** — Download beautiful PNG summaries of your cinematic runs.
-* **Persistent Trophies** — Track wins securely via Redis backend.
+* **Persistent Trophies** — Win counts survive across sessions via stable player IDs.
 
 ### 🛡️ Core Engine & Security
-* **Authoritative Validation** — Cross-referenced against full TMDB cast lists.
+* **Authoritative Validation** — Every move cross-referenced against full TMDB cast lists.
 * **Hardcore Mode** — Ban reusing the exact same connecting actor back-to-back.
 * **TV Show Support** — Expands the pool via `aggregate_credits`.
-* **Robust Reconnection** — Automatically rejoin matches after network drops.
+* **Robust Reconnection** — Automatically rejoin matches after network drops with full state restore.
+* **Rate Limiting** — Per-socket rate limits on all events prevent spam and API abuse.
+* **XSS Protection** — All user input rendered safely via DOM construction, never `innerHTML`.
+* **Atomic Concurrency** — Redis locks prevent race conditions during move validation.
+* **Graceful Shutdown** — Clean Redis disconnection and HTTP drain on SIGTERM/SIGINT.
 
 ---
 
@@ -71,6 +77,7 @@
    ```env
    TMDB_READ_TOKEN=your_tmdb_read_token_here
    REDIS_URL=redis://localhost:6379
+   FRONTEND_URL=http://localhost:3000
    ```
 
 3. **Launch the App:**
@@ -86,10 +93,13 @@
 
 ## 🧪 Testing & Quality
 
-Keep the engine running smoothly:
+43 tests across 5 suites — unit tests, game logic, and Socket.io integration:
+
 ```bash
 npm test
 ```
+
+Covers: join/reconnect flows, spectator promotion, game modes (solo/team/classic), input validation, rate limiting, error boundaries, and the Redis submit lock.
 
 ---
 
@@ -98,7 +108,7 @@ npm test
 Optimized for platforms like **Render.com**:
 1. Deploy the Node.js server as a **Web Service**.
 2. Provision a separate **Redis** instance.
-3. Map `TMDB_READ_TOKEN` and `REDIS_URL` environment variables.
+3. Map `TMDB_READ_TOKEN`, `REDIS_URL`, and `FRONTEND_URL` environment variables.
 
 ---
 
