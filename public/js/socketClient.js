@@ -262,6 +262,18 @@ export function initSocket() {
   return socket;
 }
 
+export function leaveLobby() {
+  if (turnInterval) {
+    clearInterval(turnInterval);
+    turnInterval = null;
+  }
+  if (socket) socket.emit('leaveLobby');
+  currentLobbyId = null;
+  myPlayerId = null;
+  gameState = null;
+  isSpectator = false;
+}
+
 export function getSocket() { return socket; }
 export function getCurrentLobbyId() { return currentLobbyId; }
 export function getMyPlayerId() { return myPlayerId; }

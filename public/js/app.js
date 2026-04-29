@@ -1,7 +1,7 @@
 // ====================== APP.JS ======================
 // Thin entry point — imports everything and wires up the app
 import { initUIElements, closeMobileAc, openShareModal } from './ui.js';
-import { initSocket, getSocket, getCurrentLobbyId, getGameState } from './socketClient.js';
+import { initSocket, getSocket, getCurrentLobbyId, getGameState, leaveLobby } from './socketClient.js';
 import { prepareAudio, getStableId } from './utils.js';
 
 // Initialize everything when the page loads
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
   logo.addEventListener('click', () => {
     const currentLobbyId = getCurrentLobbyId();
     if (currentLobbyId) {
-      socket.emit('leaveLobby');
+      leaveLobby();
     }
     gameScreen.classList.remove('active');
     lobbyScreen.classList.remove('active');
