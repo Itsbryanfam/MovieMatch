@@ -568,5 +568,21 @@ document.addEventListener('DOMContentLoaded', () => {
       return lines.join('\n');
   }
 
+  // Premium Ambient Parallax Effect
+  const bgCarousel = document.getElementById('poster-carousel');
+  if (bgCarousel) {
+      document.addEventListener('mousemove', (e) => {
+          // Disable on mobile/tablets where accelerometer makes more sense than cursor tracking
+          if (window.innerWidth <= 767) return; 
+          
+          // Calculate subtle offset (max 20px shift to avoid motion sickness)
+          const xShift = (e.clientX / window.innerWidth - 0.5) * -30; 
+          const yShift = (e.clientY / window.innerHeight - 0.5) * -30;
+          
+          // Combine original rotation with dynamic translation
+          bgCarousel.style.transform = `rotate(-6deg) translate(${xShift}px, ${yShift}px)`;
+      });
+  }
+
   console.log('🎬 MovieMatch frontend initialized (modular version)');
 });

@@ -43,13 +43,16 @@ body {
   width: 120vw; height: 130vh;
   z-index: 0;
   overflow: hidden;
-  opacity: 0.08;
+  opacity: 0.04; /* Darker, more ambient */
+  filter: grayscale(100%) blur(5px); /* Forces visual depth */
   display: flex;
   flex-direction: column;
   gap: 1rem;
   justify-content: center;
-  transform: rotate(-6deg);
+  transform: rotate(-6deg) translate(0px, 0px);
   pointer-events: none;
+  transition: transform 0.2s ease-out; /* Smooths JS parallax jitter */
+  will-change: transform;
 }
 
 .poster-row {
@@ -806,12 +809,13 @@ input:disabled {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 1.5rem 1.5rem 1.5rem 3.5rem; /* Expanded left padding for timeline */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.25rem; /* Increased gap for visual breathing room */
   scroll-behavior: smooth;
+  position: relative;
 }
 
 .chain-item {
@@ -819,13 +823,56 @@ input:disabled {
   border: 1px solid var(--border-subtle);
   padding: 1rem 1.25rem;
   border-radius: 8px;
-  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: dropInNode 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   opacity: 0;
   display: flex;
   gap: 1rem;
   align-items: flex-start;
+  position: relative; /* Anchor for timeline elements */
 }
 
+/* The Connecting Line */
+.chain-item::before {
+  content: '';
+  position: absolute;
+  left: -2rem;
+  top: 2.5rem;
+  bottom: -2.5rem;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--border-focus), transparent);
+  z-index: 1;
+}
+
+/* Hide line on the very last item */
+.chain-item:last-child::before {
+  display: none;
+}
+
+/* The Hollow Geometric Node */
+.chain-item::after {
+  content: '';
+  position: absolute;
+  left: -2.35rem;
+  top: 1.25rem;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 2px solid var(--border-focus);
+  z-index: 2;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Highlighted Node State */
+.chain-item.shared-highlight::after {
+  border-color: var(--accent-primary);
+  background: var(--accent-glow);
+  box-shadow: 0 0 12px rgba(129, 140, 248, 0.5);
+  transform: scale(1.1);
+}
+
+
+/* Staggered Typography States */
 .chain-poster {
   width: 60px;
   border-radius: 4px;
@@ -834,6 +881,8 @@ input:disabled {
   background: var(--bg-surface);
   aspect-ratio: 2/3;
   object-fit: cover;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.05s forwards;
 }
 
 .chain-content {
@@ -846,24 +895,43 @@ input:disabled {
   letter-spacing: 0.05em;
   color: var(--text-muted);
   margin-bottom: 0.25rem;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
 }
 
 .chain-item .movie-title {
   font-size: 1.125rem;
   font-weight: 600;
   margin-bottom: 0.35rem;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
 }
 
 .chain-item .movie-cast {
   font-size: 0.85rem;
   color: #64748b;
   line-height: 1.4;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
 }
 
 .chain-item.shared-highlight .movie-cast strong {
   color: var(--accent-primary);
   font-weight: 600;
+  text-shadow: 0 0 12px rgba(129, 140, 248, 0.3);
 }
+
+/* Premium Keyframes */
+@keyframes dropInNode {
+  from { opacity: 0; transform: translateY(15px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes revealElement {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
 
 /* INPUT AREA */
 .input-area {
