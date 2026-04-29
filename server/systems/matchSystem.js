@@ -9,6 +9,10 @@
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
 
+const TMDB_API_BASE = 'https://api.themoviedb.org/3';
+const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
+const TMDB_FETCH_TIMEOUT_MS = 5000;
+
 // ---------------------------------------------------------------------------
 // STRING SIMILARITY (for fuzzy movie title matching)
 // ---------------------------------------------------------------------------
@@ -39,8 +43,8 @@ async function autocompleteSearch(ctx, socket, { query, lobbyId }) {
 
   const searchType = room.allowTvShows ? 'multi' : 'movie';
   const searchRes = await fetch(
-    `https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`,
-    { headers: TMDB_HEADERS, signal: AbortSignal.timeout(5000) }
+    `${TMDB_API_BASE}/search/${searchType}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`,
+    { headers: TMDB_HEADERS, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
   );
 
   const searchData = await searchRes.json();
@@ -50,7 +54,7 @@ async function autocompleteSearch(ctx, socket, { query, lobbyId }) {
     id: r.id,
     title: r.title || r.name || 'Unknown Title',
     year: (r.release_date || r.first_air_date || '').split('-')[0] || 'Unknown',
-    poster: r.poster_path ? `https://image.tmdb.org/t/p/w92${r.poster_path}` : null,
+    poster: r.poster_path ? `${TMDB_POSTER_BASE}${r.poster_path}` : null,
     mediaType: r.media_type || (r.title ? 'movie' : 'tv'),
     media_type: r.media_type || (r.title ? 'movie' : 'tv')
   }));
@@ -152,8 +156,8 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
 
   // Direct TMDB ID lookup (from autocomplete selection)
   if (tmdbId && mediaType) {
-    const lookupUrl = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}?language=en-US`;
-    const detailsRes = await fetch(lookupUrl, { headers, signal: AbortSignal.timeout(5000) });
+    const lookupUrl = `${TMDB_API_BASE}/${mediaType}/${tmdbId}?language=en-US`;
+    const detailsRes = await fetch(lookupUrl, { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) });
     const detailsData = await detailsRes.json();
     if (detailsData && detailsData.id) {
       topCandidates = [{
@@ -172,8 +176,8 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
   if (topCandidates.length === 0 && movie) {
     const searchType = room.allowTvShows ? 'multi' : 'movie';
     const searchRes = await fetch(
-      `https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(movie)}&include_adult=false&language=en-US&page=1`,
-      { headers, signal: AbortSignal.timeout(5000) }
+      `${TMDB_API_BASE}/search/${searchType}?query=${encodeURIComponent(movie)}&include_adult=false&language=en-US&page=1`,
+      { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
     );
     const searchData = await searchRes.json();
     let results = (searchData.results || []).filter(r => r.media_type !== 'person');
@@ -204,7 +208,7 @@ async function enrichWithCredits(candidates, pubClient, headers, logger) {
         title,
         year: date ? date.split('-')[0] : 'Unknown',
         cast: (credData.cast || []).map(actor => actor.name),
-        poster: c.poster_path ? `https://image.tmdb.org/t/p/w92${c.poster_path}` : null,
+        poster: c.poster_path ? `${TMDB_POSTER_BASE}${c.poster_path}` : null,
         mediaType: mt
       };
     } catch (e) {
@@ -232,7 +236,7 @@ function validateChainConnection(room, candidateMovies) {
     if (!lastNode) return { match: candidate, matchedActors: [] };
 
     const result = gameLogic.validateConnection(
-      lastNodeCast, candidate.cast, room.hardcoreMode, room.previousSharedActors, []
+      lastNodeCast, candidate.cast, room.hardcoreMode, room.previousSharedActors
     );
 
     if (result.valid) {
@@ -307,5 +311,4 @@ module.exports = {
   autocompleteSearch,
   submitMovie,
   forceNextTurn,
-  levenshtein,
 };

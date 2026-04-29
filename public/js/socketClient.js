@@ -32,6 +32,9 @@ import {
 // INITIALIZATION
 // ---------------------------------------------------------------------------
 
+// Set to true for ~3s when the local player is eliminated.
+// Suppresses the generic notification overlay so the full-screen
+// self-elimination screen can take the stage without overlap.
 let selfElimActive = false;
 
 export function initSocket() {

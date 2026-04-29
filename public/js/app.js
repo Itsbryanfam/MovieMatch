@@ -15,6 +15,7 @@
 
 import {
   initUIElements, closeMobileAc, openShareModal, showNotification, showToast,
+  buildTextRecap,
   playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
   tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
@@ -617,19 +618,6 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('Image unavailable \u2014 text recap copied! \u2713');
     }
   });
-
-  function buildTextRecap(state) {
-    const lines = ['\uD83C\uDFAC MovieMatch\n'];
-    lines.push(`Chain of ${state.chain.length} connections:\n`);
-    state.chain.forEach((item, i) => {
-      const actor = (item.matchedActors || [])[0];
-      lines.push(`${i + 1}. ${item.playerName} \u2192 ${item.movie.title} (${item.movie.year})${actor ? ` \u2194 ${actor}` : ''}`);
-    });
-    if (state.winner) lines.push(`\n\uD83C\uDFC6 ${state.winner.name} wins with ${state.winner.score} pts!`);
-    const siteUrl = window.location.hostname !== 'localhost' ? window.location.hostname : 'moviematch.it.com';
-    lines.push(`\nPlay at ${siteUrl}`);
-    return lines.join('\n');
-  }
 
   // =========================================================================
   // PARALLAX EFFECT

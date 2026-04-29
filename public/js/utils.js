@@ -1,12 +1,19 @@
-// ====================== UTILS.JS ======================
-// Shared utilities + audio synthesis (no DOM, no sockets)
+// ============================================================================
+// UTILS — Shared utilities + audio synthesis
+// ============================================================================
+// No DOM manipulation, no socket calls. Safe to import from any module.
+// ============================================================================
 
 export function escapeHtml(unsafe) {
   if (!unsafe || typeof unsafe !== 'string') return unsafe;
   return unsafe.replace(/[<>&"']/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;','\'':'&#39;'})[m]);
 }
 
-// Audio synthesis
+// ---------------------------------------------------------------------------
+// AUDIO SYNTHESIS (Web Audio API)
+// ---------------------------------------------------------------------------
+// audioCtx is lazily initialized on first use — creating it at module load
+// time would trigger browser autoplay-policy warnings before any user gesture.
 let AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx;
 
@@ -43,6 +50,12 @@ export function prepareAudio() {
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
+// ---------------------------------------------------------------------------
+// STABLE CLIENT ID
+// ---------------------------------------------------------------------------
+// A persistent random ID stored in localStorage so a player can be recognised
+// across socket reconnects (the socket.id changes on every reconnect).
+// The 'p_' prefix distinguishes it from other localStorage keys at a glance.
 export function getStableId() {
   let id = localStorage.getItem('mm_stableId');
   if (!id) {
@@ -54,6 +67,11 @@ export function getStableId() {
   return id;
 }
 
+// ---------------------------------------------------------------------------
+// AUDIO UNLOCK
+// ---------------------------------------------------------------------------
+// Browsers block AudioContext.resume() until a user gesture has occurred.
+// We hook the first click/touch to resume the context, then remove the listeners.
 export function unlockAudioGlobally() {
   const unlock = () => {
     prepareAudio();

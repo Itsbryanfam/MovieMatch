@@ -18,7 +18,7 @@ describe('MovieMatch Validation Engine', () => {
   test('valid connection - shared actor found', () => {
     const lastNodeCast = ['Tom Hanks'];
     const candidateCast = ['Tom Hanks', 'Meg Ryan'];
-    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, false, [], []);
+    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, false, []);
     expect(result.valid).toBe(true);
     expect(result.matchedActors).toContain('Tom Hanks');
   });
@@ -26,7 +26,7 @@ describe('MovieMatch Validation Engine', () => {
   test('invalid connection - no shared actor', () => {
     const lastNodeCast = ['Tom Hanks'];
     const candidateCast = ['Leonardo DiCaprio', 'Kate Winslet'];
-    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, false, [], []);
+    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, false, []);
     expect(result.valid).toBe(false);
   });
 
@@ -34,7 +34,7 @@ describe('MovieMatch Validation Engine', () => {
     const lastNodeCast = ['Tom Hanks'];
     const candidateCast = ['Tom Hanks', 'Meg Ryan'];
     const previousShared = ['Tom Hanks'];
-    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, true, previousShared, []);
+    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, true, previousShared);
     expect(result.valid).toBe(false);
   });
 
@@ -42,7 +42,7 @@ describe('MovieMatch Validation Engine', () => {
     const lastNodeCast = ['Tom Hanks'];
     const candidateCast = ['Tom Hanks', 'Meg Ryan'];
     const previousShared = ['Meg Ryan'];
-    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, true, previousShared, []);
+    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, true, previousShared);
     expect(result.valid).toBe(true);
   });
 

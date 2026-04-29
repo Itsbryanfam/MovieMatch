@@ -139,11 +139,17 @@ const { setupSocketHandlers } = require('./server/socketHandlers');
 const redisUtils = require('./server/redisUtils');
 const posterCache = require('./server/posterCache');
 
+const POSTER_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
 async function startApp() {
   try {
     await Promise.all([pubClient.connect(), subClient.connect()]);
     logger.info('Redis connected');
-    setInterval(fetchBackgroundPosters, 30 * 60 * 1000);
+    // Fetch immediately on boot, then refresh every 30 minutes.
+    // Must run after Redis connects because posterCache.setPosters triggers
+    // an io.emit, and io is only ready after this function runs.
+    fetchBackgroundPosters();
+    setInterval(fetchBackgroundPosters, POSTER_REFRESH_INTERVAL_MS);
   } catch (err) {
     logger.error(err, 'Redis connection failed');
   }
@@ -159,7 +165,6 @@ async function startApp() {
   server.listen(PORT, () => logger.info(`Server listening on port ${PORT}`));
 }
 
-fetchBackgroundPosters();
 startApp();
 
 // Graceful shutdown — close connections cleanly on deploy or Ctrl+C

@@ -200,12 +200,18 @@ export function renderTeamScreen(gameState, myPlayerId, amIHost) {
 
 export function renderGame(gameState, myPlayerId, isSpectator = false) {
   const mode = gameState.gameMode || 'classic';
-  if (mode === 'solo') gameScreen.classList.add('solo-mode-ui');
-  else gameScreen.classList.remove('solo-mode-ui');
-  if (mode === 'speed') gameScreen.classList.add('speed-mode');
-  else gameScreen.classList.remove('speed-mode');
+  gameScreen.classList.toggle('solo-mode-ui', mode === 'solo');
+  gameScreen.classList.toggle('speed-mode', mode === 'speed');
 
+  renderPlayerSidebar(gameState, mode);
+  renderChainItems(gameState, myPlayerId);
+  renderTurnControls(gameState, myPlayerId, isSpectator, mode);
+}
+
+// Renders the player list in the game sidebar (scores, active turn, eliminated state).
+function renderPlayerSidebar(gameState, mode) {
   gamePlayersList.innerHTML = '';
+
   if (mode === 'team') {
     [0, 1].forEach(teamId => {
       const teamLabel = teamId === 0 ? '🔴 Red' : '🔵 Blue';
@@ -235,7 +241,6 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     });
   }
 
-  // Spectator count
   if (gameState.spectatorCount > 0) {
     const specLi = document.createElement('li');
     specLi.className = 'spectator-count';
@@ -243,41 +248,40 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     gamePlayersList.appendChild(specLi);
   }
 
-  // Smooth scroll active player into view in the sidebar
+  // Scroll active player into view after the DOM settles
   setTimeout(() => {
-      const activeLi = gamePlayersList.querySelector('.active-turn');
-      if (activeLi) {
-          activeLi.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
+    const activeLi = gamePlayersList.querySelector('.active-turn');
+    if (activeLi) activeLi.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, 50);
+}
 
-  // EFFICIENT CHAIN RENDERING
-  const currentChainItems = chainDisplay.querySelectorAll('.chain-item');
-  const currentDisplayedCount = currentChainItems.length;
+// Appends only NEW chain items to the board (incremental — does not re-render existing ones).
+function renderChainItems(gameState, myPlayerId) {
+  const currentDisplayedCount = chainDisplay.querySelectorAll('.chain-item').length;
 
-  // Render empty state or clear out stale data
   if (gameState.chain.length === 0 && gameState.status === 'playing') {
     chainDisplay.innerHTML = '<div class="empty-board-hint"><span class="empty-board-icon">🎬</span><span class="empty-board-title">The board is empty</span><span class="empty-board-sub">Waiting for the first move...</span></div>';
-  } else if (gameState.chain.length === 0 || gameState.chain.length < currentDisplayedCount) {
-    chainDisplay.innerHTML = '';
-  } else if (gameState.status === 'playing') {
-    // Prevent banner from polluting the view if a game resets suddenly
-    const existingBanner = chainDisplay.querySelector('.game-over-banner');
-    if (existingBanner) existingBanner.remove();
-    
-    // Clear the empty board placeholder once the first move is made
-    const existingEmptyHint = chainDisplay.querySelector('.empty-hint');
-    if (existingEmptyHint) existingEmptyHint.remove();
+    return;
   }
 
+  if (gameState.chain.length === 0 || gameState.chain.length < currentDisplayedCount) {
+    // Chain was reset (new game) — clear everything
+    chainDisplay.innerHTML = '';
+    return;
+  }
 
-  // Get previous actors for highlighting
+  if (gameState.status === 'playing') {
+    // Remove stale game-over banner or empty hint if the game just (re-)started
+    chainDisplay.querySelector('.game-over-banner')?.remove();
+    chainDisplay.querySelector('.empty-hint')?.remove();
+  }
+
+  // Track which actors were in the previous node so we can bold shared ones
   let previousActors = [];
   if (currentDisplayedCount > 0 && gameState.chain[currentDisplayedCount - 1]) {
     previousActors = gameState.chain[currentDisplayedCount - 1].movie.cast || [];
   }
 
-  // Only render NEW items
   for (let index = currentDisplayedCount; index < gameState.chain.length; index++) {
     const item = gameState.chain[index];
     const div = document.createElement('div');
@@ -339,8 +343,12 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     }
   }
   chainDisplay.scrollTop = chainDisplay.scrollHeight;
+}
 
+// Updates the input area, turn indicator, and hint text based on whose turn it is.
+function renderTurnControls(gameState, myPlayerId, isSpectator, mode) {
   const activePlayer = gameState.players[gameState.currentTurnIndex];
+
   if (mode === 'solo') {
     turnIndicator.innerHTML = `🔗 Chain: <span class="chain-badge">${gameState.chain.length}</span>`;
   }
@@ -351,26 +359,28 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     if (submitBtn) submitBtn.disabled = true;
     turnIndicator.textContent = '👁 Spectating';
     hintText.textContent = "You'll join when this game ends.";
-  } else if (gameState.status === 'playing') {
-    if (activePlayer && activePlayer.id === myPlayerId) {
+    return;
+  }
+
+  if (gameState.status === 'playing') {
+    const isMyTurn = activePlayer && activePlayer.id === myPlayerId;
+
+    if (isMyTurn) {
       inputArea.classList.remove('disabled-area');
       movieInput.disabled = false;
       submitBtn.disabled = false;
-      // Only auto-focus on desktop to prevent mobile keyboard layout thrashing
-      if (window.innerWidth > 767) {
-          movieInput.focus();
-      }
+      // Skip auto-focus on mobile to avoid the keyboard jumping up unexpectedly
+      if (window.innerWidth > 767) movieInput.focus();
+
       if (mode === 'team') {
-        const teamLabel = (activePlayer.teamId === 0 ? '🔴 Red' : '🔵 Blue');
+        const teamLabel = activePlayer.teamId === 0 ? '🔴 Red' : '🔵 Blue';
         turnIndicator.innerText = `${teamLabel} — It's your turn!`;
       } else if (mode !== 'solo') {
         turnIndicator.innerText = "It's your turn!";
       }
-      if (gameState.chain.length > 0) {
-        hintText.innerText = "Name a movie sharing an actor with the previous one!";
-      } else {
-        hintText.innerText = "Start the chain! Name ANY valid movie.";
-      }
+      hintText.innerText = gameState.chain.length > 0
+        ? "Name a movie sharing an actor with the previous one!"
+        : "Start the chain! Name ANY valid movie.";
     } else {
       inputArea.classList.add('disabled-area');
       movieInput.disabled = true;

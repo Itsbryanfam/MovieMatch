@@ -81,9 +81,8 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
   socket.join(id);
   socket.emit('joined', { lobbyId: id, playerId: socket.id });
 
-  if (global.cachedPosters && global.cachedPosters.length > 0) {
-    socket.emit('posters', global.cachedPosters);
-  }
+  const playerPosters = posterCache.getPosters();
+  if (playerPosters.length > 0) socket.emit('posters', playerPosters);
 
   gameLogic.broadcastState(io, id, room);
 }
@@ -150,12 +149,12 @@ async function assignTeam(ctx, socket, { lobbyId, teamId }) {
   gameLogic.broadcastState(io, lobbyId, room);
 }
 
-async function toggleSetting(ctx, socket, { lobbyId, state }, field) {
+async function toggleSetting(ctx, socket, { lobbyId, state: enabled }, field) {
   const { io, pubClient } = ctx;
   const room = await redisUtils.getLobby(pubClient, lobbyId);
   if (!room || room.status !== 'waiting') return;
   if (!room.players.find(p => p.id === socket.id)?.isHost) return;
-  room[field] = !!state;
+  room[field] = !!enabled;
   await redisUtils.saveLobby(pubClient, lobbyId, room);
   gameLogic.broadcastState(io, lobbyId, room);
 }
@@ -215,7 +214,6 @@ async function requestPublicLobbies(ctx, socket) {
 
 async function handleDisconnect(ctx, socketId) {
   const { io, pubClient, logger } = ctx;
-  const { activeTurnTimeouts } = gameLogic;
 
   try {
     const lobbyId = await redisUtils.getSocketLobby(pubClient, socketId);
@@ -239,10 +237,8 @@ async function handleDisconnect(ctx, socketId) {
       return;
     }
 
-    if (activeTurnTimeouts.has(lobbyId)) {
-      clearTimeout(activeTurnTimeouts.get(lobbyId));
-      activeTurnTimeouts.delete(lobbyId);
-    }
+    // Stop the turn timer so a disconnecting player doesn't trigger a double-elimination
+    gameLogic.clearTurnTimeout(lobbyId);
 
     player.isAlive = false;
     player.connected = false;
@@ -251,6 +247,8 @@ async function handleDisconnect(ctx, socketId) {
 
     if (room.status === 'waiting') {
       room.players = room.players.filter(p => p.id !== socketId);
+      // Promote the next player in join order — no fairness logic needed here
+      // since the host role is just for settings/start permissions.
       if (wasHost && room.players.length > 0) {
         room.players[0].isHost = true;
       }

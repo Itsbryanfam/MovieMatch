@@ -1,5 +1,3 @@
-const { createClient } = require('redis');
-
 async function getLobby(pubClient, id) {
   const data = await pubClient.get(`lobby:${id}`);
   return data ? JSON.parse(data) : null;
