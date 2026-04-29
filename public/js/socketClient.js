@@ -407,7 +407,7 @@ export function initSocket() {
 
     if (heroScreen) heroScreen.classList.remove('active');
 
-    if (data.state.status === 'playing') {
+    if (data.state.status === 'playing' || data.state.status === 'finished') {
       if (lobbyScreen) lobbyScreen.classList.remove('active');
       if (gameScreen) gameScreen.classList.add('active');
       resetMobileTab();
