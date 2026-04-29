@@ -6,8 +6,9 @@ async function getLobby(pubClient, id) {
 }
 
 async function saveLobby(pubClient, id, state) {
-  await pubClient.setEx(`lobby:${id}`, 86400, JSON.stringify(state));
+  await pubClient.setEx(`lobby:${id}`, 7200, JSON.stringify(state));
 }
+
 
 
 async function deleteLobby(pubClient, id) {
@@ -80,33 +81,31 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   }
 
   // Fetch from TMDB
-  const url = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}/credits?language=en-US`;
+  let response;
   if (mediaType === 'tv') {
-    // Use the correct endpoint for TV shows (aggregate_credits)
     const tvUrl = `https://api.themoviedb.org/3/tv/${tmdbId}/aggregate_credits?language=en-US`;
-    const response = await fetch(tvUrl, { headers });
-    if (!response.ok) {
-      await response.arrayBuffer(); // Drain and discard the body to free the socket
-      throw new Error(`TMDB credits failed: ${response.status}`);
-    }
-    const credits = await response.json();
-    await pubClient.set(cacheKey, JSON.stringify(credits), { EX: 2592000 }); // 30 days
-    return credits;
+    response = await fetch(tvUrl, { headers });
+  } else {
+    const url = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}/credits?language=en-US`;
+    response = await fetch(url, { headers });
   }
 
-  const response = await fetch(url, { headers });
   if (!response.ok) {
-    await response.arrayBuffer(); // Drain and discard the body to free the socket
+    await response.arrayBuffer();
     throw new Error(`TMDB credits failed: ${response.status}`);
   }
 
-  
-  const credits = await response.json();
+  const raw = await response.json();
 
-  // Cache for 30 days
-  await pubClient.set(cacheKey, JSON.stringify(credits), { EX: 2592000 }); // 30 days in seconds
+  // Strip to just cast names — the only field the game uses.
+  // Raw responses are 50-100KB; stripped is ~1-2KB. Saves massive Redis memory.
+  const stripped = {
+    cast: (raw.cast || []).map(actor => ({ name: actor.name }))
+  };
 
-  return credits;
+  await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+
+  return stripped;
 }
 
 async function acquireSubmitLock(pubClient, lobbyId) {

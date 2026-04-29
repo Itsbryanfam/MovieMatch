@@ -41,6 +41,51 @@ app.use(limiter);
 
 app.use(express.static('public'));
 
+app.post('/api/admin/flush-credits', async (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    let cursor = '0';
+    let deleted = 0;
+    do {
+      const result = await pubClient.scan(parseInt(cursor), { MATCH: 'credits:*', COUNT: 100 });
+      cursor = String(result.cursor);
+      if (result.keys.length > 0) {
+        await pubClient.del(result.keys);
+        deleted += result.keys.length;
+      }
+    } while (cursor !== '0');
+    logger.info(`Flushed ${deleted} cached credits entries`);
+    res.json({ deleted });
+  } catch (err) {
+    logger.error(err, 'Failed to flush credits cache');
+    res.status(500).json({ error: 'Flush failed' });
+  }
+});
+
+app.get('/api/admin/redis-stats', async (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const info = await pubClient.info('memory');
+    const dbSize = await pubClient.dbSize();
+    const memMatch = info.match(/used_memory_human:(\S+)/);
+    const peakMatch = info.match(/used_memory_peak_human:(\S+)/);
+    res.json({
+      usedMemory: memMatch ? memMatch[1] : 'unknown',
+      peakMemory: peakMatch ? peakMatch[1] : 'unknown',
+      totalKeys: dbSize
+    });
+  } catch (err) {
+    logger.error(err, 'Failed to get Redis stats');
+    res.status(500).json({ error: 'Stats failed' });
+  }
+});
+
 app.get('/api/leaderboard', async (req, res) => {
   try {
     const entries = await redisUtils.getLeaderboard(pubClient);

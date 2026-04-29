@@ -151,10 +151,7 @@ async function checkWinCondition(io, pubClient, id, state) {
       }
       state.status = 'finished';
       state.turnExpiresAt = null;
-      if (pubClient && typeof pubClient.sRem === 'function') {
-        await pubClient.sRem('activeLobbies', id); // Fixed typo
-        await pubClient.del(`lobby:${id}`);
-      }
+
       const winningTeamId = teamAlive[0] ? 0 : 1;
       const winningPlayers = state.players.filter(p => p.teamId === winningTeamId);
       winningPlayers.forEach(p => { 
@@ -188,10 +185,7 @@ async function checkWinCondition(io, pubClient, id, state) {
       }
       state.status = 'finished';
       state.turnExpiresAt = null;
-      if (pubClient && typeof pubClient.sRem === 'function') {
-        await pubClient.sRem('activeLobbies', id); // Fixed typo
-        await pubClient.del(`lobby:${id}`);
-      }
+
       const solo = state.players[0];
       state.winner = {
         name: solo ? solo.name : 'Solo Player',
@@ -215,10 +209,7 @@ async function checkWinCondition(io, pubClient, id, state) {
     }
     state.status = 'finished';
     state.turnExpiresAt = null;
-    if (pubClient && typeof pubClient.sRem === 'function') {
-      await pubClient.sRem('activeLobbies', id); // Fixed typo
-      await pubClient.del(`lobby:${id}`);
-    }
+
     const winner = alivePlayers[0];
     winner.wins = (winner.wins || 0) + 1;
     await redisUtils.incrementPlayerWins(pubClient, winner.stableId || winner.id);
@@ -235,10 +226,7 @@ async function checkWinCondition(io, pubClient, id, state) {
     }
     state.status = 'finished';
     state.turnExpiresAt = null;
-    if (pubClient && typeof pubClient.sRem === 'function') {
-      await pubClient.sRem('activeLobbies', id); // Fixed typo
-      await pubClient.del(`lobby:${id}`);
-    }
+
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
     scheduleGameReset(io, pubClient, id);

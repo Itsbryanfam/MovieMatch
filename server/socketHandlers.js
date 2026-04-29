@@ -444,7 +444,8 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
             let matchedActors = [];
             let failReason = "Invalid movie connection.";
             const lastNode = room.chain.length > 0 ? room.chain[room.chain.length - 1] : null;
-            const lastNodeCast = lastNode ? (lastNode.fullCast || lastNode.movie.cast) : [];
+            const lastNodeCast = lastNode ? lastNode.movie.cast : [];
+
 
             for (let i = 0; i < candidateMovies.length; i++) {
                 const candidate = candidateMovies[i];
