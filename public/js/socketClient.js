@@ -295,6 +295,7 @@ export function initSocket() {
         setTimeout(() => board.classList.remove('shake'), 750);
       }
     } else if (msg.includes('wins')) {
+      document.querySelectorAll('.elimination-flash').forEach(el => el.remove());
       playSuccess();
       setTimeout(playSuccess, 300);
       setTimeout(playSuccess, 600);
