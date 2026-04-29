@@ -92,28 +92,51 @@ export function initSocket() {
       const card = document.createElement('div');
       card.className = 'public-lobby-card';
 
-      let tagsHTML = '';
-      if (lobby.hardcoreMode) tagsHTML += '<span class="mode-tag">Hardcore</span> ';
-      if (lobby.allowTvShows) tagsHTML += '<span class="mode-tag">TV Shows</span>';
+      const info = document.createElement('div');
+      info.className = 'public-lobby-info';
 
-      card.innerHTML = `
-          <div class="public-lobby-info">
-              <h3>${escapeHtml(lobby.hostName)}'s Lobby</h3>
-              <div class="public-lobby-stats">
-                  <span>\u{1F465} ${lobby.playerCount} / 8</span>
-                  ${tagsHTML ? `<div>${tagsHTML}</div>` : ''}
-              </div>
-          </div>
-          <button class="btn-primary join-public-btn" style="padding: 0.5rem 1rem; width: auto;" data-id="${lobby.id}">Join</button>
-      `;
+      const h3 = document.createElement('h3');
+      h3.textContent = lobby.hostName + "'s Lobby";
 
-      const joinButton = card.querySelector('.join-public-btn');
+      const stats = document.createElement('div');
+      stats.className = 'public-lobby-stats';
+
+      const countSpan = document.createElement('span');
+      countSpan.textContent = '👥 ' + lobby.playerCount + ' / 8';
+      stats.appendChild(countSpan);
+
+      if (lobby.hardcoreMode || lobby.allowTvShows) {
+        const tagsDiv = document.createElement('div');
+        if (lobby.hardcoreMode) {
+          const tag = document.createElement('span');
+          tag.className = 'mode-tag';
+          tag.textContent = 'Hardcore';
+          tagsDiv.appendChild(tag);
+        }
+        if (lobby.allowTvShows) {
+          const tag = document.createElement('span');
+          tag.className = 'mode-tag';
+          tag.textContent = 'TV Shows';
+          tagsDiv.appendChild(tag);
+        }
+        stats.appendChild(tagsDiv);
+      }
+
+      info.appendChild(h3);
+      info.appendChild(stats);
+
+      const joinButton = document.createElement('button');
+      joinButton.className = 'btn-primary join-public-btn';
+      joinButton.style.cssText = 'padding: 0.5rem 1rem; width: auto;';
+      joinButton.textContent = 'Join';
       joinButton.addEventListener('click', () => {
         const name = playerNameInput ? playerNameInput.value.trim() : '';
         if (!name) return;
         socket.emit('joinLobby', { name, lobbyId: lobby.id, stableId: getStableId() });
       });
 
+      card.appendChild(info);
+      card.appendChild(joinButton);
       publicLobbiesList.appendChild(card);
     });
   });
@@ -251,8 +274,11 @@ export function initSocket() {
     if (hint) hint.remove();
     const div = document.createElement('div');
     div.className = 'chat-msg';
-    const badge = fromSpectator ? ' \uD83D\uDC41' : '';
-    div.innerHTML = `<span class="chat-author">${escapeHtml(playerName)}${badge}:</span>${escapeHtml(msg)}`;
+    const author = document.createElement('span');
+    author.className = 'chat-author';
+    author.textContent = playerName + (fromSpectator ? ' \uD83D\uDC41' : '') + ':';
+    div.appendChild(author);
+    div.appendChild(document.createTextNode(msg));
     const isNearBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 50;
 
     chatMessages.appendChild(div);
@@ -289,7 +315,6 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('disconnect', (reason) => {
-    console.warn('\u26A0\uFE0F Socket disconnected:', reason);
     const banner = document.getElementById('offline-banner');
     if (banner && reason !== 'io client disconnect') {
       banner.classList.remove('hidden');
@@ -297,11 +322,9 @@ export function initSocket() {
   });
 
   socket.on('reconnect', () => {
-    console.log('\uD83D\uDD04 Reconnected to server');
     const lobbyId = getCurrentLobbyId();
     const playerId = getMyPlayerId();
     if (lobbyId && playerId) {
-      console.log(`\uD83D\uDD04 Attempting to rejoin lobby ${lobbyId}`);
       socket.emit('rejoinLobby', { lobbyId, playerId });
     } else {
       const banner = document.getElementById('offline-banner');
@@ -310,7 +333,6 @@ export function initSocket() {
   });
 
   socket.on('rejoinSuccess', (data) => {
-    console.log('\u2705 Rejoined lobby successfully', data);
     const banner = document.getElementById('offline-banner');
     if (banner) banner.classList.add('hidden');
 
@@ -325,7 +347,6 @@ export function initSocket() {
   });
 
   socket.on('rejoinFailed', (msg) => {
-    console.warn('\u274C Rejoin failed:', msg);
     showNotification(msg || 'Could not rejoin game');
   });
 

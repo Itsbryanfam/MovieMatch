@@ -167,10 +167,13 @@ export function renderTeamScreen(gameState, myPlayerId, amIHost) {
     gameState.players.filter(p => p.teamId === teamId).forEach(p => {
       const li = document.createElement('li');
       li.className = 'team-player-chip' + (p.id === myPlayerId ? ' is-me' : '');
-      let label = escapeHtml(p.name);
-      if (p.id === myPlayerId) label += ' (You)';
-      if (p.isHost) label += '<span class="chip-host"> 👑</span>';
-      li.innerHTML = label;
+      li.textContent = p.name + (p.id === myPlayerId ? ' (You)' : '');
+      if (p.isHost) {
+        const crown = document.createElement('span');
+        crown.className = 'chip-host';
+        crown.textContent = ' 👑';
+        li.appendChild(crown);
+      }
       list.appendChild(li);
     });
   });
