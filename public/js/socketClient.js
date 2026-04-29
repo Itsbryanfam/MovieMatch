@@ -12,6 +12,7 @@ import {
   initUIElements, renderLobby, renderGame, renderTeamScreen,
   showNotification, renderAutocompleteResults, closeMobileAc,
   openShareModal, showGameOverBanner, resetMobileTab,
+  showEliminationFlash, showSelfEliminationScreen, showWinFlash,
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
@@ -176,9 +177,32 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('stateUpdate', (state) => {
+    const prevState = getGameState();
+    const prevSelfAlive = prevState?.players?.find(p => p.id === getMyPlayerId())?.isAlive;
+    const wasMyTurn = prevState?.status === 'playing' &&
+      prevState?.players?.[prevState?.currentTurnIndex]?.id === getMyPlayerId();
+
     const promotion = onStateUpdate(state);
     if (promotion === 'promoted') {
       showNotification('\uD83C\uDFAE You\'ve joined the game!');
+    }
+
+    // Self-elimination detection
+    const newSelfAlive = state.players?.find(p => p.id === getMyPlayerId())?.isAlive;
+    if (prevSelfAlive === true && newSelfAlive === false) {
+      showSelfEliminationScreen();
+    }
+
+    // Your-turn glow
+    const isNowMyTurn = state.status === 'playing' &&
+      state.players?.[state.currentTurnIndex]?.id === getMyPlayerId();
+    if (isNowMyTurn && !wasMyTurn && !getIsSpectator()) {
+      const inputArea = document.getElementById('input-area');
+      if (inputArea) {
+        inputArea.classList.remove('your-turn-flash');
+        void inputArea.offsetWidth;
+        inputArea.classList.add('your-turn-flash');
+      }
     }
 
     if (state.status === 'playing') {
@@ -195,6 +219,7 @@ export function initSocket() {
         if (!gs || !gs.turnExpiresAt || gs.status !== 'playing') {
           clearInterval(interval);
           setTurnInterval(null);
+          if (timerBar) timerBar.classList.remove('timer-critical');
           return;
         }
 
@@ -208,14 +233,18 @@ export function initSocket() {
 
           if (tr <= 10) {
             timerBar.style.backgroundColor = 'var(--timer-red)';
+            timerBar.classList.add('timer-critical');
             if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
               playTick();
               setLastTickSound(Math.floor(Date.now() / 1000));
             }
-          } else if (tr <= 30) {
-            timerBar.style.backgroundColor = 'var(--timer-yellow)';
           } else {
-            timerBar.style.backgroundColor = 'var(--timer-green)';
+            timerBar.classList.remove('timer-critical');
+            if (tr <= 30) {
+              timerBar.style.backgroundColor = 'var(--timer-yellow)';
+            } else {
+              timerBar.style.backgroundColor = 'var(--timer-green)';
+            }
           }
         }
 
@@ -246,15 +275,21 @@ export function initSocket() {
     showNotification(msg);
     if (msg.includes('eliminated')) {
       playFail();
+      showEliminationFlash();
+      const overlay = document.getElementById('notification-overlay');
+      if (overlay) {
+        overlay.classList.add('notification--elimination');
+      }
       const board = document.querySelector('.board');
       if (board) {
         board.classList.add('shake');
-        setTimeout(() => board.classList.remove('shake'), 500);
+        setTimeout(() => board.classList.remove('shake'), 750);
       }
     } else if (msg.includes('wins')) {
       playSuccess();
       setTimeout(playSuccess, 300);
       setTimeout(playSuccess, 600);
+      showWinFlash();
     }
   });
 

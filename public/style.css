@@ -1248,8 +1248,8 @@ input:disabled {
 }
 
 @keyframes slideIn {
-  from { opacity: 0; transform: translateX(-15px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateY(-20px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes dropIn {
@@ -1269,14 +1269,21 @@ input:disabled {
 }
 
 .shake {
-  animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+  animation: shake 0.75s cubic-bezier(.36,.07,.19,.97) both;
 }
 
 @keyframes shake {
-  10%, 90% { transform: translate3d(-1px, 0, 0); }
-  20%, 80% { transform: translate3d(2px, 0, 0); }
-  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
-  40%, 60% { transform: translate3d(4px, 0, 0); }
+  0%   { transform: translate3d(0, 0, 0); }
+  10%  { transform: translate3d(-5px, 0, 0); }
+  20%  { transform: translate3d(5px, 0, 0); }
+  30%  { transform: translate3d(-7px, -1px, 0); }
+  40%  { transform: translate3d(7px, 1px, 0); }
+  50%  { transform: translate3d(-5px, 0, 0); }
+  60%  { transform: translate3d(5px, 0, 0); }
+  70%  { transform: translate3d(-3px, 0, 0); }
+  80%  { transform: translate3d(3px, 0, 0); }
+  90%  { transform: translate3d(-1px, 0, 0); }
+  100% { transform: translate3d(0, 0, 0); }
 }
 
 /* REACTIONS */
@@ -1607,6 +1614,7 @@ input:disabled {
   font-weight: 800;
   letter-spacing: -0.02em;
   margin-bottom: 0.25rem;
+  animation: winnerGlow 2.5s ease-in-out infinite;
 }
 
 .game-over-subtitle {
@@ -2152,3 +2160,164 @@ input:disabled {
 .empty-board-icon  { font-size: 2rem; }
 .empty-board-title { font-size: 1.1rem; font-weight: 600; }
 .empty-board-sub   { font-size: 0.9rem; opacity: 0.8; }
+
+/* ============================================================
+   ANIMATION OVERHAUL — elimination, timers, turns, win
+   ============================================================ */
+
+/* ---- Elimination vignette (any elimination) ---- */
+@keyframes eliminationVignette {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.elimination-flash {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center,
+    transparent 30%,
+    rgba(220, 38, 38, 0.5) 80%,
+    rgba(185, 28, 28, 0.7) 100%
+  );
+  pointer-events: none;
+  z-index: 800;
+  animation: eliminationVignette 1.4s ease-out forwards;
+}
+
+/* ---- Self-elimination full-screen overlay ---- */
+@keyframes selfElimEnter {
+  0%   { opacity: 0; transform: scale(1.06); }
+  15%  { opacity: 1; transform: scale(1); }
+  75%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.97); }
+}
+
+.self-elim-screen {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 0, 0, 0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 850;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  pointer-events: none;
+  animation: selfElimEnter 2.8s ease-in-out forwards;
+}
+
+.self-elim-icon {
+  font-size: 3.5rem;
+  filter: grayscale(0.3);
+}
+
+.self-elim-title {
+  font-size: clamp(1.8rem, 5vw, 2.8rem);
+  font-weight: 800;
+  color: var(--team-red);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 30px rgba(248, 113, 113, 0.6);
+}
+
+.self-elim-sub {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---- Elimination notification tint ---- */
+#notification-overlay.notification--elimination {
+  background: rgba(50, 5, 5, 0.9);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+#notification-overlay.notification--elimination #notification-text {
+  color: var(--team-red);
+  text-shadow: 0 0 24px rgba(248, 113, 113, 0.5);
+}
+
+/* ---- Sidebar eliminated entry flash ---- */
+@keyframes playerEliminatedEntry {
+  0%   { background: rgba(220, 38, 38, 0.25); transform: translateX(0); }
+  20%  { background: rgba(220, 38, 38, 0.4);  transform: translateX(-5px); }
+  50%  { background: rgba(220, 38, 38, 0.15); transform: translateX(3px); }
+  100% { background: transparent;             transform: translateX(0); }
+}
+
+.sidebar-players li.eliminated {
+  animation: playerEliminatedEntry 0.7s ease-out forwards;
+}
+
+/* ---- Notification exit ---- */
+@keyframes notifExit {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.95); }
+}
+
+#notification-overlay.is-exiting {
+  animation: notifExit 0.3s ease-in forwards;
+  pointer-events: none;
+}
+
+/* ---- Timer critical blink ---- */
+@keyframes timerBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+
+#timer-bar.timer-critical {
+  animation: timerBlink 0.7s ease-in-out infinite;
+}
+
+/* ---- Your-turn input glow ---- */
+@keyframes turnActivate {
+  0%   { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0); border-color: var(--border-subtle); }
+  40%  { box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.25); border-color: var(--accent-primary); }
+  100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0); border-color: var(--border-subtle); }
+}
+
+.input-area.your-turn-flash {
+  animation: turnActivate 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ---- Win celebration flash ---- */
+@keyframes winCelebration {
+  0%   { opacity: 0; }
+  15%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.win-flash {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center,
+    rgba(129, 140, 248, 0.3) 0%,
+    rgba(99, 102, 241, 0.15) 50%,
+    transparent 75%
+  );
+  pointer-events: none;
+  z-index: 800;
+  animation: winCelebration 2.2s ease-out forwards;
+}
+
+/* ---- Game-over banner winner glow ---- */
+@keyframes winnerGlow {
+  0%, 100% { text-shadow: 0 0 12px rgba(129, 140, 248, 0.3); }
+  50%       { text-shadow: 0 0 30px rgba(129, 140, 248, 0.7), 0 0 60px rgba(129, 140, 248, 0.2); }
+}
+
+/* ---- Chain first-node ceremonial entrance ---- */
+@keyframes dropInFirst {
+  0%   { opacity: 0; transform: translateY(-20px) scale(0.95); }
+  60%  { opacity: 1; transform: translateY(3px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.chain-item:first-child {
+  animation: dropInFirst 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
