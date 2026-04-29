@@ -55,7 +55,7 @@
   </style>
 </head>
 <body>
-  <div id="offline-banner" class="hidden" style="position:fixed; top:0; left:0; right:0; background:var(--status-danger); color:white; text-align:center; padding:0.5rem; z-index:9999; font-weight:600; font-size:0.9rem; box-shadow:0 4px 12px rgba(0,0,0,0.5);">
+  <div id="offline-banner" class="offline-banner hidden">
     ⚠️ Connection lost. Trying to reconnect...
   </div>
   <div id="poster-carousel"></div>
@@ -83,6 +83,13 @@
             Run out of time or fumble a connection&nbsp;&mdash; you're eliminated.
             Last player standing wins.
           </p>
+          <div class="hero-features">
+            <span class="hero-feature-pill">⚔️ Classic</span>
+            <span class="hero-feature-pill">🤝 Team</span>
+            <span class="hero-feature-pill">⚡ Speed</span>
+            <span class="hero-feature-pill">📺 TV Shows</span>
+            <span class="hero-feature-pill">🔥 Hardcore</span>
+          </div>
           <div class="hero-cta-group">
             <button id="hero-play-btn" class="btn-primary hero-play-btn">
               &#9654;&nbsp; Play Now &mdash; It's Free
@@ -147,7 +154,7 @@
           <input type="text" id="player-name" placeholder="John Doe" autocomplete="off" />
         </div>
         
-        <div class="flex-column" style="display:flex; flex-direction:column; gap: 0.75rem;">
+        <div class="btn-stack">
           <button id="show-public-btn" class="btn-primary">Browse Public Rooms</button>
           <button id="show-private-btn" class="btn-secondary">Create / Join Private Room</button>
         </div>
@@ -168,24 +175,24 @@
       </div>
 
       <!-- STAGE 2B: PUBLIC ROOMS -->
-      <div id="public-panel" class="panel hidden lobby-panel" style="max-width: 500px; width: 100%;">
-        <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="text-align:left;">
+      <div id="public-panel" class="panel hidden lobby-panel">
+        <div class="panel-header">
+          <div>
             <h2>Public Matchmaking</h2>
             <p>Join an open lobby</p>
           </div>
-          <button id="refresh-lobbies-btn" class="btn-secondary" style="width:auto; padding: 0.5rem 1rem;">Refresh</button>
+          <button id="refresh-lobbies-btn" class="btn-secondary">Refresh</button>
         </div>
-        
-        <div class="public-lobbies-list" id="public-lobbies-list" style="max-height: 350px; overflow-y:auto; margin-bottom: 1rem; display:flex; flex-direction:column; gap: 0.5rem;">
+
+        <div class="public-lobbies-list" id="public-lobbies-list">
            <div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">Loading lobbies...</div>
         </div>
-        
+
         <button id="back-to-join-btn-2" class="btn-secondary">Back</button>
       </div>
-      
+
       <div id="waiting-room" class="panel hidden lobby-panel">
-        <div class="panel-header" style="position:relative;">
+        <div class="panel-header">
           <h2>Room: <span id="lobby-code-display" class="accent-text"></span></h2>
           <p>Waiting for players...</p>
           <label class="setting-toggle" style="position:absolute; top:0; right:0;" title="List this room on the Public Matchmaking viewer">
@@ -237,7 +244,7 @@
 
       <!-- TEAM ASSIGNMENT SCREEN -->
       <div id="team-screen" class="panel hidden lobby-panel team-screen-panel">
-        <div class="panel-header" style="position:relative;">
+        <div class="panel-header">
           <h2>🤝 Team Battle</h2>
           <p>Pick your side — Room: <span id="team-lobby-code" class="accent-text"></span></p>
         </div>
@@ -254,9 +261,9 @@
           </div>
         </div>
         <p class="team-hint" id="team-hint">Teams need at least 1 player each.</p>
-        <div style="display:flex; gap:0.75rem; margin-top:0.5rem;">
-          <button id="team-back-btn" class="btn-secondary" style="flex:1;">← Back</button>
-          <button id="team-start-btn" class="btn-primary" style="flex:2; display:none;">Start Match</button>
+        <div class="team-actions">
+          <button id="team-back-btn" class="btn-secondary">← Back</button>
+          <button id="team-start-btn" class="btn-primary" style="display:none;">Start Match</button>
         </div>
       </div>
     </div>
@@ -267,7 +274,7 @@
       <nav class="mobile-tabs" id="mobile-tabs">
         <button class="mobile-tab active" data-tab="board">🎬 Board</button>
         <button class="mobile-tab" data-tab="players">👥 Players</button>
-        <button class="mobile-tab" data-tab="chat" style="position:relative;">💬 Chat <span id="chat-badge" style="display:none; position:absolute; top:4px; right:8px; width:8px; height:8px; background:var(--status-danger); border-radius:50%;"></span></button>
+        <button class="mobile-tab" data-tab="chat">💬 Chat <span id="chat-badge" style="display:none;"></span></button>
       </nav>
       <div class="layout-grid">
         <!-- Sidebar -->
@@ -330,9 +337,9 @@
             <div id="chat-messages" class="chat-messages">
                 <div class="empty-hint">Start chatting...</div>
             </div>
-            <div class="chat-input-wrapper" style="display: flex; gap: 0.5rem; align-items: center;">
-              <input type="text" id="chat-input" placeholder="Say something..." autocomplete="off" style="flex: 1;">
-              <button id="chat-send-btn" class="btn-icon" style="width: 36px; height: 36px; min-height: 36px; flex-shrink: 0; border-radius: 6px;">
+            <div class="chat-input-wrapper">
+              <input type="text" id="chat-input" placeholder="Say something..." autocomplete="off">
+              <button id="chat-send-btn" class="btn-icon chat-send-btn">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
               </button>
             </div>
@@ -396,16 +403,16 @@
         </div>
       </div>
 
-      <h3 class="modal-section-title" style="margin: 1.5rem 0 0.5rem; font-size: 1.1rem; font-weight: 700;">🎮 Game Modes</h3>
-      <div class="how-to-modes" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;">
-        <div class="mode-badge" style="background: rgba(255,255,255,0.05); padding: 0.6rem; border-radius: 8px; font-size: 0.85rem;">⚔️ <strong>Classic</strong> — Last player standing wins. Timer shrinks every two plays.</div>
-        <div class="mode-badge" style="background: rgba(248, 113, 113, 0.1); padding: 0.6rem; border-radius: 8px; font-size: 0.85rem;">🤝 <strong>Team</strong> — 2v2 shared-turn action. If one player fails, the whole team goes down!</div>
-        <div class="mode-badge" style="background: rgba(129, 140, 248, 0.1); padding: 0.6rem; border-radius: 8px; font-size: 0.85rem;">🎯 <strong>Solo</strong> — Endless survival. Rack up the highest movie chain length possible.</div>
-        <div class="mode-badge" style="background: rgba(245, 158, 11, 0.1); padding: 0.6rem; border-radius: 8px; font-size: 0.85rem;">⚡ <strong>Speed</strong> — Pure chaos. Exactly 15 seconds per turn for the entire game.</div>
+      <h3 class="modal-section-title">🎮 Game Modes</h3>
+      <div class="how-to-modes">
+        <div class="mode-badge mode-badge--classic">⚔️ <strong>Classic</strong> — Last player standing wins. Timer shrinks every two plays.</div>
+        <div class="mode-badge mode-badge--team">🤝 <strong>Team</strong> — 2v2 shared-turn action. If one player fails, the whole team goes down!</div>
+        <div class="mode-badge mode-badge--solo">🎯 <strong>Solo</strong> — Endless survival. Rack up the highest movie chain length possible.</div>
+        <div class="mode-badge mode-badge--speed">⚡ <strong>Speed</strong> — Pure chaos. Exactly 15 seconds per turn for the entire game.</div>
       </div>
 
-      <h3 class="modal-section-title" style="margin: 1.5rem 0 0.5rem; font-size: 1.1rem; font-weight: 700;">⚙️ Modifiers</h3>
-      <div class="how-to-modes" style="display: flex; flex-direction: column; gap: 0.5rem;">
+      <h3 class="modal-section-title">⚙️ Modifiers</h3>
+      <div class="how-to-modes">
         <div class="mode-badge">🔥 <strong>Hardcore Mode</strong> — you can't reuse the same connecting actor from the previous turn.</div>
         <div class="mode-badge">📺 <strong>TV Shows</strong> — expands the pool to include television series alongside films.</div>
       </div>
