@@ -122,11 +122,27 @@ export function renderLobby(gameState, myPlayerId) {
   lobbyPlayersList.innerHTML = '';
   gameState.players.forEach(p => {
     const li = document.createElement('li');
+    li.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+
+    const nameSpan = document.createElement('span');
     let label = p.name;
     if (p.id === myPlayerId) label += ' (You)';
     if (p.isHost) label += ' 👑';
     if (p.wins > 0) label += ` • ${p.wins} 🏆`;
-    li.innerText = label;
+    nameSpan.textContent = label;
+    li.appendChild(nameSpan);
+
+    if (amIHost && p.id !== myPlayerId) {
+      const kickBtn = document.createElement('button');
+      kickBtn.className = 'btn-kick';
+      kickBtn.title = 'Remove from lobby';
+      kickBtn.textContent = '✕';
+      kickBtn.addEventListener('click', () => {
+        getSocket().emit('kickPlayer', { lobbyId: gameState.id, targetId: p.id });
+      });
+      li.appendChild(kickBtn);
+    }
+
     lobbyPlayersList.appendChild(li);
   });
 

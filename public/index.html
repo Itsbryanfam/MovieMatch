@@ -56,7 +56,7 @@
 </head>
 <body>
   <div id="offline-banner" class="offline-banner hidden">
-    ⚠️ Connection lost. Trying to reconnect...
+    ⚠️ Connection lost — reconnecting... (15s before elimination)
   </div>
   <div id="poster-carousel"></div>
   <div id="app-container">
@@ -297,7 +297,11 @@
             </div>
             <div class="input-header">
               <span id="turn-indicator" class="status-indicator">Waiting for game to start...</span>
-              <span id="time-text" class="time-text">60s</span>
+              <div class="input-header-right">
+                <span id="time-text" class="time-text">60s</span>
+                <button id="mute-btn" class="btn-icon mute-btn" title="Toggle sound">🔊</button>
+                <button id="game-invite-btn" class="btn-icon" title="Copy invite link">🔗</button>
+              </div>
             </div>
             
             <div class="input-row">

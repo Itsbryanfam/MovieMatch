@@ -13,6 +13,12 @@ const posterCache = require('../posterCache');
 // Unambiguous charset for lobby codes (Crockford base32 — no 0/O, 1/I/L)
 const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 
+// In-memory grace period timers — same pattern as activeTurnTimeouts in gameLogic.
+// Not Redis-backed: a pod restart during the 15s window would eliminate the player,
+// which is acceptable (the 15s is a best-effort courtesy, not a guarantee).
+const graceTimers = new Map();
+const RECONNECT_GRACE_MS = 15000;
+
 async function generateLobbyId(pubClient) {
   let id;
   do {
@@ -91,7 +97,7 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
 // RECONNECTION
 // ---------------------------------------------------------------------------
 
-async function rejoinLobby(ctx, socket, { lobbyId, playerId }) {
+async function rejoinLobby(ctx, socket, { lobbyId, playerId, stableId }) {
   const { io, pubClient } = ctx;
 
   const room = await redisUtils.getLobby(pubClient, lobbyId);
@@ -100,10 +106,21 @@ async function rejoinLobby(ctx, socket, { lobbyId, playerId }) {
     return;
   }
 
-  const player = room.players.find(p => p.id === playerId);
+  // Primary lookup: by current socket.id. Fallback: disconnected player by stableId
+  // (socket.id changes on page refresh, stableId is persistent in localStorage).
+  const player = room.players.find(p => p.id === playerId)
+    || room.players.find(p => p.stableId === stableId && !p.connected);
+
   if (!player) {
     socket.emit('rejoinFailed', 'Player not found in lobby');
     return;
+  }
+
+  // Clear grace period timer so the player isn't eliminated after reconnecting
+  const graceKey = `${lobbyId}:${player.id}`;
+  if (graceTimers.has(graceKey)) {
+    clearTimeout(graceTimers.get(graceKey));
+    graceTimers.delete(graceKey);
   }
 
   const oldSocketId = player.id;
@@ -156,6 +173,33 @@ async function toggleSetting(ctx, socket, { lobbyId, state: enabled }, field) {
   if (!room.players.find(p => p.id === socket.id)?.isHost) return;
   room[field] = !!enabled;
   await redisUtils.saveLobby(pubClient, lobbyId, room);
+  gameLogic.broadcastState(io, lobbyId, room);
+}
+
+// ---------------------------------------------------------------------------
+// KICK PLAYER (host-only, waiting state)
+// ---------------------------------------------------------------------------
+
+async function kickPlayer(ctx, socket, { lobbyId, targetId }) {
+  const { io, pubClient } = ctx;
+  const room = await redisUtils.getLobby(pubClient, lobbyId);
+  if (!room || room.status !== 'waiting') return;
+  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
+  if (targetId === socket.id) return; // can't kick yourself
+
+  const target = room.players.find(p => p.id === targetId);
+  if (!target) return;
+
+  room.players = room.players.filter(p => p.id !== targetId);
+  await redisUtils.saveLobby(pubClient, lobbyId, room);
+  await redisUtils.deleteSocketLobby(pubClient, targetId);
+
+  const targetSocket = io.sockets.sockets.get(targetId);
+  if (targetSocket) {
+    targetSocket.emit('kicked', 'You were removed from the lobby.');
+    targetSocket.leave(lobbyId);
+  }
+
   gameLogic.broadcastState(io, lobbyId, room);
 }
 
@@ -240,8 +284,12 @@ async function handleDisconnect(ctx, socketId) {
     // Stop the turn timer so a disconnecting player doesn't trigger a double-elimination
     gameLogic.clearTurnTimeout(lobbyId);
 
-    player.isAlive = false;
+    // In playing state we use a grace period — keep the player alive while they try to reconnect.
+    // In all other states, mark them dead immediately.
     player.connected = false;
+    if (room.status !== 'playing') {
+      player.isAlive = false;
+    }
 
     const wasHost = player.isHost;
 
@@ -262,14 +310,37 @@ async function handleDisconnect(ctx, socketId) {
     }
 
     if (room.status === 'playing') {
-      const isCurrentTurnPlayer = room.players[room.currentTurnIndex]?.id === socketId;
-      if (isCurrentTurnPlayer) {
-        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Player disconnected");
-      } else {
-        await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
-        const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
-        if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
-      }
+      // Broadcast immediately so others see the player as disconnected
+      gameLogic.broadcastState(io, lobbyId, room);
+      io.to(lobbyId).emit('notification', `${player.name} disconnected — waiting 15s...`);
+
+      const graceKey = `${lobbyId}:${socketId}`;
+      const graceTimeoutId = setTimeout(async () => {
+        graceTimers.delete(graceKey);
+        try {
+          const liveRoom = await redisUtils.getLobby(pubClient, lobbyId);
+          if (!liveRoom || liveRoom.status !== 'playing') return;
+
+          // Find player by stableId (covers page-refresh rejoins that changed socket.id)
+          const livePlayer = liveRoom.players.find(p => p.stableId === player.stableId || p.id === socketId);
+          if (!livePlayer || livePlayer.connected) return; // already reconnected
+
+          const isCurrentTurn = liveRoom.players[liveRoom.currentTurnIndex]?.id === livePlayer.id;
+          if (isCurrentTurn) {
+            await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, liveRoom, 'Disconnected');
+          } else {
+            livePlayer.isAlive = false;
+            await redisUtils.saveLobby(pubClient, lobbyId, liveRoom);
+            await gameLogic.checkWinCondition(io, pubClient, lobbyId, liveRoom);
+            const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+            if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+          }
+        } catch (err) {
+          logger.error(err, 'Grace period elimination error');
+        }
+      }, RECONNECT_GRACE_MS);
+
+      graceTimers.set(graceKey, graceTimeoutId);
     } else {
       const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
       if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
@@ -283,6 +354,7 @@ module.exports = {
   generateLobbyId,
   joinLobby,
   rejoinLobby,
+  kickPlayer,
   setGameMode,
   assignTeam,
   toggleSetting,

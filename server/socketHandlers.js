@@ -33,6 +33,7 @@ const RATE_LIMITS = {
   forceNextTurn:{ limit: 2,  windowMs: 5000  },
   chat:         { limit: 5,  windowMs: 5000  },
   reaction:     { limit: 10, windowMs: 5000  },
+  kickPlayer:   { limit: 5,  windowMs: 10000 },
 };
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,11 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
     socket.on('requestPublicLobbies', async () => {
       await lobbySystem.requestPublicLobbies(ctx, socket);
+    });
+
+    socket.on('kickPlayer', async (data) => {
+      if (await rateLimit(socket.id, 'kickPlayer', RATE_LIMITS.kickPlayer.limit, RATE_LIMITS.kickPlayer.windowMs)) return;
+      await lobbySystem.kickPlayer(ctx, socket, data);
     });
 
     // -----------------------------------------------------------------------

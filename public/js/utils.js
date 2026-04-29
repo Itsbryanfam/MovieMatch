@@ -10,6 +10,19 @@ export function escapeHtml(unsafe) {
 }
 
 // ---------------------------------------------------------------------------
+// MUTE STATE
+// ---------------------------------------------------------------------------
+
+let muted = localStorage.getItem('mm_muted') === 'true';
+
+export function isMuted() { return muted; }
+export function toggleMute() {
+  muted = !muted;
+  localStorage.setItem('mm_muted', String(muted));
+  return muted;
+}
+
+// ---------------------------------------------------------------------------
 // AUDIO SYNTHESIS (Web Audio API)
 // ---------------------------------------------------------------------------
 // audioCtx is lazily initialized on first use — creating it at module load
@@ -18,6 +31,7 @@ let AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx;
 
 export function playTone(frequency, type, duration) {
+  if (muted) return;
   if (!audioCtx) audioCtx = new AudioCtx();
   const oscillator = audioCtx.createOscillator();
   const gainNode = audioCtx.createGain();

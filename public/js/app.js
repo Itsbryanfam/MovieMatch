@@ -30,7 +30,7 @@ import {
 
 import { initSocket, leaveLobby } from './socketClient.js';
 import { getSocket, getCurrentLobbyId, getGameState } from './state.js';
-import { prepareAudio, getStableId, unlockAudioGlobally } from './utils.js';
+import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute } from './utils.js';
 
 // ============================================================================
 // INITIALIZATION
@@ -45,6 +45,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 3. Unlock audio for browsers that require user interaction
   unlockAudioGlobally();
+
+  // =========================================================================
+  // MUTE BUTTON
+  // =========================================================================
+
+  const muteBtn = document.getElementById('mute-btn');
+  if (muteBtn) {
+    muteBtn.textContent = isMuted() ? '🔇' : '🔊';
+    muteBtn.classList.toggle('muted', isMuted());
+    muteBtn.addEventListener('click', () => {
+      const nowMuted = toggleMute();
+      muteBtn.textContent = nowMuted ? '🔇' : '🔊';
+      muteBtn.classList.toggle('muted', nowMuted);
+    });
+  }
+
+  // =========================================================================
+  // IN-GAME INVITE BUTTON
+  // =========================================================================
+
+  const gameInviteBtn = document.getElementById('game-invite-btn');
+  gameInviteBtn?.addEventListener('click', () => {
+    const code = getCurrentLobbyId();
+    if (!code) return;
+    const url = window.location.origin + '?room=' + code;
+    navigator.clipboard.writeText(url)
+      .then(() => showToast('Invite link copied! 🔗'))
+      .catch(() => showToast('Room code: ' + code));
+  });
 
   // 4. Request background posters
   setTimeout(() => {

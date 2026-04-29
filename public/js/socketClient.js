@@ -15,7 +15,7 @@ import {
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
-  waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
+  heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
   chatMessages
 } from './ui.js';
 
@@ -217,6 +217,10 @@ export function initSocket() {
       }
     }
 
+    document.title = (isNowMyTurn && !getIsSpectator())
+      ? '🎬 Your turn! — MovieMatch'
+      : 'MovieMatch';
+
     if (state.status === 'playing') {
       if (lobbyScreen) lobbyScreen.classList.remove('active');
       if (gameScreen) gameScreen.classList.add('active');
@@ -275,6 +279,7 @@ export function initSocket() {
       renderLobby(state, getMyPlayerId());
     } else if (state.status === 'finished') {
       clearTurnTimer();
+      document.title = 'MovieMatch';
       renderGame(state, getMyPlayerId(), getIsSpectator());
     }
   });
@@ -363,17 +368,25 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('disconnect', (reason) => {
+    document.title = 'MovieMatch';
     const banner = document.getElementById('offline-banner');
     if (banner && reason !== 'io client disconnect') {
       banner.classList.remove('hidden');
     }
   });
 
-  socket.on('reconnect', () => {
-    const lobbyId = getCurrentLobbyId();
-    const playerId = getMyPlayerId();
-    if (lobbyId && playerId) {
-      socket.emit('rejoinLobby', { lobbyId, playerId });
+  // Covers both socket reconnect (same tab) and page refresh (new socket).
+  // sessionStorage holds the last known lobbyId/playerId and is cleared on intentional leave,
+  // so this will no-op on a fresh page load with no prior session.
+  socket.on('connect', () => {
+    const savedLobbyId = sessionStorage.getItem('mm_lobbyId');
+    const savedPlayerId = sessionStorage.getItem('mm_playerId');
+    if (savedLobbyId && savedPlayerId) {
+      socket.emit('rejoinLobby', {
+        lobbyId: savedLobbyId,
+        playerId: savedPlayerId,
+        stableId: getStableId(),
+      });
     } else {
       const banner = document.getElementById('offline-banner');
       if (banner) banner.classList.add('hidden');
@@ -385,6 +398,9 @@ export function initSocket() {
     if (banner) banner.classList.add('hidden');
 
     onRejoined(data);
+    // Update sessionStorage with the new socket.id so future refreshes use the correct ID
+    sessionStorage.setItem('mm_lobbyId', data.lobbyId);
+    sessionStorage.setItem('mm_playerId', data.playerId);
 
     if (data.state.status === 'playing') {
       renderGame(data.state, getMyPlayerId());
@@ -395,7 +411,24 @@ export function initSocket() {
   });
 
   socket.on('rejoinFailed', (msg) => {
-    showNotification(msg || 'Could not rejoin game');
+    // Clear stale session so we don't retry on next connect
+    sessionStorage.removeItem('mm_lobbyId');
+    sessionStorage.removeItem('mm_playerId');
+    const banner = document.getElementById('offline-banner');
+    // Only show error if there was an active disconnect (banner visible)
+    if (banner && !banner.classList.contains('hidden')) {
+      banner.classList.add('hidden');
+      showNotification(msg || 'Could not rejoin game');
+    }
+  });
+
+  socket.on('kicked', (msg) => {
+    showNotification(msg || 'You were removed from the lobby.');
+    resetSession();
+    if (gameScreen) gameScreen.classList.remove('active');
+    if (lobbyScreen) lobbyScreen.classList.remove('active');
+    if (heroScreen) heroScreen.classList.add('active');
+    if (waitingRoom) waitingRoom.classList.add('hidden');
   });
 
   return socket;

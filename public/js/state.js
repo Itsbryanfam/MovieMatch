@@ -54,6 +54,11 @@ export function onJoined(data) {
   currentLobbyId = data.lobbyId;
   myPlayerId = data.playerId;
   isSpectator = data.isSpectator || false;
+  // Persist so a page refresh can attempt rejoin during the grace period
+  if (!isSpectator) {
+    sessionStorage.setItem('mm_lobbyId', data.lobbyId);
+    sessionStorage.setItem('mm_playerId', data.playerId);
+  }
 }
 
 /** Called when receiving a state update from the server */
@@ -86,6 +91,8 @@ export function resetSession() {
   gameState = null;
   isSpectator = false;
   lastTickSound = 0;
+  sessionStorage.removeItem('mm_lobbyId');
+  sessionStorage.removeItem('mm_playerId');
 }
 
 /** Clear the turn timer interval */
