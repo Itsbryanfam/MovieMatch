@@ -415,6 +415,9 @@ export function initSocket() {
     } else {
       if (gameScreen) gameScreen.classList.remove('active');
       if (lobbyScreen) lobbyScreen.classList.add('active');
+      document.getElementById('join-panel')?.classList.add('hidden');
+      document.getElementById('private-panel')?.classList.add('hidden');
+      document.getElementById('public-panel')?.classList.add('hidden');
       if (waitingRoom) waitingRoom.classList.remove('hidden');
       renderLobby(data.state, getMyPlayerId());
     }
