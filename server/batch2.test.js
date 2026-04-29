@@ -1,10 +1,11 @@
 const gameLogic = require('./gameLogic');
-const { acquireSubmitLock, releaseSubmitLock } = jest.requireActual('./redisUtils');
+const { acquireSubmitLock, releaseSubmitLock, recordWin, getLeaderboard } = jest.requireActual('./redisUtils');
 const { clampString } = require('./socketHandlers');
 const redisUtils = require('./redisUtils');
 
 jest.mock('./redisUtils');
 redisUtils.incrementPlayerWins.mockReturnValue(Promise.resolve());
+redisUtils.recordWin.mockReturnValue(Promise.resolve());
 
 describe('clampString', () => {
   test('returns empty string for non-string input', () => {
@@ -269,5 +270,52 @@ describe('promoteSpectators', () => {
     const state = { players: [{ id: 'p1' }] };
     gameLogic.promoteSpectators(state);
     expect(state.players).toHaveLength(1);
+  });
+});
+
+describe('leaderboard functions', () => {
+  test('recordWin increments sorted set and stores player name', async () => {
+    const mockClient = {
+      zIncrBy: jest.fn().mockResolvedValue(3),
+      set: jest.fn().mockResolvedValue('OK'),
+    };
+    await recordWin(mockClient, 'p_abc', 'Alice');
+    expect(mockClient.zIncrBy).toHaveBeenCalledWith('leaderboard', 1, 'p_abc');
+    expect(mockClient.set).toHaveBeenCalledWith('playerName:p_abc', 'Alice', { EX: 2592000 });
+  });
+
+  test('getLeaderboard returns top players with names', async () => {
+    const mockClient = {
+      zRangeWithScores: jest.fn().mockResolvedValue([
+        { value: 'p_abc', score: 5 },
+        { value: 'p_def', score: 3 },
+      ]),
+      mGet: jest.fn().mockResolvedValue(['Alice', 'Bob']),
+    };
+    const result = await getLeaderboard(mockClient, 20);
+    expect(result).toEqual([
+      { name: 'Alice', wins: 5 },
+      { name: 'Bob', wins: 3 },
+    ]);
+    expect(mockClient.zRangeWithScores).toHaveBeenCalledWith('leaderboard', 0, 19, { REV: true });
+  });
+
+  test('getLeaderboard shows Unknown Player for missing names', async () => {
+    const mockClient = {
+      zRangeWithScores: jest.fn().mockResolvedValue([
+        { value: 'p_ghost', score: 2 },
+      ]),
+      mGet: jest.fn().mockResolvedValue([null]),
+    };
+    const result = await getLeaderboard(mockClient);
+    expect(result).toEqual([{ name: 'Unknown Player', wins: 2 }]);
+  });
+
+  test('getLeaderboard returns empty array when no entries exist', async () => {
+    const mockClient = {
+      zRangeWithScores: jest.fn().mockResolvedValue([]),
+    };
+    const result = await getLeaderboard(mockClient);
+    expect(result).toEqual([]);
   });
 });

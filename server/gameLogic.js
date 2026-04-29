@@ -152,6 +152,7 @@ async function checkWinCondition(io, pubClient, id, state) {
       winningPlayers.forEach(p => { 
         p.wins = (p.wins || 0) + 1; 
         redisUtils.incrementPlayerWins(pubClient, p.stableId || p.id).catch(e => logger.error(e, 'Failed to increment team player wins'));
+        redisUtils.recordWin(pubClient, p.stableId || p.id, p.name).catch(e => logger.error(e, 'Failed to record team win'));
       });
       const teamLabel = winningTeamId === 0 ? '🔴 Red' : '🔵 Blue';
       state.winner = {
@@ -197,6 +198,7 @@ async function checkWinCondition(io, pubClient, id, state) {
     const winner = alivePlayers[0];
     winner.wins = (winner.wins || 0) + 1;
     await redisUtils.incrementPlayerWins(pubClient, winner.stableId || winner.id);
+    await redisUtils.recordWin(pubClient, winner.stableId || winner.id, winner.name);
     state.winner = { name: winner.name, score: winner.score, id: winner.id };
     io.to(id).emit('notification', `${winner.name} wins!`);
     await redisUtils.saveLobby(pubClient, id, state);

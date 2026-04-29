@@ -41,6 +41,16 @@ app.use(limiter);
 
 app.use(express.static('public'));
 
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const entries = await redisUtils.getLeaderboard(pubClient);
+    res.json(entries);
+  } catch (err) {
+    logger.error(err, 'Failed to fetch leaderboard');
+    res.status(500).json({ error: 'Failed to load leaderboard' });
+  }
+});
+
 const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
 const subClient = pubClient.duplicate();
 
@@ -79,6 +89,7 @@ async function fetchBackgroundPosters() {
 }
 
 const { setupSocketHandlers } = require('./server/socketHandlers');
+const redisUtils = require('./server/redisUtils');
 
 async function startApp() {
   try {

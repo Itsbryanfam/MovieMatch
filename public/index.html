@@ -60,6 +60,7 @@
     <header class="app-header">
       <div class="logo">Movie<span>Match</span></div>
       <nav class="header-nav">
+        <button id="leaderboard-btn" class="nav-link-btn">Leaderboard</button>
         <button id="how-to-play-btn" class="nav-link-btn">How to Play</button>
         <button id="credits-btn" class="nav-link-btn">Credits</button>
       </nav>
@@ -433,6 +434,15 @@
           <span class="tech-badge">Redis</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="leaderboard-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <button class="modal-close" id="close-leaderboard">✕</button>
+      <h2 class="modal-title">🏆 Leaderboard</h2>
+      <p class="modal-subtitle">Top players by wins</p>
+      <div id="leaderboard-list" style="max-height:400px;overflow-y:auto;margin-top:1rem;"></div>
     </div>
   </div>
 

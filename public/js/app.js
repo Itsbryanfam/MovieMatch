@@ -50,6 +50,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const creditsModal = document.getElementById('credits-modal');
   const closeHowToPlay = document.getElementById('close-how-to-play');
   const closeCredits = document.getElementById('close-credits');
+  const leaderboardBtn = document.getElementById('leaderboard-btn');
+  const leaderboardModal = document.getElementById('leaderboard-modal');
+  const closeLeaderboard = document.getElementById('close-leaderboard');
+  const leaderboardList = document.getElementById('leaderboard-list');
   const submitBtn = document.getElementById('submit-btn');
   const movieInput = document.getElementById('movie-input');
   const autocompleteContainer = document.getElementById('autocomplete-container');
@@ -287,17 +291,69 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   });
 
-  howToPlayBtn?.addEventListener('click', () => howToPlayModal?.classList.remove('hidden'));
+    howToPlayBtn?.addEventListener('click', () => howToPlayModal?.classList.remove('hidden'));
   creditsBtn?.addEventListener('click', () => creditsModal?.classList.remove('hidden'));
   closeHowToPlay?.addEventListener('click', () => howToPlayModal?.classList.add('hidden'));
   closeCredits?.addEventListener('click', () => creditsModal?.classList.add('hidden'));
   howToPlayModal?.addEventListener('click', (e) => { if (e.target === howToPlayModal) howToPlayModal.classList.add('hidden'); });
   creditsModal?.addEventListener('click', (e) => { if (e.target === creditsModal) creditsModal.classList.add('hidden'); });
 
-  document.addEventListener('keydown', (e) => {
+  async function loadLeaderboard() {
+    leaderboardModal.classList.remove('hidden');
+    leaderboardList.innerHTML = '';
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'empty-hint';
+    loadingDiv.style.cssText = 'text-align:center;padding:2rem;color:var(--text-muted);';
+    loadingDiv.textContent = 'Loading...';
+    leaderboardList.appendChild(loadingDiv);
+    try {
+      const res = await fetch('/api/leaderboard');
+      const data = await res.json();
+      leaderboardList.innerHTML = '';
+      if (!data.length) {
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'empty-hint';
+        emptyDiv.style.cssText = 'text-align:center;padding:2rem;color:var(--text-muted);font-style:italic;';
+        emptyDiv.textContent = 'No wins recorded yet. Play a game!';
+        leaderboardList.appendChild(emptyDiv);
+        return;
+      }
+      data.forEach((entry, i) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;padding:0.75rem 1rem;border-bottom:1px solid rgba(255,255,255,0.06);';
+        const rank = document.createElement('span');
+        rank.style.cssText = 'width:2.5rem;font-size:1.1rem;text-align:center;flex-shrink:0;';
+        rank.textContent = i === 0 ? '\uD83E\uDD47' : i === 1 ? '\uD83E\uDD48' : i === 2 ? '\uD83E\uDD49' : '#' + (i + 1);
+        const name = document.createElement('span');
+        name.style.cssText = 'flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        name.textContent = entry.name;
+        const wins = document.createElement('span');
+        wins.style.cssText = 'color:var(--text-muted,#94a3b8);font-size:0.9rem;flex-shrink:0;margin-left:0.5rem;';
+        wins.textContent = entry.wins + ' \uD83C\uDFC6';
+        row.appendChild(rank);
+        row.appendChild(name);
+        row.appendChild(wins);
+        leaderboardList.appendChild(row);
+      });
+    } catch (err) {
+      leaderboardList.innerHTML = '';
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'empty-hint';
+      errorDiv.style.cssText = 'text-align:center;padding:2rem;color:var(--text-muted);';
+      errorDiv.textContent = 'Failed to load leaderboard.';
+      leaderboardList.appendChild(errorDiv);
+    }
+  }
+
+  leaderboardBtn?.addEventListener('click', loadLeaderboard);
+  closeLeaderboard?.addEventListener('click', () => leaderboardModal?.classList.add('hidden'));
+  leaderboardModal?.addEventListener('click', (e) => { if (e.target === leaderboardModal) leaderboardModal.classList.add('hidden'); });
+
+    document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
           howToPlayModal?.classList.add('hidden');
           creditsModal?.classList.add('hidden');
+          leaderboardModal?.classList.add('hidden');
       }
   });
 

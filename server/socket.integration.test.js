@@ -65,6 +65,8 @@ describe('Socket.io Integration', () => {
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
     redisUtils.acquireSubmitLock.mockResolvedValue(true);
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+    redisUtils.recordWin.mockResolvedValue(undefined);
+    redisUtils.getLeaderboard.mockResolvedValue([]);
     // Reset pubClient mocks
     mockPubClient.exists.mockResolvedValue(0);
     mockPubClient.multi.mockReturnValue({

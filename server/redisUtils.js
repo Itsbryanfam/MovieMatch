@@ -110,6 +110,22 @@ async function releaseSubmitLock(pubClient, lobbyId) {
   await pubClient.del(`lock:submit:${lobbyId}`);
 }
 
+async function recordWin(pubClient, stableId, name) {
+  await pubClient.zIncrBy('leaderboard', 1, stableId);
+  await pubClient.set(`playerName:${stableId}`, name, { EX: 2592000 }); // 30 days
+}
+
+async function getLeaderboard(pubClient, limit = 20) {
+  const results = await pubClient.zRangeWithScores('leaderboard', 0, limit - 1, { REV: true });
+  if (results.length === 0) return [];
+  const nameKeys = results.map(r => `playerName:${r.value}`);
+  const names = await pubClient.mGet(nameKeys);
+  return results.map((r, i) => ({
+    name: names[i] || 'Unknown Player',
+    wins: Math.floor(r.score)
+  }));
+}
+
 module.exports = {
   getLobby,
   saveLobby,
@@ -125,5 +141,7 @@ module.exports = {
   setPlayerWins,
   getOrFetchCredits,
   acquireSubmitLock,
-  releaseSubmitLock
+  releaseSubmitLock,
+  recordWin,
+  getLeaderboard
 };
