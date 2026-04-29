@@ -356,8 +356,37 @@ body {
     font-size: 1.8rem;
   }
 
+  /* Keep the demo visible on small screens — it's the strongest first-impression
+     element and shows new visitors what the game actually is. Just trim it down. */
   .hero-demo {
-    display: none;
+    flex: none;
+    width: 100%;
+    max-width: 100%;
+    padding: 0.85rem;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+
+  .hero-demo .demo-poster {
+    width: 44px;
+    height: 64px;
+  }
+
+  .hero-demo .chain-item {
+    padding: 0.5rem 0.6rem;
+    gap: 0.6rem;
+  }
+
+  .hero-demo .movie-title {
+    font-size: 0.85rem;
+  }
+
+  .hero-demo .movie-cast {
+    font-size: 0.7rem;
+  }
+
+  .hero-demo .player-name {
+    font-size: 0.7rem;
   }
 }
 
@@ -1783,6 +1812,22 @@ input:disabled {
     padding-bottom: 1rem;
   }
 
+  /* 4-across mode chips cramp at 375px and force text overflow. 2x2 keeps
+     each chip wide enough to fit the icon + name comfortably. */
+  .mode-chips {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+  }
+
+  .mode-chip {
+    padding: 0.85rem 0.5rem;
+    min-height: 60px;
+  }
+
+  .mode-chip-name {
+    font-size: 0.85rem;
+  }
+
   /* GAME SCREEN */
   #game-screen {
     flex-direction: column;
@@ -1808,7 +1853,33 @@ input:disabled {
     border-radius: var(--radius-xl);
     padding: 4px;
     gap: 4px;
-    margin-bottom: 0.75rem;
+    /* Anchor to the bottom of the viewport so the tab bar stays put when
+       the on-screen keyboard opens. --keyboard-inset is updated by app.js
+       via the Visual Viewport API; without keyboard, env(safe-area-inset-bottom)
+       handles iPhones with home indicators. */
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px));
+    z-index: 50;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.4);
+    transition: bottom 0.15s ease-out;
+  }
+
+  /* Reserve space at the bottom of the game screen so the fixed tab bar
+     never overlaps the input row or chat. */
+  #game-screen {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Lift the chat input above the keyboard when it opens — same pattern
+     as the tab bar. The chat panel has its own scroll, so we shift only
+     the input wrapper itself. */
+  [data-panel="chat"].mobile-visible .chat-input-wrapper {
+    position: sticky;
+    bottom: var(--keyboard-inset, 0px);
+    background: var(--bg-surface);
+    z-index: 5;
   }
 
   .mobile-tab {
@@ -2345,13 +2416,21 @@ input:disabled {
   background: transparent;
   border: 1px solid rgba(248, 113, 113, 0.3);
   color: #f87171;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  /* Tap target sized to Apple HIG 44px minimum so hosts on phones don't
+     mis-tap adjacent player rows. Width comes from min-width + padding. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.4rem 0.7rem;
   cursor: pointer;
-  line-height: 1.4;
+  line-height: 1;
   transition: background 0.15s;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-kick:hover { background: rgba(248, 113, 113, 0.15); }
+.btn-kick:active { background: rgba(248, 113, 113, 0.25); }

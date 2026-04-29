@@ -661,4 +661,22 @@ document.addEventListener('DOMContentLoaded', () => {
       bgCarousel.style.transform = `rotate(-6deg) translate(${xShift}px, ${yShift}px)`;
     });
   }
+
+  // =========================================================================
+  // MOBILE KEYBOARD HANDLING
+  // =========================================================================
+  // On mobile, the on-screen keyboard normally covers the chat input + the
+  // bottom-fixed tab bar. We use the Visual Viewport API to detect keyboard
+  // open/close and lift fixed elements above it.
+  if (window.visualViewport) {
+    const root = document.documentElement;
+    const updateKeyboardOffset = () => {
+      const offset = Math.max(0, window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop);
+      root.style.setProperty('--keyboard-inset', offset + 'px');
+      root.classList.toggle('keyboard-open', offset > 50);
+    };
+    window.visualViewport.addEventListener('resize', updateKeyboardOffset);
+    window.visualViewport.addEventListener('scroll', updateKeyboardOffset);
+    updateKeyboardOffset();
+  }
 });
