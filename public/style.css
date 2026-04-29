@@ -2080,12 +2080,17 @@ input:disabled {
   }
 }
 
-/* Solo Mode UI Adjustments */
-.solo-mode-ui .sidebar[data-panel="players"] {
-  display: none !important;
-}
+/* =============================================
+   SOLO MODE UI — focused single-column layout
+   =============================================
+   Without the players sidebar and chat to fill the multiplayer 3-column
+   grid, solo mode used to leave a 380px right panel mostly empty (just
+   autocomplete suggestions) and forced 1fr 380px on every viewport,
+   which broke mobile entirely. Now solo collapses to a single centered
+   column on all screen sizes and uses the mobile-style floating
+   autocomplete dropdown that already works for the small-screen game. */
 
-.solo-mode-ui .chat-half {
+.solo-mode-ui .sidebar {
   display: none !important;
 }
 
@@ -2098,10 +2103,19 @@ input:disabled {
 }
 
 .solo-mode-ui .layout-grid {
-  grid-template-columns: 1fr 380px !important;
-  max-width: 1400px;
+  display: flex;
+  justify-content: center;
+  max-width: 720px;
   margin: 0 auto;
   padding: 0 1rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.solo-mode-ui .game-board {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
 }
 
 .solo-mode-ui .feed-container {
@@ -2114,6 +2128,64 @@ input:disabled {
   background: var(--accent-glow);
   padding: 0.25rem 0.75rem;
   border: 1px solid rgba(129, 140, 248, 0.4);
+}
+
+/* Always use the floating autocomplete dropdown in solo mode (no side
+   panel exists to host the desktop autocomplete, since the sidebars are
+   hidden). The .mobile-ac-dropdown class is normally only enabled on
+   <=767px screens; we re-enable it here for all widths. */
+.solo-mode-ui .mobile-ac-dropdown {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 50;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.solo-mode-ui .mobile-ac-dropdown.open {
+  max-height: 300px;
+  pointer-events: auto;
+}
+
+.solo-mode-ui .mobile-ac-dropdown .autocomplete-item {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0.75rem 1rem;
+  min-height: 52px;
+}
+
+.solo-mode-ui .mobile-ac-dropdown .autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.solo-mode-ui .mobile-ac-dropdown .empty-hint {
+  padding: 1rem;
+  font-size: 0.8rem;
+}
+
+/* On mobile, fall back into the existing single-column flow but drop the
+   max-width cap (already constrained by the viewport) and the horizontal
+   padding the multiplayer mobile layout uses. */
+@media (max-width: 767px) {
+  .solo-mode-ui .layout-grid {
+    max-width: none;
+    padding: 0;
+  }
+
+  /* The 60px bottom-padding on #game-screen reserves room for the fixed
+     mobile tab bar — solo hides that bar, so reclaim the space. */
+  .solo-mode-ui#game-screen,
+  #game-screen.solo-mode-ui {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 /* =============================================
