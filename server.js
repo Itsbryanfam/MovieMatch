@@ -49,13 +49,13 @@ subClient.on('error', (err) => logger.error(err, 'Redis Sub Client Error'));
 
 const TMDB_TOKEN = process.env.TMDB_READ_TOKEN;
 if (!TMDB_TOKEN) {
-  console.error('FATAL: TMDB_READ_TOKEN environment variable is required. Set it in your .env file.');
+  logger.fatal('TMDB_READ_TOKEN environment variable is required. Set it in your .env file.');
   process.exit(1);
 }
 const TMDB_HEADERS = { Authorization: `Bearer ${TMDB_TOKEN}`, accept: 'application/json' };
 
 let io;
-let cachedPosters = [];
+
 
 async function fetchBackgroundPosters() {
   try {
@@ -83,10 +83,10 @@ const { setupSocketHandlers } = require('./server/socketHandlers');
 async function startApp() {
   try {
     await Promise.all([pubClient.connect(), subClient.connect()]);
-    console.log('Redis connected');
+    logger.info('Redis connected');
     setInterval(fetchBackgroundPosters, 30 * 60 * 1000);
   } catch (err) {
-    console.error("FAIL", err);
+    logger.error(err, 'Redis connection failed');
   }
 
   io = new Server(server, { 
@@ -94,11 +94,35 @@ async function startApp() {
     cors: { origin: process.env.FRONTEND_URL || 'http://localhost:3000' }
   });
 
-  setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS);
+  setupSocketHandlers(io, pubClient, TMDB_HEADERS);
 
   const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+  server.listen(PORT, () => logger.info(`Server listening on port ${PORT}`));
 }
 
 fetchBackgroundPosters();
 startApp();
+
+// Graceful shutdown — close connections cleanly on deploy or Ctrl+C
+function gracefulShutdown(signal) {
+  logger.info(`${signal} received — shutting down`);
+  server.close(() => {
+    Promise.all([pubClient.quit(), subClient.quit()])
+      .then(() => {
+        logger.info('Shutdown complete');
+        process.exit(0);
+      })
+      .catch((err) => {
+        logger.error(err, 'Error during shutdown');
+        process.exit(1);
+      });
+  });
+  // Force exit if graceful shutdown hangs
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

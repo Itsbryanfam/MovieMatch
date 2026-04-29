@@ -48,7 +48,7 @@ export function initSocket() {
     if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = currentLobbyId;
   });
 
-  socket.on('error', (msg) => alert(msg));
+  socket.on('error', (msg) => showNotification(msg));
 
   socket.on('publicLobbiesList', (lobbies) => {
     if (!publicLobbiesList) return;

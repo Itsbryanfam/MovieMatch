@@ -1,4 +1,5 @@
 const redisUtils = require('./redisUtils');
+const logger = require('pino')();
 
 // In-memory map for active turn timeouts (never stored in Redis)
 const activeTurnTimeouts = new Map();
@@ -76,7 +77,7 @@ async function nextTurn(io, pubClient, id, state) {
         await eliminateCurrentPlayer(io, pubClient, id, liveRoom, "Turn timed out");
       }
     } catch (err) {
-      console.error("Timeout handler error:", err);
+      logger.error(err, 'Timeout handler error');
     } finally {
       activeTurnTimeouts.delete(id); // cleanup even on error
     }
@@ -113,7 +114,7 @@ async function checkWinCondition(io, pubClient, id, state) {
       const winningPlayers = state.players.filter(p => p.teamId === winningTeamId);
       winningPlayers.forEach(p => { 
         p.wins = (p.wins || 0) + 1; 
-        redisUtils.incrementPlayerWins(pubClient, p.stableId || p.id).catch(e => console.error(e));
+        redisUtils.incrementPlayerWins(pubClient, p.stableId || p.id).catch(e => logger.error(e, 'Failed to increment team player wins'));
       });
       const teamLabel = winningTeamId === 0 ? '🔴 Red' : '🔵 Blue';
       state.winner = {

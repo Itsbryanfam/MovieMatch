@@ -101,6 +101,15 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   return credits;
 }
 
+async function acquireSubmitLock(pubClient, lobbyId) {
+  const result = await pubClient.set(`lock:submit:${lobbyId}`, '1', { NX: true, EX: 30 });
+  return result !== null;
+}
+
+async function releaseSubmitLock(pubClient, lobbyId) {
+  await pubClient.del(`lock:submit:${lobbyId}`);
+}
+
 module.exports = {
   getLobby,
   saveLobby,
@@ -114,5 +123,7 @@ module.exports = {
   getPlayerWins,
   incrementPlayerWins,
   setPlayerWins,
-  getOrFetchCredits
+  getOrFetchCredits,
+  acquireSubmitLock,
+  releaseSubmitLock
 };

@@ -35,7 +35,7 @@ describe('Socket.io Integration', () => {
     httpServer = http.createServer();
     io = new Server(httpServer, { cors: { origin: '*' } });
     const TMDB_HEADERS = { Authorization: 'Bearer test_token', accept: 'application/json' };
-    setupSocketHandlers(io, mockPubClient, [], TMDB_HEADERS);
+    setupSocketHandlers(io, mockPubClient, TMDB_HEADERS);
     httpServer.listen(0, () => {
       port = httpServer.address().port;
       done();
@@ -63,6 +63,8 @@ describe('Socket.io Integration', () => {
     redisUtils.deleteLobby.mockResolvedValue(undefined);
     redisUtils.getSocketLobby.mockResolvedValue(null);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+    redisUtils.acquireSubmitLock.mockResolvedValue(true);
+    redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     // Reset pubClient mocks
     mockPubClient.exists.mockResolvedValue(0);
     mockPubClient.multi.mockReturnValue({

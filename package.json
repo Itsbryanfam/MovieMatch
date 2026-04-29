@@ -2,7 +2,7 @@
   "name": "moviematch",
   "version": "1.0.0",
   "description": "MovieMatch real-time text-based battle royale",
-  "main": "index.js",
+  "main": "server.js",
   "engines": {
     "node": ">=18"
   },

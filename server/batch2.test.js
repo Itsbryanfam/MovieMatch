@@ -1,4 +1,5 @@
 const gameLogic = require('./gameLogic');
+const { acquireSubmitLock, releaseSubmitLock } = jest.requireActual('./redisUtils');
 const { clampString } = require('./socketHandlers');
 const redisUtils = require('./redisUtils');
 
@@ -187,5 +188,28 @@ describe('gameLogic — all players eliminated', () => {
     await gameLogic.checkWinCondition(mockIo, mockPubClient, 'LOBBY1', state);
     expect(state.status).toBe('finished');
     expect(state.winner).toBe(null);
+  });
+});
+
+describe('submitLock functions', () => {
+  test('acquireSubmitLock returns true when lock is available', async () => {
+    const mockClient = { set: jest.fn().mockResolvedValue('OK') };
+    const result = await acquireSubmitLock(mockClient, 'LOBBY1');
+    expect(result).toBe(true);
+    expect(mockClient.set).toHaveBeenCalledWith(
+      'lock:submit:LOBBY1', '1', { NX: true, EX: 30 }
+    );
+  });
+
+  test('acquireSubmitLock returns false when lock is already held', async () => {
+    const mockClient = { set: jest.fn().mockResolvedValue(null) };
+    const result = await acquireSubmitLock(mockClient, 'LOBBY1');
+    expect(result).toBe(false);
+  });
+
+  test('releaseSubmitLock deletes the lock key', async () => {
+    const mockClient = { del: jest.fn().mockResolvedValue(1) };
+    await releaseSubmitLock(mockClient, 'LOBBY1');
+    expect(mockClient.del).toHaveBeenCalledWith('lock:submit:LOBBY1');
   });
 });

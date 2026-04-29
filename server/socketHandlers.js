@@ -5,10 +5,7 @@ const logger = pino();
 // Use the shared map from gameLogic so timeouts can be cancelled on disconnect
 const { activeTurnTimeouts } = gameLogic;
 
-function escapeHtml(unsafe) {
-  if (!unsafe || typeof unsafe !== 'string') return unsafe;
-  return unsafe.replace(/[<>&"']/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;','\'':'&#39;'})[m]);
-}
+
 
 function clampString(value, maxLen) {
   if (typeof value !== 'string') return '';
@@ -28,7 +25,7 @@ async function generateLobbyId(pubClient) {
   return id;
 }
 
-function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
+function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
   // Simple per-socket rate limiter (Redis-backed)
   async function rateLimit(socketId, action, limit = 10, windowMs = 10000) {
     const key = `ratelimit:${action}:${socketId}`;
@@ -322,6 +319,12 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
         const player = room.players.find(p => p.id === socket.id);
         if (!player || !player.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
         
+        // Atomic Redis lock prevents concurrent submits for this lobby.
+        // NX = only set if key doesn't exist. EX 30 = auto-expire after 30s (safety net).
+        const lockAcquired = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+        if (!lockAcquired) return;
+
+        try {
         room.isValidating = true; 
         await redisUtils.saveLobby(pubClient, lobbyId, room);
 
@@ -399,7 +402,7 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
                     mediaType: mediaType 
                   };
               } catch(e) { 
-                  console.error("Credits fetch error:", e);
+                  logger.error(e, 'Credits fetch error');
                   return { id: c.id, title: c.name || c.title, year: 'Unknown', cast: [], poster: null, mediaType: c.media_type || 'movie'}; 
               }
             }));
@@ -420,7 +423,7 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
             for (let i = 0; i < candidateMovies.length; i++) {
                 const candidate = candidateMovies[i];
                 const uniqueKey = `${candidate.mediaType}:${candidate.id}`;
-                console.log('🔍 Server checking duplicate:', { uniqueKey, usedMovies: room.usedMovies });
+
                 if (room.usedMovies.includes(uniqueKey)) { 
                   if(i===0) failReason = "Movie already used!"; 
                   continue; 
@@ -480,6 +483,9 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
             room.isValidating = false; 
             await redisUtils.saveLobby(pubClient, lobbyId, room);
             await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "API Error or Timeout!");
+        }
+        } finally {
+            await redisUtils.releaseSubmitLock(pubClient, lobbyId).catch(() => {});
         }
     });
 
@@ -544,7 +550,7 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
               if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
             }
           } catch (err) {
-            console.error(`[handleDisconnect] Error for socket ${socketId}:`, err);
+            logger.error(err, `handleDisconnect error for socket ${socketId}`);
           }
         }
 
