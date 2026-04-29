@@ -382,6 +382,9 @@ export function initSocket() {
     const savedLobbyId = sessionStorage.getItem('mm_lobbyId');
     const savedPlayerId = sessionStorage.getItem('mm_playerId');
     if (savedLobbyId && savedPlayerId) {
+      // Hide hero screen immediately \u2014 rejoinSuccess/rejoinFailed will handle final state.
+      // This prevents the hero from flashing behind the lobby/game on page refresh.
+      if (heroScreen) heroScreen.classList.remove('active');
       socket.emit('rejoinLobby', {
         lobbyId: savedLobbyId,
         playerId: savedPlayerId,
@@ -402,9 +405,17 @@ export function initSocket() {
     sessionStorage.setItem('mm_lobbyId', data.lobbyId);
     sessionStorage.setItem('mm_playerId', data.playerId);
 
+    if (heroScreen) heroScreen.classList.remove('active');
+
     if (data.state.status === 'playing') {
-      renderGame(data.state, getMyPlayerId());
+      if (lobbyScreen) lobbyScreen.classList.remove('active');
+      if (gameScreen) gameScreen.classList.add('active');
+      resetMobileTab();
+      renderGame(data.state, getMyPlayerId(), getIsSpectator());
     } else {
+      if (gameScreen) gameScreen.classList.remove('active');
+      if (lobbyScreen) lobbyScreen.classList.add('active');
+      if (waitingRoom) waitingRoom.classList.remove('hidden');
       renderLobby(data.state, getMyPlayerId());
     }
     showNotification('\u2705 Reconnected to game!');
@@ -414,6 +425,10 @@ export function initSocket() {
     // Clear stale session so we don't retry on next connect
     sessionStorage.removeItem('mm_lobbyId');
     sessionStorage.removeItem('mm_playerId');
+    // Restore hero screen (was hidden optimistically on connect)
+    if (heroScreen) heroScreen.classList.add('active');
+    if (lobbyScreen) lobbyScreen.classList.remove('active');
+    if (gameScreen) gameScreen.classList.remove('active');
     const banner = document.getElementById('offline-banner');
     // Only show error if there was an active disconnect (banner visible)
     if (banner && !banner.classList.contains('hidden')) {
