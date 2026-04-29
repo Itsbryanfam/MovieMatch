@@ -1,6 +1,19 @@
-// ====================== APP.JS ======================
-// Thin entry point — imports everything and wires up the app
-import { 
+// ============================================================================
+// APP.JS — Entry point + input wiring
+// ============================================================================
+// This file is the INPUT layer. It handles:
+//   - DOM event binding (buttons, inputs, keyboard shortcuts)
+//   - Screen transitions
+//   - Modal management
+//   - Join/name prompt overlays
+//   - Share card actions
+//   - Parallax effect
+//
+// No state ownership — reads through state.js.
+// No socket events — delegates server communication to socketClient.js.
+// ============================================================================
+
+import {
   initUIElements, closeMobileAc, openShareModal, showNotification, showToast,
   playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
@@ -13,137 +26,153 @@ import {
   joinBlueBtn, teamBackBtn, teamStartBtn, teamScreen, downloadCardBtn,
   copyCardBtn, shareCanvas, shareModal
 } from './ui.js';
-import { initSocket, getSocket, getCurrentLobbyId, getGameState, leaveLobby } from './socketClient.js';
+
+import { initSocket, leaveLobby } from './socketClient.js';
+import { getSocket, getCurrentLobbyId, getGameState } from './state.js';
 import { prepareAudio, getStableId, unlockAudioGlobally } from './utils.js';
 
-// Initialize everything when the page loads
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
 document.addEventListener('DOMContentLoaded', () => {
-  // 1. Initialize all DOM references FIRST
+  // 1. Initialize all DOM references
   initUIElements();
-  
-  // 2. Start socket connection
+
+  // 2. Start socket connection (registers all server event listeners)
   const socket = initSocket();
 
-  // Ensure audio works even if user auto-joins via URL params
+  // 3. Unlock audio for browsers that require user interaction
   unlockAudioGlobally();
 
-  // Enable reconnection logging
-  console.log('🔌 Reconnection support enabled');
-  
-  // Small safety delay to ensure DOM is fully ready for background elements
+  // 4. Request background posters
   setTimeout(() => {
-    // Request posters on load (in case the server already sent them)
     if (socket) socket.emit('requestPosters');
   }, 300);
 
-  // 3. All event listeners that were at the bottom of the old app.js
+  // =========================================================================
+  // NAVIGATION
+  // =========================================================================
 
   logo.addEventListener('click', () => {
-    const currentLobbyId = getCurrentLobbyId();
-    if (currentLobbyId) {
-      leaveLobby();
-    }
+    if (getCurrentLobbyId()) leaveLobby();
     gameScreen.classList.remove('active');
     lobbyScreen.classList.remove('active');
     heroScreen.classList.add('active');
     waitingRoom.classList.add('hidden');
-    if(privatePanel) privatePanel.classList.add('hidden');
-    if(publicPanel) publicPanel.classList.add('hidden');
-    if(joinPanel) joinPanel.classList.remove('hidden');
+    if (privatePanel) privatePanel.classList.add('hidden');
+    if (publicPanel) publicPanel.classList.add('hidden');
+    if (joinPanel) joinPanel.classList.remove('hidden');
   });
+
+  // =========================================================================
+  // PLAYER NAME (persisted in localStorage)
+  // =========================================================================
 
   const savedName = localStorage.getItem('mm_playerName');
   if (savedName && playerNameInput) playerNameInput.value = savedName;
   if (playerNameInput) {
-      playerNameInput.addEventListener('input', () => {
-          localStorage.setItem('mm_playerName', playerNameInput.value.trim());
-      });
+    playerNameInput.addEventListener('input', () => {
+      localStorage.setItem('mm_playerName', playerNameInput.value.trim());
+    });
   }
 
   function checkName() {
-      const name = playerNameInput ? playerNameInput.value.trim() : '';
-      if (!name) {
-          showNotification('Enter a name first!');
-          return false;
-      }
-      return true;
+    const name = playerNameInput ? playerNameInput.value.trim() : '';
+    if (!name) {
+      showNotification('Enter a name first!');
+      return false;
+    }
+    return true;
   }
 
+  // =========================================================================
+  // JOIN PANELS
+  // =========================================================================
+
   showPrivateBtn?.addEventListener('click', () => {
-      if (!checkName()) return;
-      joinPanel.classList.add('hidden');
-      privatePanel.classList.remove('hidden');
+    if (!checkName()) return;
+    joinPanel.classList.add('hidden');
+    privatePanel.classList.remove('hidden');
   });
 
   showPublicBtn?.addEventListener('click', () => {
-      if (!checkName()) return;
-      joinPanel.classList.add('hidden');
-      publicPanel.classList.remove('hidden');
-      socket.emit('requestPublicLobbies');
+    if (!checkName()) return;
+    joinPanel.classList.add('hidden');
+    publicPanel.classList.remove('hidden');
+    socket.emit('requestPublicLobbies');
   });
 
   backToJoinBtn?.addEventListener('click', () => {
-      privatePanel.classList.add('hidden');
-      joinPanel.classList.remove('hidden');
+    privatePanel.classList.add('hidden');
+    joinPanel.classList.remove('hidden');
   });
 
   backToJoinBtn2?.addEventListener('click', () => {
-      publicPanel.classList.add('hidden');
-      joinPanel.classList.remove('hidden');
+    publicPanel.classList.add('hidden');
+    joinPanel.classList.remove('hidden');
   });
 
   refreshLobbiesBtn?.addEventListener('click', () => {
-      const publicLobbiesList = document.getElementById('public-lobbies-list');
-      if (publicLobbiesList) publicLobbiesList.innerHTML = '<div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">Loading lobbies...</div>';
-      socket.emit('requestPublicLobbies');
+    const publicLobbiesList = document.getElementById('public-lobbies-list');
+    if (publicLobbiesList) publicLobbiesList.innerHTML = '<div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">Loading lobbies...</div>';
+    socket.emit('requestPublicLobbies');
   });
 
-  function handleJoinRoomSubmit() {
-      const name = playerNameInput ? playerNameInput.value.trim() : '';
-      if (!name) {
-          showNotification('Enter a name first!');
-          if (privatePanel) privatePanel.classList.add('hidden');
-          if (joinPanel) joinPanel.classList.remove('hidden');
-          if (playerNameInput) playerNameInput.focus();
-          return;
-      }
-      localStorage.setItem('mm_playerName', name);
-      getSocket().emit('joinLobby', { 
-          name, 
-          lobbyId: lobbyIdInput ? lobbyIdInput.value.trim() : '',
-          stableId: getStableId()
-      });
+  // =========================================================================
+  // ROOM CODE JOIN
+  // =========================================================================
 
+  function handleJoinRoomSubmit() {
+    const name = playerNameInput ? playerNameInput.value.trim() : '';
+    if (!name) {
+      showNotification('Enter a name first!');
       if (privatePanel) privatePanel.classList.add('hidden');
+      if (joinPanel) joinPanel.classList.remove('hidden');
+      if (playerNameInput) playerNameInput.focus();
+      return;
+    }
+    localStorage.setItem('mm_playerName', name);
+    getSocket().emit('joinLobby', {
+      name,
+      lobbyId: lobbyIdInput ? lobbyIdInput.value.trim() : '',
+      stableId: getStableId()
+    });
+    if (privatePanel) privatePanel.classList.add('hidden');
   }
 
   joinBtn?.addEventListener('click', handleJoinRoomSubmit);
-  
+
   lobbyIdInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') handleJoinRoomSubmit();
-  });
-  
-  playerNameInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-          // If private panel is visible, submit. Otherwise, just save name.
-          if (privatePanel && !privatePanel.classList.contains('hidden')) {
-              handleJoinRoomSubmit();
-          } else if (lobbyIdInput && !privatePanel.classList.contains('hidden') === false) {
-              // Optionally auto-transition to next screen here if desired in the future
-          }
-      }
+    if (e.key === 'Enter') handleJoinRoomSubmit();
   });
 
+  playerNameInput?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      if (privatePanel && !privatePanel.classList.contains('hidden')) {
+        handleJoinRoomSubmit();
+      }
+    }
+  });
+
+  // =========================================================================
+  // GAME LIFECYCLE
+  // =========================================================================
+
   startBtn?.addEventListener('click', () => {
-      socket.emit('startLobby', getCurrentLobbyId());
+    socket.emit('startLobby', getCurrentLobbyId());
   });
 
   heroPlayBtn?.addEventListener('click', () => {
-      heroScreen.classList.remove('active');
-      lobbyScreen.classList.add('active');
+    heroScreen.classList.remove('active');
+    lobbyScreen.classList.add('active');
   });
 
   heroCodeBtn?.addEventListener('click', () => showJoinPrompt());
+
+  // =========================================================================
+  // INVITE LINK JOIN — overlay prompts
+  // =========================================================================
 
   function showNamePrompt(roomCode) {
     const overlay = document.createElement('div');
@@ -276,6 +305,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => { (nameInput.value ? codeInput : nameInput).focus(); }, 100);
   }
 
+  // =========================================================================
+  // URL PARAMS (invite links)
+  // =========================================================================
+
   function checkUrlParams() {
     const params = new URLSearchParams(window.location.search);
     const roomId = params.get('room') || params.get('lobby');
@@ -296,7 +329,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   checkUrlParams();
 
-  // Click lobby code to copy invite link
+  // =========================================================================
+  // CLICK-TO-COPY INVITE LINK
+  // =========================================================================
+
   function setupCodeCopy(element) {
     if (!element) return;
     element.style.cursor = 'pointer';
@@ -306,7 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!code) return;
       const url = window.location.origin + '?room=' + code;
       navigator.clipboard.writeText(url).then(() => {
-        showToast('Invite link copied! 🔗');
+        showToast('Invite link copied! \uD83D\uDD17');
       }).catch(() => {
         navigator.clipboard.writeText(code).catch(() => {});
         showToast('Room code copied!');
@@ -317,49 +353,60 @@ document.addEventListener('DOMContentLoaded', () => {
   setupCodeCopy(document.getElementById('lobby-code-display'));
   setupCodeCopy(document.getElementById('team-lobby-code'));
 
+  // =========================================================================
+  // HERO DEMO ANIMATION
+  // =========================================================================
+
   const heroDemo = document.querySelector('.hero-demo');
   if (heroDemo) {
-      setTimeout(() => {
-          heroDemo.classList.add('animate-demo');
-      }, 500);
+    setTimeout(() => heroDemo.classList.add('animate-demo'), 500);
   }
 
+  // =========================================================================
+  // LOBBY SETTINGS
+  // =========================================================================
+
   modeChips.forEach(chip => {
-      chip.addEventListener('click', () => {
-          const mode = chip.dataset.mode;
-          socket.emit('setGameMode', { lobbyId: getCurrentLobbyId(), mode });
-      });
+    chip.addEventListener('click', () => {
+      const mode = chip.dataset.mode;
+      socket.emit('setGameMode', { lobbyId: getCurrentLobbyId(), mode });
+    });
   });
 
   joinRedBtn?.addEventListener('click', () => {
-      socket.emit('assignTeam', { lobbyId: getCurrentLobbyId(), teamId: 0 });
+    socket.emit('assignTeam', { lobbyId: getCurrentLobbyId(), teamId: 0 });
   });
   joinBlueBtn?.addEventListener('click', () => {
-      socket.emit('assignTeam', { lobbyId: getCurrentLobbyId(), teamId: 1 });
+    socket.emit('assignTeam', { lobbyId: getCurrentLobbyId(), teamId: 1 });
   });
   teamBackBtn?.addEventListener('click', () => {
-      teamScreen.classList.add('hidden');
-      waitingRoom.classList.remove('hidden');
+    teamScreen.classList.add('hidden');
+    waitingRoom.classList.remove('hidden');
   });
   teamStartBtn?.addEventListener('click', () => {
-      socket.emit('startLobby', getCurrentLobbyId());
+    socket.emit('startLobby', getCurrentLobbyId());
   });
 
   hardcoreToggle?.addEventListener('change', (e) => {
-      socket.emit('toggleHardcore', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
+    socket.emit('toggleHardcore', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
   });
 
-  if(publicRoomToggle) {
-      publicRoomToggle.addEventListener('change', (e) => {
-          socket.emit('togglePublic', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
-      });
+  if (publicRoomToggle) {
+    publicRoomToggle.addEventListener('change', (e) => {
+      socket.emit('togglePublic', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
+    });
   }
 
   tvShowsToggle?.addEventListener('change', (e) => {
-      socket.emit('toggleTvShows', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
+    socket.emit('toggleTvShows', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
   });
 
+  // =========================================================================
+  // MOVIE SUBMISSION
+  // =========================================================================
+
   let debounceTimeout = null;
+  const hintText = document.getElementById('hint-text');
 
   function submitMovie() {
     const movie = movieInput ? movieInput.value.trim() : '';
@@ -380,51 +427,58 @@ document.addEventListener('DOMContentLoaded', () => {
 
   submitBtn?.addEventListener('click', submitMovie);
   movieInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') submitMovie();
+    if (e.key === 'Enter') submitMovie();
   });
 
   movieInput?.addEventListener('input', (e) => {
-      const query = e.target.value.trim();
-      if (query.length < 2) {
-          if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
-          closeMobileAc();
-          return;
-      }
-      clearTimeout(debounceTimeout);
-      debounceTimeout = setTimeout(() => {
-          socket.emit('autocompleteSearch', { query, lobbyId: getCurrentLobbyId() });
-      }, 400);
+    const query = e.target.value.trim();
+    if (query.length < 2) {
+      if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+      closeMobileAc();
+      return;
+    }
+    clearTimeout(debounceTimeout);
+    debounceTimeout = setTimeout(() => {
+      socket.emit('autocompleteSearch', { query, lobbyId: getCurrentLobbyId() });
+    }, 400);
   });
 
+  // =========================================================================
+  // CHAT & REACTIONS
+  // =========================================================================
+
   const chatSendBtn = document.getElementById('chat-send-btn');
-  
+
   function handleChatSend() {
-      const msg = chatInput ? chatInput.value.trim() : '';
-      if (msg) {
-          getSocket().emit('sendChat', { lobbyId: getCurrentLobbyId(), msg });
-          if (chatInput) chatInput.value = '';
-      }
+    const msg = chatInput ? chatInput.value.trim() : '';
+    if (msg) {
+      getSocket().emit('sendChat', { lobbyId: getCurrentLobbyId(), msg });
+      if (chatInput) chatInput.value = '';
+    }
   }
-  
+
   chatSendBtn?.addEventListener('click', handleChatSend);
   chatInput?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') handleChatSend();
+    if (e.key === 'Enter') handleChatSend();
   });
 
   const reactionBtns = document.querySelectorAll('.reaction-btn');
   reactionBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-          const lobbyId = getCurrentLobbyId();
-          if (!lobbyId) return;
-          socket.emit('sendReaction', { lobbyId, emoji: btn.innerText });
-          btn.style.transform = 'scale(0.8)';
-          setTimeout(() => btn.style.transform = '', 100);
-      });
+    btn.addEventListener('click', () => {
+      const lobbyId = getCurrentLobbyId();
+      if (!lobbyId) return;
+      socket.emit('sendReaction', { lobbyId, emoji: btn.innerText });
+      btn.style.transform = 'scale(0.8)';
+      setTimeout(() => btn.style.transform = '', 100);
+    });
   });
 
-    howToPlayBtn?.addEventListener('click', () => howToPlayModal?.classList.remove('hidden'));
-  creditsBtn?.addEventListener('click', () => creditsModal?.classList.remove('hidden'));
+  // =========================================================================
+  // MODALS (unified delegation)
+  // =========================================================================
 
+  howToPlayBtn?.addEventListener('click', () => howToPlayModal?.classList.remove('hidden'));
+  creditsBtn?.addEventListener('click', () => creditsModal?.classList.remove('hidden'));
 
   async function loadLeaderboard() {
     leaderboardModal.classList.remove('hidden');
@@ -474,22 +528,26 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   leaderboardBtn?.addEventListener('click', loadLeaderboard);
-  // Unified Modal Management (Handles all Modals)
+
   document.body.addEventListener('click', (e) => {
-      if (e.target.classList.contains('modal-overlay')) {
-          e.target.classList.add('hidden');
-      }
-      if (e.target.closest('.modal-close')) {
-          const overlay = e.target.closest('.modal-overlay');
-          if (overlay) overlay.classList.add('hidden');
-      }
+    if (e.target.classList.contains('modal-overlay')) {
+      e.target.classList.add('hidden');
+    }
+    if (e.target.closest('.modal-close')) {
+      const overlay = e.target.closest('.modal-overlay');
+      if (overlay) overlay.classList.add('hidden');
+    }
   });
 
   document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-          document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
-      }
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
+    }
   });
+
+  // =========================================================================
+  // MOBILE TABS
+  // =========================================================================
 
   const mobileTabs = document.getElementById('mobile-tabs');
   const gameBoardEl = document.querySelector('.game-board');
@@ -497,92 +555,93 @@ document.addEventListener('DOMContentLoaded', () => {
   const chatPanel = document.querySelector('[data-panel="chat"]');
 
   if (mobileTabs) {
-      mobileTabs.addEventListener('click', (e) => {
-          const btn = e.target.closest('.mobile-tab');
-          if (!btn) return;
-          const tab = btn.dataset.tab;
+    mobileTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mobile-tab');
+      if (!btn) return;
+      const tab = btn.dataset.tab;
 
-          document.querySelectorAll('.mobile-tab').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
+      document.querySelectorAll('.mobile-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
 
-          if (gameBoardEl) gameBoardEl.classList.remove('mobile-hidden');
-          if (playersPanel) playersPanel.classList.remove('mobile-visible');
-          if (chatPanel) chatPanel.classList.remove('mobile-visible');
+      if (gameBoardEl) gameBoardEl.classList.remove('mobile-hidden');
+      if (playersPanel) playersPanel.classList.remove('mobile-visible');
+      if (chatPanel) chatPanel.classList.remove('mobile-visible');
 
-          if (tab === 'players') {
-              if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
-              if (playersPanel) playersPanel.classList.add('mobile-visible');
-          } else if (tab === 'chat') {
-              const badge = document.getElementById('chat-badge');
-              if (badge) badge.style.display = 'none';
-              if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
-              if (chatPanel) chatPanel.classList.add('mobile-visible');
-          }
-      });
+      if (tab === 'players') {
+        if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
+        if (playersPanel) playersPanel.classList.add('mobile-visible');
+      } else if (tab === 'chat') {
+        const badge = document.getElementById('chat-badge');
+        if (badge) badge.style.display = 'none';
+        if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
+        if (chatPanel) chatPanel.classList.add('mobile-visible');
+      }
+    });
   }
 
+  // =========================================================================
+  // GAME-OVER ACTIONS (delegated — buttons are created dynamically)
+  // =========================================================================
+
   document.body.addEventListener('click', (e) => {
-      const shareBtn = e.target.closest('#share-results-btn');
-      const playAgainBtn = e.target.closest('#play-again-btn');
-      if (shareBtn) {
-          openShareModal(getGameState());
-      }
-      if (playAgainBtn) {
-          socket.emit('restartLobby', getCurrentLobbyId());
-      }
+    const shareBtn = e.target.closest('#share-results-btn');
+    const playAgainBtn = e.target.closest('#play-again-btn');
+    if (shareBtn) {
+      openShareModal(getGameState());
+    }
+    if (playAgainBtn) {
+      socket.emit('restartLobby', getCurrentLobbyId());
+    }
   });
 
-
+  // =========================================================================
+  // SHARE CARD
+  // =========================================================================
 
   downloadCardBtn?.addEventListener('click', () => {
-      const link = document.createElement('a');
-      link.download = `moviematch-chain-${Date.now()}.png`;
-      link.href = shareCanvas.toDataURL('image/png');
-      link.click();
-      showToast('Downloaded! 🎬');
+    const link = document.createElement('a');
+    link.download = `moviematch-chain-${Date.now()}.png`;
+    link.href = shareCanvas.toDataURL('image/png');
+    link.click();
+    showToast('Downloaded! \uD83C\uDFAC');
   });
 
   copyCardBtn?.addEventListener('click', async () => {
-      try {
-          const blob = await new Promise(res => shareCanvas.toBlob(res, 'image/png'));
-          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-          showToast('Image copied to clipboard! 📋');
-      } catch {
-          // Fallback
-          const text = buildTextRecap(getGameState());
-          navigator.clipboard.writeText(text).catch(() => {});
-          showToast('Image unavailable — text recap copied! ✓');
-      }
+    try {
+      const blob = await new Promise(res => shareCanvas.toBlob(res, 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      showToast('Image copied to clipboard! \uD83D\uDCCB');
+    } catch {
+      const text = buildTextRecap(getGameState());
+      navigator.clipboard.writeText(text).catch(() => {});
+      showToast('Image unavailable \u2014 text recap copied! \u2713');
+    }
   });
 
   function buildTextRecap(state) {
-      const lines = ['🎬 MovieMatch\n'];
-      lines.push(`Chain of ${state.chain.length} connections:\n`);
-      state.chain.forEach((item, i) => {
-          const actor = (item.matchedActors || [])[0];
-          lines.push(`${i + 1}. ${item.playerName} → ${item.movie.title} (${item.movie.year})${actor ? ` ↔ ${actor}` : ''}`);
-      });
-      if (state.winner) lines.push(`\n🏆 ${state.winner.name} wins with ${state.winner.score} pts!`);
-      const siteUrl = window.location.hostname !== 'localhost' ? window.location.hostname : 'moviematch.it.com';
-      lines.push(`\nPlay at ${siteUrl}`);
-      return lines.join('\n');
+    const lines = ['\uD83C\uDFAC MovieMatch\n'];
+    lines.push(`Chain of ${state.chain.length} connections:\n`);
+    state.chain.forEach((item, i) => {
+      const actor = (item.matchedActors || [])[0];
+      lines.push(`${i + 1}. ${item.playerName} \u2192 ${item.movie.title} (${item.movie.year})${actor ? ` \u2194 ${actor}` : ''}`);
+    });
+    if (state.winner) lines.push(`\n\uD83C\uDFC6 ${state.winner.name} wins with ${state.winner.score} pts!`);
+    const siteUrl = window.location.hostname !== 'localhost' ? window.location.hostname : 'moviematch.it.com';
+    lines.push(`\nPlay at ${siteUrl}`);
+    return lines.join('\n');
   }
 
-  // Premium Ambient Parallax Effect
+  // =========================================================================
+  // PARALLAX EFFECT
+  // =========================================================================
+
   const bgCarousel = document.getElementById('poster-carousel');
   if (bgCarousel) {
-      document.addEventListener('mousemove', (e) => {
-          // Disable on mobile/tablets where accelerometer makes more sense than cursor tracking
-          if (window.innerWidth <= 767) return; 
-          
-          // Calculate subtle offset (max 20px shift to avoid motion sickness)
-          const xShift = (e.clientX / window.innerWidth - 0.5) * -30; 
-          const yShift = (e.clientY / window.innerHeight - 0.5) * -30;
-          
-          // Combine original rotation with dynamic translation
-          bgCarousel.style.transform = `rotate(-6deg) translate(${xShift}px, ${yShift}px)`;
-      });
+    document.addEventListener('mousemove', (e) => {
+      if (window.innerWidth <= 767) return;
+      const xShift = (e.clientX / window.innerWidth - 0.5) * -30;
+      const yShift = (e.clientY / window.innerHeight - 0.5) * -30;
+      bgCarousel.style.transform = `rotate(-6deg) translate(${xShift}px, ${yShift}px)`;
+    });
   }
-
-  console.log('🎬 MovieMatch frontend initialized (modular version)');
 });

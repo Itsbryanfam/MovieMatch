@@ -1,6 +1,6 @@
 // ====================== UI.JS ======================
 import { escapeHtml, playSuccess, playFail, playTick, prepareAudio } from './utils.js';
-import { getSocket, getCurrentLobbyId } from './socketClient.js';
+import { getSocket, getCurrentLobbyId } from './state.js';
 
 export const MODE_DESCRIPTIONS = {
     classic: 'Last player standing wins. Timer shrinks each round.',

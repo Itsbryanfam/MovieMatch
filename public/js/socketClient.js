@@ -1,6 +1,15 @@
-// ====================== SOCKETCLIENT.JS ======================
-import { 
-  initUIElements, renderLobby, renderGame, renderTeamScreen, 
+// ============================================================================
+// SOCKET CLIENT — Network layer
+// ============================================================================
+// Pure socket event handling. Receives server events, updates state,
+// and delegates all rendering to ui.js.
+//
+// No state ownership — reads/writes through state.js.
+// No DOM creation — calls ui.js functions for rendering.
+// ============================================================================
+
+import {
+  initUIElements, renderLobby, renderGame, renderTeamScreen,
   showNotification, renderAutocompleteResults, closeMobileAc,
   openShareModal, showGameOverBanner, resetMobileTab,
   // DOM elements
@@ -11,16 +20,19 @@ import {
 
 import { prepareAudio, playSuccess, playFail, playTick, escapeHtml, getStableId } from './utils.js';
 
-let socket;
-let currentLobbyId = null;
-let myPlayerId = null;
-let gameState = null;
-let turnInterval = null;
-let lastTickSound = 0;
-let isSpectator = false;
+import {
+  getSocket, setSocket, getCurrentLobbyId, getMyPlayerId, getGameState,
+  getIsSpectator, getTurnInterval, getLastTickSound,
+  setTurnInterval, setLastTickSound, clearTurnTimer,
+  onJoined, onStateUpdate, onRejoined, resetSession
+} from './state.js';
+
+// ---------------------------------------------------------------------------
+// INITIALIZATION
+// ---------------------------------------------------------------------------
 
 export function initSocket() {
-  socket = io({
+  const socket = io({
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 1000,
@@ -28,12 +40,15 @@ export function initSocket() {
     timeout: 20000,
   });
 
-  // === ALL SOCKET LISTENERS ===
+  setSocket(socket);
+
+  // -----------------------------------------------------------------------
+  // JOIN / IDENTITY
+  // -----------------------------------------------------------------------
+
   socket.on('joined', (data) => {
-    currentLobbyId = data.lobbyId;
-    myPlayerId = data.playerId;
-    isSpectator = data.isSpectator || false;
-    // Hide join screens and show waiting room
+    onJoined(data);
+
     const joinPanel = document.getElementById('join-panel');
     const privatePanel = document.getElementById('private-panel');
     const publicPanel = document.getElementById('public-panel');
@@ -45,8 +60,7 @@ export function initSocket() {
     if (privatePanel) privatePanel.classList.add('hidden');
     if (publicPanel) publicPanel.classList.add('hidden');
     if (heroScreenEl) heroScreenEl.classList.remove('active');
-    if (isSpectator) {
-      // Go straight to game screen — stateUpdate will render spectator view
+    if (getIsSpectator()) {
       if (lobbyScreenEl) lobbyScreenEl.classList.remove('active');
       const gameScreenEl = document.getElementById('game-screen');
       if (gameScreenEl) gameScreenEl.classList.add('active');
@@ -54,137 +68,156 @@ export function initSocket() {
       if (waitingRoomEl) waitingRoomEl.classList.remove('hidden');
       if (lobbyScreenEl) lobbyScreenEl.classList.add('active');
     }
-    if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = currentLobbyId;
+    if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = getCurrentLobbyId();
   });
 
   socket.on('error', (msg) => showNotification(msg));
 
+  // -----------------------------------------------------------------------
+  // PUBLIC LOBBY BROWSER
+  // -----------------------------------------------------------------------
+
   socket.on('publicLobbiesList', (lobbies) => {
     if (!publicLobbiesList) return;
     publicLobbiesList.innerHTML = '';
-    
+
     if (!lobbies || lobbies.length === 0) {
-        publicLobbiesList.innerHTML = '<div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">No open lobbies found. Create a private one!</div>';
-        return;
+      publicLobbiesList.innerHTML = '<div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">No open lobbies found. Create a private one!</div>';
+      return;
     }
-    
+
     const playerNameInput = document.getElementById('player-name');
-    
+
     lobbies.forEach(lobby => {
-        const card = document.createElement('div');
-        card.className = 'public-lobby-card';
-        
-        let tagsHTML = '';
-        if (lobby.hardcoreMode) tagsHTML += '<span class="mode-tag">Hardcore</span> ';
-        if (lobby.allowTvShows) tagsHTML += '<span class="mode-tag">TV Shows</span>';
-        
-        card.innerHTML = `
-            <div class="public-lobby-info">
-                <h3>${escapeHtml(lobby.hostName)}'s Lobby</h3>
-                <div class="public-lobby-stats">
-                    <span>👥 ${lobby.playerCount} / 8</span>
-                    ${tagsHTML ? `<div>${tagsHTML}</div>` : ''}
-                </div>
-            </div>
-            <button class="btn-primary join-public-btn" style="padding: 0.5rem 1rem; width: auto;" data-id="${lobby.id}">Join</button>
-        `;
-        
-        const joinButton = card.querySelector('.join-public-btn');
-        joinButton.addEventListener('click', () => {
-            const name = playerNameInput ? playerNameInput.value.trim() : '';
-            if (!name) return;
-            socket.emit('joinLobby', { name, lobbyId: lobby.id, stableId: getStableId() });
-        });
-        
-        publicLobbiesList.appendChild(card);
+      const card = document.createElement('div');
+      card.className = 'public-lobby-card';
+
+      let tagsHTML = '';
+      if (lobby.hardcoreMode) tagsHTML += '<span class="mode-tag">Hardcore</span> ';
+      if (lobby.allowTvShows) tagsHTML += '<span class="mode-tag">TV Shows</span>';
+
+      card.innerHTML = `
+          <div class="public-lobby-info">
+              <h3>${escapeHtml(lobby.hostName)}'s Lobby</h3>
+              <div class="public-lobby-stats">
+                  <span>\u{1F465} ${lobby.playerCount} / 8</span>
+                  ${tagsHTML ? `<div>${tagsHTML}</div>` : ''}
+              </div>
+          </div>
+          <button class="btn-primary join-public-btn" style="padding: 0.5rem 1rem; width: auto;" data-id="${lobby.id}">Join</button>
+      `;
+
+      const joinButton = card.querySelector('.join-public-btn');
+      joinButton.addEventListener('click', () => {
+        const name = playerNameInput ? playerNameInput.value.trim() : '';
+        if (!name) return;
+        socket.emit('joinLobby', { name, lobbyId: lobby.id, stableId: getStableId() });
+      });
+
+      publicLobbiesList.appendChild(card);
     });
   });
 
+  // -----------------------------------------------------------------------
+  // BACKGROUND POSTERS
+  // -----------------------------------------------------------------------
+
   socket.on('posters', (posters) => {
-    // Try exported reference first, then fallback to direct DOM lookup
     let carousel = posterCarousel || document.getElementById('poster-carousel');
     if (!carousel) return;
-    
+
     carousel.innerHTML = '';
-   
+
     const rows = 4;
     const postersPerRow = Math.ceil(posters.length / rows);
-   
+
     for (let i = 0; i < rows; i++) {
-        const rowDiv = document.createElement('div');
-        rowDiv.className = 'poster-row';
-       
-        const rowPosters = posters.slice(i * postersPerRow, (i + 1) * postersPerRow);
-        const seamlessPosters = [...rowPosters, ...rowPosters, ...rowPosters, ...rowPosters, ...rowPosters];
-       
-        seamlessPosters.forEach(url => {
-            const img = document.createElement('img');
-            img.src = url;
-            rowDiv.appendChild(img);
-        });
-       
-        carousel.appendChild(rowDiv);
+      const rowDiv = document.createElement('div');
+      rowDiv.className = 'poster-row';
+
+      const rowPosters = posters.slice(i * postersPerRow, (i + 1) * postersPerRow);
+      const seamlessPosters = [...rowPosters, ...rowPosters, ...rowPosters, ...rowPosters, ...rowPosters];
+
+      seamlessPosters.forEach(url => {
+        const img = document.createElement('img');
+        img.src = url;
+        rowDiv.appendChild(img);
+      });
+
+      carousel.appendChild(rowDiv);
     }
   });
 
+  // -----------------------------------------------------------------------
+  // GAME STATE UPDATES
+  // -----------------------------------------------------------------------
+
   socket.on('stateUpdate', (state) => {
-    gameState = state;
-    // Detect spectator promotion
-    if (isSpectator && state.status === 'waiting' && state.players && state.players.find(p => p.id === myPlayerId)) {
-      isSpectator = false;
-      showNotification('🎮 You\'ve joined the game!');
+    const promotion = onStateUpdate(state);
+    if (promotion === 'promoted') {
+      showNotification('\uD83C\uDFAE You\'ve joined the game!');
     }
+
     if (state.status === 'playing') {
       if (lobbyScreen) lobbyScreen.classList.remove('active');
       if (gameScreen) gameScreen.classList.add('active');
       resetMobileTab();
-      renderGame(state, myPlayerId, isSpectator);
-      
-      if (turnInterval) clearInterval(turnInterval);
-      turnInterval = setInterval(() => {
+      renderGame(state, getMyPlayerId(), getIsSpectator());
+
+      clearTurnTimer();
+      const interval = setInterval(() => {
         const timerBar = document.getElementById('timer-bar');
         const timeText = document.getElementById('time-text');
-        if (!gameState || !gameState.turnExpiresAt || gameState.status !== 'playing') {
-            clearInterval(turnInterval);
-            return;
+        const gs = getGameState();
+        if (!gs || !gs.turnExpiresAt || gs.status !== 'playing') {
+          clearInterval(interval);
+          setTurnInterval(null);
+          return;
         }
-        
-        const ms = gameState.turnExpiresAt - Date.now();
+
+        const ms = gs.turnExpiresAt - Date.now();
         let tr = Math.max(0, Math.ceil(ms / 1000));
-        
+
         if (timeText) timeText.innerText = tr + 's';
         const percentage = (tr / 60) * 100;
         if (timerBar) {
-            timerBar.style.width = Math.max(0, Math.min(percentage, 100)) + '%';
-            
-            if (tr <= 10) {
-                timerBar.style.backgroundColor = 'var(--timer-red)';
-                if (tr > 0 && Math.floor(Date.now() / 1000) > lastTickSound) {
-                   playTick();
-                   lastTickSound = Math.floor(Date.now() / 1000);
-                 }
-            } else if (tr <= 30) {
-                timerBar.style.backgroundColor = 'var(--timer-yellow)';
-            } else {
-                timerBar.style.backgroundColor = 'var(--timer-green)';
+          timerBar.style.width = Math.max(0, Math.min(percentage, 100)) + '%';
+
+          if (tr <= 10) {
+            timerBar.style.backgroundColor = 'var(--timer-red)';
+            if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
+              playTick();
+              setLastTickSound(Math.floor(Date.now() / 1000));
             }
+          } else if (tr <= 30) {
+            timerBar.style.backgroundColor = 'var(--timer-yellow)';
+          } else {
+            timerBar.style.backgroundColor = 'var(--timer-green)';
+          }
         }
-        
+
         if (tr === 0) {
-            socket.emit('forceNextTurn', currentLobbyId);
-            clearInterval(turnInterval);
+          socket.emit('forceNextTurn', getCurrentLobbyId());
+          clearInterval(interval);
+          setTurnInterval(null);
         }
       }, 1000);
+      setTurnInterval(interval);
+
     } else if (state.status === 'waiting') {
-      if (turnInterval) clearInterval(turnInterval);
+      clearTurnTimer();
       if (gameScreen) gameScreen.classList.remove('active');
       if (lobbyScreen) lobbyScreen.classList.add('active');
-      renderLobby(state, myPlayerId);
+      renderLobby(state, getMyPlayerId());
     } else if (state.status === 'finished') {
-      if (turnInterval) clearInterval(turnInterval);
-      renderGame(state, myPlayerId, isSpectator);
+      clearTurnTimer();
+      renderGame(state, getMyPlayerId(), getIsSpectator());
     }
   });
+
+  // -----------------------------------------------------------------------
+  // NOTIFICATIONS
+  // -----------------------------------------------------------------------
 
   socket.on('notification', (msg) => {
     showNotification(msg);
@@ -202,7 +235,15 @@ export function initSocket() {
     }
   });
 
+  // -----------------------------------------------------------------------
+  // AUTOCOMPLETE
+  // -----------------------------------------------------------------------
+
   socket.on('autocompleteResults', renderAutocompleteResults);
+
+  // -----------------------------------------------------------------------
+  // CHAT & REACTIONS
+  // -----------------------------------------------------------------------
 
   socket.on('receiveChat', ({ playerName, msg, isSpectator: fromSpectator }) => {
     if (!chatMessages) return;
@@ -210,26 +251,23 @@ export function initSocket() {
     if (hint) hint.remove();
     const div = document.createElement('div');
     div.className = 'chat-msg';
-    const badge = fromSpectator ? ' 👁' : '';
+    const badge = fromSpectator ? ' \uD83D\uDC41' : '';
     div.innerHTML = `<span class="chat-author">${escapeHtml(playerName)}${badge}:</span>${escapeHtml(msg)}`;
-    // Check if user is scrolled near the bottom (within 50px) BEFORE appending
     const isNearBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 50;
-    
+
     chatMessages.appendChild(div);
-    
-    // Only auto-scroll if they were already at the bottom
+
     if (isNearBottom) {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+      chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // Trigger mobile unread badge
     const chatPanel = document.querySelector('[data-panel="chat"]');
     const isMobileVisible = chatPanel && chatPanel.classList.contains('mobile-visible');
     const isDesktop = window.innerWidth > 767;
-    
+
     if (!isDesktop && !isMobileVisible) {
-        const badgeEl = document.getElementById('chat-badge');
-        if (badgeEl) badgeEl.style.display = 'block';
+      const badgeEl = document.getElementById('chat-badge');
+      if (badgeEl) badgeEl.style.display = 'block';
     }
   });
 
@@ -246,21 +284,24 @@ export function initSocket() {
     setTimeout(() => el.remove(), 2500);
   });
 
-  // === RECONNECTION HANDLING ===
+  // -----------------------------------------------------------------------
+  // RECONNECTION
+  // -----------------------------------------------------------------------
+
   socket.on('disconnect', (reason) => {
-    console.warn('⚠️ Socket disconnected:', reason);
+    console.warn('\u26A0\uFE0F Socket disconnected:', reason);
     const banner = document.getElementById('offline-banner');
     if (banner && reason !== 'io client disconnect') {
-        banner.classList.remove('hidden');
+      banner.classList.remove('hidden');
     }
   });
 
   socket.on('reconnect', () => {
-    console.log('🔄 Reconnected to server');
+    console.log('\uD83D\uDD04 Reconnected to server');
     const lobbyId = getCurrentLobbyId();
     const playerId = getMyPlayerId();
     if (lobbyId && playerId) {
-      console.log(`🔄 Attempting to rejoin lobby ${lobbyId}`);
+      console.log(`\uD83D\uDD04 Attempting to rejoin lobby ${lobbyId}`);
       socket.emit('rejoinLobby', { lobbyId, playerId });
     } else {
       const banner = document.getElementById('offline-banner');
@@ -269,44 +310,34 @@ export function initSocket() {
   });
 
   socket.on('rejoinSuccess', (data) => {
-    console.log('✅ Rejoined lobby successfully', data);
+    console.log('\u2705 Rejoined lobby successfully', data);
     const banner = document.getElementById('offline-banner');
     if (banner) banner.classList.add('hidden');
-    
-    currentLobbyId = data.lobbyId;
-    myPlayerId = data.playerId;
-    gameState = data.state;
+
+    onRejoined(data);
 
     if (data.state.status === 'playing') {
-      renderGame(data.state, myPlayerId);
+      renderGame(data.state, getMyPlayerId());
     } else {
-      renderLobby(data.state, myPlayerId);
+      renderLobby(data.state, getMyPlayerId());
     }
-    showNotification('✅ Reconnected to game!');
+    showNotification('\u2705 Reconnected to game!');
   });
 
   socket.on('rejoinFailed', (msg) => {
-    console.warn('❌ Rejoin failed:', msg);
+    console.warn('\u274C Rejoin failed:', msg);
     showNotification(msg || 'Could not rejoin game');
   });
 
   return socket;
 }
 
-export function leaveLobby() {
-  if (turnInterval) {
-    clearInterval(turnInterval);
-    turnInterval = null;
-  }
-  if (socket) socket.emit('leaveLobby');
-  currentLobbyId = null;
-  myPlayerId = null;
-  gameState = null;
-  isSpectator = false;
-}
+// ---------------------------------------------------------------------------
+// LEAVE LOBBY — emits socket event + resets state
+// ---------------------------------------------------------------------------
 
-export function getSocket() { return socket; }
-export function getCurrentLobbyId() { return currentLobbyId; }
-export function getMyPlayerId() { return myPlayerId; }
-export function getGameState() { return gameState; }
-export function getIsSpectator() { return isSpectator; }
+export function leaveLobby() {
+  const socket = getSocket();
+  if (socket) socket.emit('leaveLobby');
+  resetSession();
+}
