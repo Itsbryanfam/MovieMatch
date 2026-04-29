@@ -161,14 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
       prepareAudio();
   });
 
-  heroCodeBtn?.addEventListener('click', () => {
-      heroScreen.classList.remove('active');
-      lobbyScreen.classList.add('active');
-      joinPanel.classList.add('hidden');
-      privatePanel.classList.remove('hidden');
-      lobbyIdInput.focus();
-      prepareAudio();
-  });
+  heroCodeBtn?.addEventListener('click', () => showJoinPrompt());
 
   function showNamePrompt(roomCode) {
     const overlay = document.createElement('div');
@@ -223,6 +216,83 @@ document.addEventListener('DOMContentLoaded', () => {
     overlay.appendChild(card);
     document.body.appendChild(overlay);
     setTimeout(() => input.focus(), 100);
+  }
+
+  function showJoinPrompt() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:1000;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--surface,#18181b);border-radius:1rem;padding:2rem;max-width:340px;width:90%;text-align:center;border:1px solid rgba(255,255,255,0.08);';
+
+    const title = document.createElement('h2');
+    title.style.cssText = 'margin:0 0 1.5rem;font-size:1.25rem;color:var(--text,#f8fafc);';
+    title.textContent = 'Join a Room';
+
+    const lblStyle = 'display:block;text-align:left;font-size:0.8rem;font-weight:600;color:var(--text-muted,#94a3b8);margin-bottom:0.35rem;letter-spacing:0.03em;';
+    const inpStyle = 'width:100%;padding:0.75rem 1rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:var(--text,#f8fafc);font-size:1rem;box-sizing:border-box;outline:none;font-family:inherit;';
+
+    const nameLabel = document.createElement('label');
+    nameLabel.style.cssText = lblStyle;
+    nameLabel.textContent = 'Your Name';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.placeholder = 'Enter your name';
+    nameInput.autocomplete = 'off';
+    nameInput.maxLength = 24;
+    nameInput.value = localStorage.getItem('mm_playerName') || '';
+    nameInput.style.cssText = inpStyle + 'margin-bottom:1rem;';
+
+    const codeLabel = document.createElement('label');
+    codeLabel.style.cssText = lblStyle;
+    codeLabel.textContent = 'Room Code';
+    const codeInput = document.createElement('input');
+    codeInput.type = 'text';
+    codeInput.placeholder = 'Leave blank to create new';
+    codeInput.autocomplete = 'off';
+    codeInput.maxLength = 6;
+    codeInput.style.cssText = inpStyle + 'margin-bottom:1.5rem;text-transform:uppercase;';
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Join Game';
+    btn.style.cssText = 'width:100%;padding:0.75rem;border-radius:0.5rem;border:none;background:var(--accent,#818cf8);color:white;font-size:1rem;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:0.75rem;';
+
+    const backBtn = document.createElement('button');
+    backBtn.textContent = 'Back';
+    backBtn.style.cssText = 'width:100%;padding:0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.1);background:transparent;color:var(--text-muted,#94a3b8);font-size:0.9rem;cursor:pointer;font-family:inherit;';
+
+    function close() { overlay.remove(); }
+
+    function submit() {
+      const name = nameInput.value.trim();
+      const code = codeInput.value.trim().toUpperCase();
+      if (!name) { nameInput.style.borderColor = '#f87171'; nameInput.focus(); return; }
+      localStorage.setItem('mm_playerName', name);
+      if (playerNameInput) playerNameInput.value = name;
+      overlay.remove();
+      prepareAudio();
+      heroScreen.classList.remove('active');
+      lobbyScreen.classList.add('active');
+      socket.emit('joinLobby', { name, lobbyId: code, stableId: getStableId() });
+    }
+
+    btn.addEventListener('click', submit);
+    backBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    codeInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') submit(); });
+    nameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') codeInput.focus(); });
+
+    card.appendChild(title);
+    card.appendChild(nameLabel);
+    card.appendChild(nameInput);
+    card.appendChild(codeLabel);
+    card.appendChild(codeInput);
+    card.appendChild(btn);
+    card.appendChild(backBtn);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    setTimeout(() => { (nameInput.value ? codeInput : nameInput).focus(); }, 100);
   }
 
   function checkUrlParams() {
