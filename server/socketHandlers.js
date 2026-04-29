@@ -15,10 +15,15 @@ function clampString(value, maxLen) {
   return value.slice(0, maxLen);
 }
 
+const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+
 async function generateLobbyId(pubClient) {
   let id;
   do {
-    id = Math.random().toString(36).substring(2, 8).toUpperCase();
+    id = '';
+    for (let i = 0; i < 6; i++) {
+      id += LOBBY_CHARS[Math.floor(Math.random() * LOBBY_CHARS.length)];
+    }
   } while (await pubClient.exists(`lobby:${id}`));
   return id;
 }
@@ -42,6 +47,20 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
       socket.emit('posters', global.cachedPosters);
     }
 
+    // Global error boundary — wraps every handler registered below.
+    // Handlers that already have their own try/catch (submitMovie, handleDisconnect)
+    // get a harmless extra layer that never fires.
+    const _origOn = socket.on.bind(socket);
+    socket.on = function(event, handler) {
+      return _origOn(event, async (...args) => {
+        try {
+          await handler(...args);
+        } catch (err) {
+          logger.error(err, `Socket handler error in '${event}'`);
+        }
+      });
+    };
+
     socket.on('requestPosters', () => {
       if (global.cachedPosters && global.cachedPosters.length > 0) {
         socket.emit('posters', global.cachedPosters);
@@ -54,6 +73,7 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
           if (await rateLimit(socket.id, 'autocomplete', 20, 10000)) return;
           const room = await redisUtils.getLobby(pubClient, lobbyId);
           if (!room) return;
+          if (!room.players.find(p => p.id === socket.id)) return;
 
           const searchType = room.allowTvShows ? 'multi' : 'movie';
           const searchRes = await fetch(`https://api.themoviedb.org/3/search/${searchType}?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`, { 
@@ -78,6 +98,7 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
         });
 
     socket.on('joinLobby', async ({ name, lobbyId, stableId }) => {
+      if (await rateLimit(socket.id, 'joinLobby', 5, 60000)) return;
       name = clampString(name, 24);
       if (!name || !name.trim()) return socket.emit('error', 'Name cannot be empty.');
       stableId = (typeof stableId === 'string' && stableId.length > 0 && stableId.length <= 64) ? stableId : socket.id;
@@ -223,7 +244,8 @@ function setupSocketHandlers(io, pubClient, cachedPosters, TMDB_HEADERS) {
         if (typeof emoji !== 'string' || emoji.length > 8) return;
         if (await rateLimit(socket.id, 'reaction', 10, 5000)) return;
         const room = await redisUtils.getLobby(pubClient, lobbyId);
-        if (room) io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
+        if (!room || !room.players.find(p => p.id === socket.id)) return;
+        io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
     });
 
     socket.on('forceNextTurn', async (lobbyId) => {
