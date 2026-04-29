@@ -252,7 +252,6 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
   const currentChainItems = chainDisplay.querySelectorAll('.chain-item');
   const currentDisplayedCount = currentChainItems.length;
 
-  // Clear if game restarted or changed
   // Render empty state or clear out stale data
   if (gameState.chain.length === 0 && gameState.status === 'playing') {
     chainDisplay.innerHTML = '<div class="empty-hint" style="margin:auto; display:flex; flex-direction:column; align-items:center; gap:0.5rem; color:var(--text-muted);"><span style="font-size:2rem;">🎬</span><span style="font-size:1.1rem; font-weight:600;">The board is empty</span><span style="font-size:0.9rem; opacity:0.8;">Waiting for the first move...</span></div>';
@@ -262,7 +261,12 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     // Prevent banner from polluting the view if a game resets suddenly
     const existingBanner = chainDisplay.querySelector('.game-over-banner');
     if (existingBanner) existingBanner.remove();
+    
+    // Clear the empty board placeholder once the first move is made
+    const existingEmptyHint = chainDisplay.querySelector('.empty-hint');
+    if (existingEmptyHint) existingEmptyHint.remove();
   }
+
 
   // Get previous actors for highlighting
   let previousActors = [];
