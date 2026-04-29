@@ -807,6 +807,7 @@ input:disabled {
 
 .feed-container {
   flex: 1;
+  min-height: 60vh; /* Forces the glass board to stay expanded when empty */
   background: rgba(15, 23, 42, 0.65); /* Translucent dark wash */
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px); /* Safari support */
@@ -821,6 +822,7 @@ input:disabled {
   position: relative;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); /* Deep drop shadow for floating effect */
 }
+
 
 .chain-item {
   background: rgba(30, 41, 59, 0.7); /* Translucent elevation */
