@@ -23,6 +23,7 @@ export let chatMessages, chatInput, timerBar, timeText, notificationOverlay, not
 export let logo, teamScreen, modeChips, modeDescription, teamLobbyCode;
 export let teamRedList, teamBlueList, joinRedBtn, joinBlueBtn, teamBackBtn, teamStartBtn, teamHint;
 export let shareModal, shareCanvas, closeShareModal, downloadCardBtn, copyCardBtn;
+export let leaderboardBtn, leaderboardModal, closeLeaderboard, leaderboardList;
 
 // Initialize DOM references
 export function initUIElements() {
@@ -90,6 +91,11 @@ export function initUIElements() {
   closeShareModal = document.getElementById('close-share-modal');
   downloadCardBtn = document.getElementById('download-card-btn');
   copyCardBtn = document.getElementById('copy-card-btn');
+
+  leaderboardBtn = document.getElementById('leaderboard-btn');
+  leaderboardModal = document.getElementById('leaderboard-modal');
+  closeLeaderboard = document.getElementById('close-leaderboard');
+  leaderboardList = document.getElementById('leaderboard-list');
 }
 
 export function renderLobby(gameState, myPlayerId) {
