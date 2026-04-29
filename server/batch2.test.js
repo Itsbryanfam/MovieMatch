@@ -213,3 +213,61 @@ describe('submitLock functions', () => {
     expect(mockClient.del).toHaveBeenCalledWith('lock:submit:LOBBY1');
   });
 });
+
+describe('promoteSpectators', () => {
+  test('promotes connected spectators up to 8-player cap', () => {
+    const state = {
+      players: [
+        { id: 'p1', name: 'Player1', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1' }
+      ],
+      spectators: [
+        { id: 's1', name: 'Spec1', stableId: 'ss1', connected: true, wins: 3 },
+        { id: 's2', name: 'Spec2', stableId: 'ss2', connected: true, wins: 0 },
+        { id: 's3', name: 'Spec3', stableId: 'ss3', connected: false, wins: 0 }
+      ]
+    };
+
+    gameLogic.promoteSpectators(state);
+
+    expect(state.players).toHaveLength(3);
+    expect(state.players[1].name).toBe('Spec1');
+    expect(state.players[1].wins).toBe(3);
+    expect(state.players[1].isAlive).toBe(true);
+    expect(state.players[1].isHost).toBe(false);
+    expect(state.players[2].name).toBe('Spec2');
+    // Disconnected spectator should NOT be promoted
+    expect(state.spectators).toHaveLength(0);
+  });
+
+  test('does not promote beyond 8 players', () => {
+    const state = {
+      players: Array.from({ length: 7 }, (_, i) => ({
+        id: `p${i}`, name: `Player${i}`, isHost: i === 0, isAlive: true,
+        connected: true, score: 0, wins: 0, teamId: i % 2, stableId: `sp${i}`
+      })),
+      spectators: [
+        { id: 's1', name: 'Spec1', stableId: 'ss1', connected: true, wins: 0 },
+        { id: 's2', name: 'Spec2', stableId: 'ss2', connected: true, wins: 0 },
+        { id: 's3', name: 'Spec3', stableId: 'ss3', connected: true, wins: 0 }
+      ]
+    };
+
+    gameLogic.promoteSpectators(state);
+
+    expect(state.players).toHaveLength(8);
+    expect(state.spectators).toHaveLength(2);
+    expect(state.spectators[0].name).toBe('Spec2');
+  });
+
+  test('does nothing when no spectators exist', () => {
+    const state = { players: [{ id: 'p1' }], spectators: [] };
+    gameLogic.promoteSpectators(state);
+    expect(state.players).toHaveLength(1);
+  });
+
+  test('does nothing when spectators is undefined', () => {
+    const state = { players: [{ id: 'p1' }] };
+    gameLogic.promoteSpectators(state);
+    expect(state.players).toHaveLength(1);
+  });
+});

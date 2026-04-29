@@ -8,6 +8,8 @@ function broadcastState(io, id, state) {
   const clientState = {
     ...state,
     players: state.players.map(({ stableId, ...rest }) => rest),
+    spectators: undefined,
+    spectatorCount: (state.spectators || []).filter(s => s.connected).length,
     chain: state.chain.map(item => ({
       playerId: item.playerId,
       playerName: item.playerName,
@@ -89,6 +91,41 @@ async function nextTurn(io, pubClient, id, state) {
   broadcastState(io, id, state);
 }
 
+function promoteSpectators(state) {
+  if (!state.spectators || state.spectators.length === 0) return;
+  const connected = state.spectators.filter(s => s.connected);
+  const slotsAvailable = 8 - state.players.length;
+  const promoted = connected.slice(0, slotsAvailable);
+  promoted.forEach(s => {
+    state.players.push({
+      id: s.id, name: s.name, isHost: false, isAlive: true,
+      connected: true, score: 0, wins: s.wins || 0,
+      teamId: state.players.length % 2, stableId: s.stableId
+    });
+  });
+  state.spectators = connected.slice(slotsAvailable);
+}
+
+function scheduleGameReset(io, pubClient, id) {
+  setTimeout(async () => {
+    try {
+      const liveState = await redisUtils.getLobby(pubClient, id);
+      if (liveState && liveState.status === 'finished') {
+        liveState.status = 'waiting';
+        liveState.players = liveState.players.filter(p => p.connected);
+        promoteSpectators(liveState);
+        if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) {
+          liveState.players[0].isHost = true;
+        }
+        await redisUtils.saveLobby(pubClient, id, liveState);
+        broadcastState(io, id, liveState);
+      }
+    } catch (err) {
+      logger.error(err, 'Game reset error');
+    }
+  }, 7000);
+}
+
 function resetTimer(state) {
   if (state.gameMode === 'speed') {
     state.turnExpiresAt = Date.now() + 15000;
@@ -127,16 +164,7 @@ async function checkWinCondition(io, pubClient, id, state) {
       io.to(id).emit('notification', `Team ${teamLabel} wins!`);
       await redisUtils.saveLobby(pubClient, id, state);
       broadcastState(io, id, state);
-      setTimeout(async () => {
-        const liveState = await redisUtils.getLobby(pubClient, id);
-        if (liveState && liveState.status === 'finished') {
-          liveState.status = 'waiting';
-          liveState.players = liveState.players.filter(p => p.connected);
-          if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) liveState.players[0].isHost = true;
-          await redisUtils.saveLobby(pubClient, id, liveState);
-          broadcastState(io, id, liveState);
-        }
-      }, 7000);
+      scheduleGameReset(io, pubClient, id);
     }
     return;
   }
@@ -156,15 +184,7 @@ async function checkWinCondition(io, pubClient, id, state) {
       };
       await redisUtils.saveLobby(pubClient, id, state);
       broadcastState(io, id, state);
-      setTimeout(async () => {
-        const liveState = await redisUtils.getLobby(pubClient, id);
-        if (liveState && liveState.status === 'finished') {
-          liveState.status = 'waiting';
-          liveState.players = liveState.players.filter(p => p.connected);
-          await redisUtils.saveLobby(pubClient, id, liveState);
-          broadcastState(io, id, liveState);
-        }
-      }, 7000);
+      scheduleGameReset(io, pubClient, id);
     }
     return;
   }
@@ -181,31 +201,13 @@ async function checkWinCondition(io, pubClient, id, state) {
     io.to(id).emit('notification', `${winner.name} wins!`);
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
-    setTimeout(async () => {
-      const liveState = await redisUtils.getLobby(pubClient, id);
-      if (liveState && liveState.status === 'finished') {
-        liveState.status = 'waiting';
-        liveState.players = liveState.players.filter(p => p.connected);
-        if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) liveState.players[0].isHost = true;
-        await redisUtils.saveLobby(pubClient, id, liveState);
-        broadcastState(io, id, liveState);
-      }
-    }, 7000);
+    scheduleGameReset(io, pubClient, id);
   } else if (alivePlayers.length === 0) {
     state.status = 'finished';
     state.turnExpiresAt = null;
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
-    setTimeout(async () => {
-      const liveState = await redisUtils.getLobby(pubClient, id);
-      if (liveState && liveState.status === 'finished') {
-        liveState.status = 'waiting';
-        liveState.players = liveState.players.filter(p => p.connected);
-        if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) liveState.players[0].isHost = true;
-        await redisUtils.saveLobby(pubClient, id, liveState);
-        broadcastState(io, id, liveState);
-      }
-    }, 7000);
+    scheduleGameReset(io, pubClient, id);
   }
 }
 
@@ -285,4 +287,5 @@ module.exports = {
   startGame,
   validateConnection,
   activeTurnTimeouts,
+  promoteSpectators,
 };

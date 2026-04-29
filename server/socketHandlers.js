@@ -105,13 +105,30 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       const isNewLobby = !room;
       if (isNewLobby) {
         room = {
-          id, status: 'waiting', players: [], currentTurnIndex: 0, chain: [],
+          id, status: 'waiting', players: [], spectators: [], currentTurnIndex: 0, chain: [],
           usedMovies: [], hardcoreMode: false, previousSharedActors: [], 
           allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
           isValidating: false, gameMode: 'classic'
         };
       }
-      if (room.status !== 'waiting') return socket.emit('error', 'Lobby is already playing or full.');
+      // Spectator path: join as watcher if game is in progress
+      if (room.status !== 'waiting') {
+        if (!room.spectators) room.spectators = [];
+        const existingWins = await redisUtils.getPlayerWins(pubClient, stableId);
+        room.spectators.push({ id: socket.id, name, stableId, connected: true, wins: existingWins });
+
+        await redisUtils.setSocketLobby(pubClient, socket.id, id);
+        await redisUtils.saveLobby(pubClient, id, room);
+        socket.join(id);
+        socket.emit('joined', { lobbyId: id, playerId: socket.id, isSpectator: true });
+
+        if (global.cachedPosters && global.cachedPosters.length > 0) {
+          socket.emit('posters', global.cachedPosters);
+        }
+
+        gameLogic.broadcastState(io, id, room);
+        return;
+      }
 
       if (!isNewLobby && room.players.length >= 8) {
         return socket.emit('error', 'Lobby is full (8 player maximum).');
@@ -195,6 +212,7 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
         room.timerMultiplier = 0;
         room.previousSharedActors = [];
         room.players.forEach(p => { p.isAlive = true; p.score = 0; });
+        gameLogic.promoteSpectators(room);
         await redisUtils.saveLobby(pubClient, lobbyId, room);
         gameLogic.broadcastState(io, lobbyId, room);
     });
@@ -233,7 +251,9 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
         const room = await redisUtils.getLobby(pubClient, lobbyId);
         if (room) {
           const player = room.players.find(p => p.id === socket.id);
-          if (player) io.to(lobbyId).emit('receiveChat', { playerName: player.name, msg });
+          const spectator = !player && (room.spectators || []).find(s => s.id === socket.id);
+          const sender = player || spectator;
+          if (sender) io.to(lobbyId).emit('receiveChat', { playerName: sender.name, msg, isSpectator: !!spectator });
         }
     });
 
@@ -241,7 +261,9 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
         if (typeof emoji !== 'string' || emoji.length > 8) return;
         if (await rateLimit(socket.id, 'reaction', 10, 5000)) return;
         const room = await redisUtils.getLobby(pubClient, lobbyId);
-        if (!room || !room.players.find(p => p.id === socket.id)) return;
+        if (!room) return;
+        const isParticipant = room.players.find(p => p.id === socket.id) || (room.spectators || []).find(s => s.id === socket.id);
+        if (!isParticipant) return;
         io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
     });
 
@@ -506,7 +528,15 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
             if (!room) return;
 
             const player = room.players.find(p => p.id === socketId);
-            if (!player) return;
+            if (!player) {
+              // Check if they were a spectator
+              if (room.spectators) {
+                room.spectators = room.spectators.filter(s => s.id !== socketId);
+                await redisUtils.saveLobby(pubClient, lobbyId, room);
+                gameLogic.broadcastState(io, lobbyId, room);
+              }
+              return;
+            }
 
             // === TIMEOUT CLEANUP ===
             if (activeTurnTimeouts.has(lobbyId)) {

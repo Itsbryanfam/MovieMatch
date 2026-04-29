@@ -187,7 +187,7 @@ export function renderTeamScreen(gameState, myPlayerId, amIHost) {
   }
 }
 
-export function renderGame(gameState, myPlayerId) {
+export function renderGame(gameState, myPlayerId, isSpectator = false) {
   const mode = gameState.gameMode || 'classic';
   if (mode === 'solo') gameScreen.classList.add('solo-mode-ui');
   else gameScreen.classList.remove('solo-mode-ui');
@@ -221,6 +221,14 @@ export function renderGame(gameState, myPlayerId) {
       if (index === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
       gamePlayersList.appendChild(li);
     });
+  }
+
+  // Spectator count
+  if (gameState.spectatorCount > 0) {
+    const specLi = document.createElement('li');
+    specLi.style.cssText = 'color:var(--text-muted);font-size:0.75rem;text-align:center;padding:0.5rem 0;';
+    specLi.textContent = '👁 ' + gameState.spectatorCount + ' watching';
+    gamePlayersList.appendChild(specLi);
   }
 
   // FULL CHAIN RENDERING (safe DOM — no innerHTML with external data)
@@ -295,7 +303,13 @@ export function renderGame(gameState, myPlayerId) {
     turnIndicator.innerHTML = `🔗 Chain: <span class="chain-badge">${gameState.chain.length}</span>`;
   }
 
-  if (gameState.status === 'playing') {
+  if (isSpectator && gameState.status !== 'finished') {
+    inputArea.classList.add('disabled-area');
+    if (movieInput) movieInput.disabled = true;
+    if (submitBtn) submitBtn.disabled = true;
+    turnIndicator.textContent = '👁 Spectating';
+    hintText.textContent = "You'll join when this game ends.";
+  } else if (gameState.status === 'playing') {
     if (activePlayer && activePlayer.id === myPlayerId) {
       inputArea.classList.remove('disabled-area');
       movieInput.disabled = false;

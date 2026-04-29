@@ -161,10 +161,11 @@ describe('Socket.io Integration', () => {
     expect(msg).toContain('full');
   });
 
-  test('joinLobby rejects when lobby is already playing', async () => {
+  test('joinLobby as spectator when lobby is already playing', async () => {
     redisUtils.getLobby.mockResolvedValue({
       id: 'PLAY01', status: 'playing',
       players: [{ id: 'p1', name: 'A', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1' }],
+      spectators: [],
       chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
       allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
       isValidating: false, gameMode: 'classic'
@@ -174,8 +175,9 @@ describe('Socket.io Integration', () => {
 
     client.emit('joinLobby', { name: 'Late', lobbyId: 'PLAY01', stableId: 'p_late' });
 
-    const msg = await waitFor(client, 'error');
-    expect(msg).toContain('already playing');
+    const data = await waitFor(client, 'joined');
+    expect(data.lobbyId).toBe('PLAY01');
+    expect(data.isSpectator).toBe(true);
   });
 
   // ========================

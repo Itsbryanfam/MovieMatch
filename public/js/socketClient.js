@@ -17,6 +17,7 @@ let myPlayerId = null;
 let gameState = null;
 let turnInterval = null;
 let lastTickSound = 0;
+let isSpectator = false;
 
 export function initSocket() {
   socket = io({
@@ -31,6 +32,7 @@ export function initSocket() {
   socket.on('joined', (data) => {
     currentLobbyId = data.lobbyId;
     myPlayerId = data.playerId;
+    isSpectator = data.isSpectator || false;
     // Hide join screens and show waiting room
     const joinPanel = document.getElementById('join-panel');
     const privatePanel = document.getElementById('private-panel');
@@ -42,9 +44,16 @@ export function initSocket() {
     if (joinPanel) joinPanel.classList.add('hidden');
     if (privatePanel) privatePanel.classList.add('hidden');
     if (publicPanel) publicPanel.classList.add('hidden');
-    if (waitingRoomEl) waitingRoomEl.classList.remove('hidden');
-    if (lobbyScreenEl) lobbyScreenEl.classList.add('active');
     if (heroScreenEl) heroScreenEl.classList.remove('active');
+    if (isSpectator) {
+      // Go straight to game screen — stateUpdate will render spectator view
+      if (lobbyScreenEl) lobbyScreenEl.classList.remove('active');
+      const gameScreenEl = document.getElementById('game-screen');
+      if (gameScreenEl) gameScreenEl.classList.add('active');
+    } else {
+      if (waitingRoomEl) waitingRoomEl.classList.remove('hidden');
+      if (lobbyScreenEl) lobbyScreenEl.classList.add('active');
+    }
     if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = currentLobbyId;
   });
 
@@ -120,11 +129,16 @@ export function initSocket() {
 
   socket.on('stateUpdate', (state) => {
     gameState = state;
+    // Detect spectator promotion
+    if (isSpectator && state.status === 'waiting' && state.players && state.players.find(p => p.id === myPlayerId)) {
+      isSpectator = false;
+      showNotification('🎮 You\'ve joined the game!');
+    }
     if (state.status === 'playing') {
       if (lobbyScreen) lobbyScreen.classList.remove('active');
       if (gameScreen) gameScreen.classList.add('active');
       resetMobileTab();
-      renderGame(state, myPlayerId);
+      renderGame(state, myPlayerId, isSpectator);
       
       if (turnInterval) clearInterval(turnInterval);
       turnInterval = setInterval(() => {
@@ -168,7 +182,7 @@ export function initSocket() {
       renderLobby(state, myPlayerId);
     } else if (state.status === 'finished') {
       if (turnInterval) clearInterval(turnInterval);
-      renderGame(state, myPlayerId);
+      renderGame(state, myPlayerId, isSpectator);
     }
   });
 
@@ -190,13 +204,14 @@ export function initSocket() {
 
   socket.on('autocompleteResults', renderAutocompleteResults);
 
-  socket.on('receiveChat', ({ playerName, msg }) => {
+  socket.on('receiveChat', ({ playerName, msg, isSpectator: fromSpectator }) => {
     if (!chatMessages) return;
     const hint = chatMessages.querySelector('.empty-hint');
     if (hint) hint.remove();
     const div = document.createElement('div');
     div.className = 'chat-msg';
-    div.innerHTML = `<span class="chat-author">${escapeHtml(playerName)}:</span>${escapeHtml(msg)}`;
+    const badge = fromSpectator ? ' 👁' : '';
+    div.innerHTML = `<span class="chat-author">${escapeHtml(playerName)}${badge}:</span>${escapeHtml(msg)}`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   });
@@ -251,3 +266,4 @@ export function getSocket() { return socket; }
 export function getCurrentLobbyId() { return currentLobbyId; }
 export function getMyPlayerId() { return myPlayerId; }
 export function getGameState() { return gameState; }
+export function getIsSpectator() { return isSpectator; }
