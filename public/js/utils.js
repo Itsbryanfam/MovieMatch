@@ -46,7 +46,9 @@ export function prepareAudio() {
 export function getStableId() {
   let id = localStorage.getItem('mm_stableId');
   if (!id) {
-    id = 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    id = 'p_' + Array.from(bytes, b => b.toString(36).padStart(2, '0')).join('');
     localStorage.setItem('mm_stableId', id);
   }
   return id;

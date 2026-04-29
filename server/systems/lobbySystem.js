@@ -8,6 +8,7 @@
 
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
+const posterCache = require('../posterCache');
 
 // Unambiguous charset for lobby codes (Crockford base32 — no 0/O, 1/I/L)
 const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -54,9 +55,8 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
     socket.join(id);
     socket.emit('joined', { lobbyId: id, playerId: socket.id, isSpectator: true });
 
-    if (global.cachedPosters && global.cachedPosters.length > 0) {
-      socket.emit('posters', global.cachedPosters);
-    }
+    const cached = posterCache.getPosters();
+    if (cached.length > 0) socket.emit('posters', cached);
 
     gameLogic.broadcastState(io, id, room);
     return;
