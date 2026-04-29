@@ -493,9 +493,19 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
             // Valid play
             const uniqueMatchKey = `${validMatch.mediaType}:${validMatch.id}`;
             room.usedMovies.push(uniqueMatchKey);
-            room.chain.push({ playerId: player.id, playerName: player.name, movie: validMatch, fullCast: fullCastList, matchedActors });
+            // Strip massive TMDB payload to prevent Redis bloat
+            const lightweightMovie = {
+                id: validMatch.id,
+                title: validMatch.title,
+                poster: validMatch.poster,
+                year: validMatch.year,
+                cast: validMatch.cast,
+                mediaType: validMatch.mediaType
+            };
+            room.chain.push({ playerId: player.id, playerName: player.name, movie: lightweightMovie, matchedActors });
             const pIndex = room.players.findIndex(p => p.id === socket.id);
             if(pIndex > -1) room.players[pIndex].score += 100;
+
 
             room.timerMultiplier++;
             room.isValidating = false;

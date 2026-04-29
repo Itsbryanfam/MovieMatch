@@ -6,8 +6,9 @@ async function getLobby(pubClient, id) {
 }
 
 async function saveLobby(pubClient, id, state) {
-  await pubClient.setEx(`lobby:${id}`, 7200, JSON.stringify(state));
+  await pubClient.setEx(`lobby:${id}`, 86400, JSON.stringify(state));
 }
+
 
 async function deleteLobby(pubClient, id) {
   await pubClient.del(`lobby:${id}`);
