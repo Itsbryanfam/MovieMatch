@@ -183,6 +183,27 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   checkUrlParams();
 
+  // Click lobby code to copy invite link
+  function setupCodeCopy(element) {
+    if (!element) return;
+    element.style.cursor = 'pointer';
+    element.title = 'Click to copy invite link';
+    element.addEventListener('click', () => {
+      const code = element.innerText.trim();
+      if (!code) return;
+      const url = window.location.origin + '?room=' + code;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Invite link copied! 🔗');
+      }).catch(() => {
+        navigator.clipboard.writeText(code).catch(() => {});
+        showToast('Room code copied!');
+      });
+    });
+  }
+
+  setupCodeCopy(document.getElementById('lobby-code-display'));
+  setupCodeCopy(document.getElementById('team-lobby-code'));
+
   const heroDemo = document.querySelector('.hero-demo');
   if (heroDemo) {
       setTimeout(() => {
