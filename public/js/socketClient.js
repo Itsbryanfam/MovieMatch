@@ -32,6 +32,8 @@ import {
 // INITIALIZATION
 // ---------------------------------------------------------------------------
 
+let selfElimActive = false;
+
 export function initSocket() {
   const socket = io({
     reconnection: true,
@@ -190,6 +192,13 @@ export function initSocket() {
     // Self-elimination detection
     const newSelfAlive = state.players?.find(p => p.id === getMyPlayerId())?.isAlive;
     if (prevSelfAlive === true && newSelfAlive === false) {
+      selfElimActive = true;
+      setTimeout(() => { selfElimActive = false; }, 3200);
+      const overlay = document.getElementById('notification-overlay');
+      if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('is-exiting', 'notification--elimination');
+      }
       showSelfEliminationScreen();
     }
 
@@ -272,13 +281,13 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('notification', (msg) => {
-    showNotification(msg);
+    if (!selfElimActive) showNotification(msg);
     if (msg.includes('eliminated')) {
       playFail();
       showEliminationFlash();
-      const overlay = document.getElementById('notification-overlay');
-      if (overlay) {
-        overlay.classList.add('notification--elimination');
+      if (!selfElimActive) {
+        const overlay = document.getElementById('notification-overlay');
+        if (overlay) overlay.classList.add('notification--elimination');
       }
       const board = document.querySelector('.board');
       if (board) {
