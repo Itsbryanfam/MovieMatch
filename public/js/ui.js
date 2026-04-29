@@ -231,15 +231,27 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     gamePlayersList.appendChild(specLi);
   }
 
-  // FULL CHAIN RENDERING (safe DOM — no innerHTML with external data)
-  chainDisplay.innerHTML = '';
+  // EFFICIENT CHAIN RENDERING
+  const currentDisplayedCount = chainDisplay.children.length;
+
+  // Clear if game restarted or changed
+  if (gameState.chain.length === 0 || gameState.chain.length < currentDisplayedCount) {
+    chainDisplay.innerHTML = '';
+  }
+
+  // Get previous actors for highlighting
   let previousActors = [];
-  gameState.chain.forEach((item, index) => {
+  if (chainDisplay.children.length > 0 && gameState.chain[chainDisplay.children.length - 1]) {
+    previousActors = gameState.chain[chainDisplay.children.length - 1].movie.cast || [];
+  }
+
+  // Only render NEW items
+  for (let index = chainDisplay.children.length; index < gameState.chain.length; index++) {
+    const item = gameState.chain[index];
     const div = document.createElement('div');
     div.className = 'chain-item';
     if (index > 0) div.classList.add('shared-highlight');
 
-    // Poster image (validate URL prefix to prevent injection)
     if (item.movie.poster && item.movie.poster.startsWith('https://image.tmdb.org/')) {
       const img = document.createElement('img');
       img.src = item.movie.poster;
@@ -252,7 +264,6 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
       div.appendChild(placeholder);
     }
 
-    // Content container
     const content = document.createElement('div');
     content.className = 'chain-content';
 
@@ -270,7 +281,6 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     titleDiv.appendChild(yearSpan);
     content.appendChild(titleDiv);
 
-    // Cast list — bold matched actors safely with createElement
     const castDiv = document.createElement('div');
     castDiv.className = 'movie-cast';
     castDiv.appendChild(document.createTextNode('Cast: '));
@@ -295,7 +305,7 @@ export function renderGame(gameState, myPlayerId, isSpectator = false) {
     if (index === gameState.chain.length - 1 && item.playerId !== myPlayerId) {
       playSuccess();
     }
-  });
+  }
   chainDisplay.scrollTop = chainDisplay.scrollHeight;
 
   const activePlayer = gameState.players[gameState.currentTurnIndex];
@@ -354,84 +364,79 @@ export function showNotification(msg) {
 }
 
 export function renderAutocompleteResults(results) {
-  console.log('🎬 Received autocomplete results from server:', results);
-
-  const isMobile = window.matchMedia('(max-width: 767px)').matches;
-  const target = isMobile ? mobileAcDropdown : autocompleteContainer;
-
   if (!results || results.length === 0) {
-    target.innerHTML = '<div class="empty-hint">No results found.</div>';
-    if (isMobile) mobileAcDropdown.classList.add('open');
+    if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">No results found.</div>';
+    if (mobileAcDropdown) mobileAcDropdown.innerHTML = '<div class="empty-hint">No results found.</div>';
+    mobileAcDropdown.classList.add('open');
     return;
   }
 
-  target.innerHTML = '';
+  if (autocompleteContainer) autocompleteContainer.innerHTML = '';
+  if (mobileAcDropdown) mobileAcDropdown.innerHTML = '';
 
   results.forEach(movie => {
-    const div = document.createElement('div');
-    div.className = 'autocomplete-item';
+    // Generate the DOM node logic once, returning a fresh node for each container
+    const createAcNode = () => {
+      const div = document.createElement('div');
+      div.className = 'autocomplete-item';
 
-    // Ensure we have a real ID
-    const id = movie.id || movie.tmdbId || 'unknown';
-    const mediaType = movie.media_type || movie.mediaType || 'movie';
+      const id = movie.id || movie.tmdbId || 'unknown';
+      const mediaType = movie.media_type || movie.mediaType || 'movie';
 
-    div.setAttribute('data-tmdb-id', id);
-    div.setAttribute('data-media-type', mediaType);
+      div.setAttribute('data-tmdb-id', id);
+      div.setAttribute('data-media-type', mediaType);
 
-    // Poster image (validate URL prefix to prevent injection)
-    if (movie.poster && movie.poster.startsWith('https://image.tmdb.org/')) {
-      const img = document.createElement('img');
-      img.src = movie.poster;
-      img.alt = 'Poster';
-      img.className = 'mini-poster';
-      div.appendChild(img);
-    } else {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'mini-poster placeholder';
-      div.appendChild(placeholder);
-    }
-
-    const acText = document.createElement('div');
-    acText.className = 'ac-text';
-    const acTitle = document.createElement('div');
-    acTitle.className = 'ac-title';
-    acTitle.textContent = movie.title;
-    const yearSpan = document.createElement('span');
-    yearSpan.className = 'year';
-    yearSpan.textContent = '(' + movie.year + ')';
-    acText.appendChild(acTitle);
-    acText.appendChild(yearSpan);
-    div.appendChild(acText);
-
-    // Click handler
-    div.addEventListener('click', () => {
-      const tmdbId = div.getAttribute('data-tmdb-id');
-      const mediaType = div.getAttribute('data-media-type');
-      const title = movie.title;
-
-      console.log('🎬 Autocomplete clicked → sending:', { title, tmdbId, mediaType });
-
-      if (movieInput) movieInput.value = '';
-      if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
-      closeMobileAc();
-
-      const socket = getSocket();
-      const lobbyId = getCurrentLobbyId();
-
-      if (socket && tmdbId && tmdbId !== 'unknown' && mediaType) {
-        socket.emit('submitMovie', {
-          lobbyId: lobbyId,
-          movie: title,
-          tmdbId: parseInt(tmdbId),
-          mediaType: mediaType
-        });
+      if (movie.poster && movie.poster.startsWith('https://image.tmdb.org/')) {
+        const img = document.createElement('img');
+        img.src = movie.poster;
+        img.alt = 'Poster';
+        img.className = 'mini-poster';
+        div.appendChild(img);
+      } else {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'mini-poster placeholder';
+        div.appendChild(placeholder);
       }
-    });
 
-    target.appendChild(div);
+      const acText = document.createElement('div');
+      acText.className = 'ac-text';
+      const acTitle = document.createElement('div');
+      acTitle.className = 'ac-title';
+      acTitle.textContent = movie.title;
+      const yearSpan = document.createElement('span');
+      yearSpan.className = 'year';
+      yearSpan.textContent = '(' + movie.year + ')';
+      acText.appendChild(acTitle);
+      acText.appendChild(yearSpan);
+      div.appendChild(acText);
+
+      div.addEventListener('click', () => {
+        const title = movie.title;
+        if (movieInput) movieInput.value = '';
+        if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
+        closeMobileAc();
+
+        const socket = getSocket();
+        const lobbyId = getCurrentLobbyId();
+
+        if (socket && id && id !== 'unknown' && mediaType) {
+          socket.emit('submitMovie', {
+            lobbyId: lobbyId,
+            movie: title,
+            tmdbId: parseInt(id),
+            mediaType: mediaType
+          });
+        }
+      });
+
+      return div;
+    };
+
+    if (autocompleteContainer) autocompleteContainer.appendChild(createAcNode());
+    if (mobileAcDropdown) mobileAcDropdown.appendChild(createAcNode());
   });
 
-  if (isMobile) mobileAcDropdown.classList.add('open');
+  mobileAcDropdown.classList.add('open');
 }
 
 export function closeMobileAc() {

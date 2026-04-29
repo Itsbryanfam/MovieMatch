@@ -1,6 +1,18 @@
 // ====================== APP.JS ======================
 // Thin entry point — imports everything and wires up the app
-import { initUIElements, closeMobileAc, openShareModal, showNotification } from './ui.js';
+import { 
+  initUIElements, closeMobileAc, openShareModal, showNotification,
+  playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
+  privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
+  tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
+  showPrivateBtn, backToJoinBtn, backToJoinBtn2, refreshLobbiesBtn,
+  heroPlayBtn, heroCodeBtn, howToPlayBtn, creditsBtn, howToPlayModal,
+  creditsModal, closeHowToPlay, closeCredits, leaderboardBtn,
+  leaderboardModal, closeLeaderboard, leaderboardList, submitBtn,
+  movieInput, autocompleteContainer, chatInput, modeChips, joinRedBtn,
+  joinBlueBtn, teamBackBtn, teamStartBtn, teamScreen, downloadCardBtn,
+  copyCardBtn, shareCanvas, shareModal
+} from './ui.js';
 import { initSocket, getSocket, getCurrentLobbyId, getGameState, leaveLobby } from './socketClient.js';
 import { prepareAudio, getStableId } from './utils.js';
 
@@ -22,52 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 300);
 
   // 3. All event listeners that were at the bottom of the old app.js
-  const playerNameInput = document.getElementById('player-name');
-  const logo = document.querySelector('.logo');
-  const lobbyScreen = document.getElementById('lobby-screen');
-  const heroScreen = document.getElementById('hero-screen');
-  const gameScreen = document.getElementById('game-screen');
-  const waitingRoom = document.getElementById('waiting-room');
-  const privatePanel = document.getElementById('private-panel');
-  const publicPanel = document.getElementById('public-panel');
-  const joinPanel = document.getElementById('join-panel');
-  const lobbyIdInput = document.getElementById('lobby-id-input');
-  const hardcoreToggle = document.getElementById('hardcore-toggle');
-  const tvShowsToggle = document.getElementById('tv-shows-toggle');
-  const publicRoomToggle = document.getElementById('public-room-toggle');
-  const joinBtn = document.getElementById('join-btn');
-  const startBtn = document.getElementById('start-btn');
-  const showPublicBtn = document.getElementById('show-public-btn');
-  const showPrivateBtn = document.getElementById('show-private-btn');
-  const backToJoinBtn = document.getElementById('back-to-join-btn');
-  const backToJoinBtn2 = document.getElementById('back-to-join-btn-2');
-  const refreshLobbiesBtn = document.getElementById('refresh-lobbies-btn');
-  const heroPlayBtn = document.getElementById('hero-play-btn');
-  const heroCodeBtn = document.getElementById('hero-code-btn');
-  const howToPlayBtn = document.getElementById('how-to-play-btn');
-  const creditsBtn = document.getElementById('credits-btn');
-  const howToPlayModal = document.getElementById('how-to-play-modal');
-  const creditsModal = document.getElementById('credits-modal');
-  const closeHowToPlay = document.getElementById('close-how-to-play');
-  const closeCredits = document.getElementById('close-credits');
-  const leaderboardBtn = document.getElementById('leaderboard-btn');
-  const leaderboardModal = document.getElementById('leaderboard-modal');
-  const closeLeaderboard = document.getElementById('close-leaderboard');
-  const leaderboardList = document.getElementById('leaderboard-list');
-  const submitBtn = document.getElementById('submit-btn');
-  const movieInput = document.getElementById('movie-input');
-  const autocompleteContainer = document.getElementById('autocomplete-container');
-  const chatInput = document.getElementById('chat-input');
-  const modeChips = document.querySelectorAll('.mode-chip');
-  const joinRedBtn = document.getElementById('join-red-btn');
-  const joinBlueBtn = document.getElementById('join-blue-btn');
-  const teamBackBtn = document.getElementById('team-back-btn');
-  const teamStartBtn = document.getElementById('team-start-btn');
-  const teamScreen = document.getElementById('team-screen');
-  const downloadCardBtn = document.getElementById('download-card-btn');
-  const copyCardBtn = document.getElementById('copy-card-btn');
-  const shareCanvas = document.getElementById('share-canvas');
-  const shareModal = document.getElementById('share-modal');
 
   logo.addEventListener('click', () => {
     const currentLobbyId = getCurrentLobbyId();

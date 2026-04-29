@@ -174,7 +174,7 @@ export function initSocket() {
             socket.emit('forceNextTurn', currentLobbyId);
             clearInterval(turnInterval);
         }
-      }, 100);
+      }, 1000);
     } else if (state.status === 'waiting') {
       if (turnInterval) clearInterval(turnInterval);
       if (gameScreen) gameScreen.classList.remove('active');
