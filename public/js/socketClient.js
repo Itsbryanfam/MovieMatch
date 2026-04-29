@@ -276,6 +276,11 @@ export function initSocket() {
       clearTurnTimer();
       if (gameScreen) gameScreen.classList.remove('active');
       if (lobbyScreen) lobbyScreen.classList.add('active');
+      // join-panel starts visible on every page load — hide it here so a
+      // stateUpdate received after a page refresh never reveals it alongside waitingRoom.
+      document.getElementById('join-panel')?.classList.add('hidden');
+      document.getElementById('private-panel')?.classList.add('hidden');
+      document.getElementById('public-panel')?.classList.add('hidden');
       renderLobby(state, getMyPlayerId());
     } else if (state.status === 'finished') {
       clearTurnTimer();
@@ -407,6 +412,11 @@ export function initSocket() {
 
     if (heroScreen) heroScreen.classList.remove('active');
 
+    // Always hide join-flow panels — rejoining means we're already in a lobby.
+    document.getElementById('join-panel')?.classList.add('hidden');
+    document.getElementById('private-panel')?.classList.add('hidden');
+    document.getElementById('public-panel')?.classList.add('hidden');
+
     if (data.state.status === 'playing' || data.state.status === 'finished') {
       if (lobbyScreen) lobbyScreen.classList.remove('active');
       if (gameScreen) gameScreen.classList.add('active');
@@ -415,9 +425,6 @@ export function initSocket() {
     } else {
       if (gameScreen) gameScreen.classList.remove('active');
       if (lobbyScreen) lobbyScreen.classList.add('active');
-      document.getElementById('join-panel')?.classList.add('hidden');
-      document.getElementById('private-panel')?.classList.add('hidden');
-      document.getElementById('public-panel')?.classList.add('hidden');
       if (waitingRoom) waitingRoom.classList.remove('hidden');
       renderLobby(data.state, getMyPlayerId());
     }
