@@ -85,14 +85,21 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
     // Use the correct endpoint for TV shows (aggregate_credits)
     const tvUrl = `https://api.themoviedb.org/3/tv/${tmdbId}/aggregate_credits?language=en-US`;
     const response = await fetch(tvUrl, { headers });
-    if (!response.ok) throw new Error(`TMDB credits failed: ${response.status}`);
+    if (!response.ok) {
+      await response.arrayBuffer(); // Drain and discard the body to free the socket
+      throw new Error(`TMDB credits failed: ${response.status}`);
+    }
     const credits = await response.json();
     await pubClient.set(cacheKey, JSON.stringify(credits), { EX: 2592000 }); // 30 days
     return credits;
   }
 
   const response = await fetch(url, { headers });
-  if (!response.ok) throw new Error(`TMDB credits failed: ${response.status}`);
+  if (!response.ok) {
+    await response.arrayBuffer(); // Drain and discard the body to free the socket
+    throw new Error(`TMDB credits failed: ${response.status}`);
+  }
+
   
   const credits = await response.json();
 

@@ -145,10 +145,14 @@ async function checkWinCondition(io, pubClient, id, state) {
     });
     const aliveTeams = teamAlive.filter(Boolean).length;
     if (aliveTeams <= 1) {
+      if (activeTurnTimeouts.has(id)) {
+        clearTimeout(activeTurnTimeouts.get(id));
+        activeTurnTimeouts.delete(id);
+      }
       state.status = 'finished';
       state.turnExpiresAt = null;
       if (pubClient && typeof pubClient.sRem === 'function') {
-        await pubClient.sRem('active_lobbies', id);
+        await pubClient.sRem('activeLobbies', id); // Fixed typo
         await pubClient.del(`lobby:${id}`);
       }
       const winningTeamId = teamAlive[0] ? 0 : 1;
@@ -178,10 +182,14 @@ async function checkWinCondition(io, pubClient, id, state) {
   if (state.gameMode === 'solo') {
     const alive = state.players.filter(p => p.isAlive);
     if (alive.length === 0) {
+      if (activeTurnTimeouts.has(id)) {
+        clearTimeout(activeTurnTimeouts.get(id));
+        activeTurnTimeouts.delete(id);
+      }
       state.status = 'finished';
       state.turnExpiresAt = null;
       if (pubClient && typeof pubClient.sRem === 'function') {
-        await pubClient.sRem('active_lobbies', id);
+        await pubClient.sRem('activeLobbies', id); // Fixed typo
         await pubClient.del(`lobby:${id}`);
       }
       const solo = state.players[0];
@@ -201,10 +209,14 @@ async function checkWinCondition(io, pubClient, id, state) {
   // --- CLASSIC / SPEED ---
   const alivePlayers = state.players.filter(p => p.isAlive);
   if (alivePlayers.length === 1 && state.players.length > 1) {
+    if (activeTurnTimeouts.has(id)) {
+      clearTimeout(activeTurnTimeouts.get(id));
+      activeTurnTimeouts.delete(id);
+    }
     state.status = 'finished';
     state.turnExpiresAt = null;
     if (pubClient && typeof pubClient.sRem === 'function') {
-      await pubClient.sRem('active_lobbies', id);
+      await pubClient.sRem('activeLobbies', id); // Fixed typo
       await pubClient.del(`lobby:${id}`);
     }
     const winner = alivePlayers[0];
@@ -217,16 +229,22 @@ async function checkWinCondition(io, pubClient, id, state) {
     broadcastState(io, id, state);
     scheduleGameReset(io, pubClient, id);
   } else if (alivePlayers.length === 0) {
+    if (activeTurnTimeouts.has(id)) {
+      clearTimeout(activeTurnTimeouts.get(id));
+      activeTurnTimeouts.delete(id);
+    }
     state.status = 'finished';
     state.turnExpiresAt = null;
     if (pubClient && typeof pubClient.sRem === 'function') {
-      await pubClient.sRem('active_lobbies', id);
+      await pubClient.sRem('activeLobbies', id); // Fixed typo
       await pubClient.del(`lobby:${id}`);
     }
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
     scheduleGameReset(io, pubClient, id);
   }
+
+
 
 }
 

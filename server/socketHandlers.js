@@ -268,8 +268,12 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     });
 
     socket.on('forceNextTurn', async (lobbyId) => {
+        // Add strict rate limiting: max 2 requests per 5 seconds
+        if (await rateLimit(socket.id, 'forceNextTurn', 2, 5000)) return; 
+        
         let room = await redisUtils.getLobby(pubClient, lobbyId);
         if (!room || room.status !== 'playing' || room.isValidating) return;
+
         if (!room.players.find(p => p.id === socket.id)) return;
         if (!room.turnExpiresAt) return;
         
