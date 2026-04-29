@@ -1,117 +1,147 @@
 <div align="center">
 
-# 🎬 MovieMatch
+# MovieMatch
 
-[![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![Express](https://img.shields.io/badge/Express.js-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
-[![Socket.io](https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socketdotio&logoColor=white)](https://socket.io/)
-[![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
+[![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Express](https://img.shields.io/badge/Express-5-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
+[![Socket.io](https://img.shields.io/badge/Socket.io-4-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
+[![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
+[![Tests](https://img.shields.io/badge/tests-47%20passing-brightgreen?style=flat-square)](/)
 
-**A fast-paced, real-time multiplayer "last-player-standing" movie/TV chaining game.**
-*Link titles by shared cast members. Outsmart your friends. Last one standing wins!*
+**Real-time multiplayer trivia game — chain movies and TV shows through shared cast members. Last player standing wins.**
 
-![MovieMatch Banner](public/og-image.png)
+[Live Demo](https://moviematch.it.com) · [Report a Bug](https://github.com/Itsbryanfam/MovieMatch/issues)
+
+![MovieMatch Screenshot](public/og-image.png)
 
 </div>
 
 ---
 
-## 🎮 Game Modes
+## Overview
 
-| Mode | Icon | Description |
-| :--- | :---: | :--- |
-| **Classic** | ⚔️ | Last player standing wins. Timer shrinks every two successful plays. |
-| **Team (2v2)** | 🤝 | Teams submit back-to-back. One mistake eliminates the whole team. |
-| **Solo Challenge** | 🎯 | Build the longest chain possible against the clock. |
-| **Speed Round** | ⚡ | Brutal 15-second flat timer for pure chaos. |
-| **Spectator** | 👁 | Join mid-game as a viewer. Auto-promoted to player when the round ends. |
+MovieMatch is a full-stack real-time game built on Node.js, Socket.io, and Redis. Players take turns naming a movie or TV show that shares at least one cast member with the previous title. Get it wrong, run out of time, or disconnect for too long — you're eliminated. The last player standing wins.
+
+Every submission is validated server-side against live TMDB cast data, preventing any client-side cheating. The game state is entirely authoritative and Redis-backed, making it horizontally scalable.
 
 ---
 
-## 🕹️ How to Play
+## Game Modes
 
-1. **Name a Movie** — Type any movie or TV show into the search bar on your turn.
-2. **Connect the Cast** — Your pick must share at least one actor with the previous title.
-3. **Beat the Clock** — Don't freeze! The timer shrinks as the game progresses.
-4. **Survival of the Smartest** — Fumble a connection or run out of time, and you're out!
+| Mode | Description |
+| :--- | :--- |
+| **Classic** | Last player standing. Timer shrinks every two successful plays, increasing pressure throughout the game. |
+| **Team (2v2)** | Two teams submit back-to-back. One failed connection eliminates the entire team. |
+| **Solo** | Single-player survival — build the longest chain possible. |
+| **Speed** | Fixed 15-second timer for every turn. No exceptions. |
 
----
-
-## ✨ Key Features
-
-### 🌐 Matchmaking & Social
-* **Public Lobby Browser** — Browse and join open games instantly.
-* **Spectator Mode** — Join mid-game to watch, then auto-join the next round. Share lobby links freely.
-* **Interactive Chat & Reactions** — Trash talk or cheer with real-time emoji bursts. Spectators can chat too.
-* **Shareable Chain Recaps** — Download beautiful PNG summaries of your cinematic runs.
-* **Persistent Trophies** — Win counts survive across sessions via stable player IDs.
-
-### 🛡️ Core Engine & Security
-* **Authoritative Validation** — Every move cross-referenced against full TMDB cast lists.
-* **Hardcore Mode** — Ban reusing the exact same connecting actor back-to-back.
-* **TV Show Support** — Expands the pool via `aggregate_credits`.
-* **Robust Reconnection** — Automatically rejoin matches after network drops with full state restore.
-* **Rate Limiting** — Per-socket rate limits on all events prevent spam and API abuse.
-* **XSS Protection** — All user input rendered safely via DOM construction, never `innerHTML`.
-* **Atomic Concurrency** — Redis locks prevent race conditions during move validation.
-* **Graceful Shutdown** — Clean Redis disconnection and HTTP drain on SIGTERM/SIGINT.
+**Optional modifiers:** Hardcore Mode (no reusing the same connecting actor consecutively) and TV Show support (expands the pool via TMDB `aggregate_credits`).
 
 ---
 
-## 📦 Quick Start
+## Features
 
-### 📋 Prerequisites
-> [!IMPORTANT]
-> Ensure you have **Node.js (v18+)** and a running **Redis** server.
+**Gameplay**
+- Server-authoritative move validation against full TMDB cast lists
+- Adaptive turn timer that shrinks as the game progresses
+- 15-second reconnection grace period — disconnecting mid-game doesn't immediately eliminate you
+- Page-refresh recovery via `sessionStorage` and persistent stable player IDs (`localStorage`)
 
-### 🚀 Installation
+**Matchmaking & Social**
+- Public lobby browser for open matchmaking
+- Private rooms with shareable invite links
+- Spectator mode with automatic promotion to player at round end
+- Real-time lobby chat and emoji reactions
+- Host controls: kick players, configure game mode and modifiers before the match
+- Shareable PNG recap cards of the full movie chain
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Itsbryanfam/MovieMatch.git
-   cd MovieMatch
-   ```
-
-2. **Configure Environment:**
-   Create a `.env` file in the root directory:
-   ```env
-   TMDB_READ_TOKEN=your_tmdb_read_token_here
-   REDIS_URL=redis://localhost:6379
-   FRONTEND_URL=http://localhost:3000
-   ```
-
-3. **Launch the App:**
-   ```bash
-   npm install
-   npm start
-   ```
-
-4. **Play!**
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
+**Infrastructure**
+- Redis-backed distributed lock (`SET NX PX`) prevents race conditions during concurrent move submissions
+- Per-socket Redis rate limiting on all events (join, submit, chat, reactions)
+- XSS protection — all user content written via DOM APIs, never `innerHTML`
+- Graceful shutdown with Redis drain on `SIGTERM`/`SIGINT`
+- In-memory poster cache with 30-minute background refresh
+- 47 tests across 5 suites covering game logic, socket integration, reconnection, and validation
 
 ---
 
-## 🧪 Testing & Quality
+## Architecture
 
-43 tests across 5 suites — unit tests, game logic, and Socket.io integration:
+```
+client (Vanilla JS ES modules)
+  ├── app.js          — input wiring, DOM event binding
+  ├── socketClient.js — socket event handlers, screen transitions
+  ├── ui.js           — all DOM rendering (no state ownership)
+  ├── state.js        — single source of truth for client state
+  └── utils.js        — audio synthesis, stable ID, shared utilities
 
-```bash
-npm test
+server (Node.js / Express 5)
+  ├── server.js               — HTTP server, Redis adapter, startup
+  ├── socketHandlers.js       — socket event routing, rate limiting
+  ├── gameLogic.js            — win conditions, turn timers, elimination
+  ├── redisUtils.js           — all Redis I/O
+  └── systems/
+      ├── lobbySystem.js      — lobby lifecycle, reconnection grace period
+      └── matchSystem.js      — TMDB search, move validation, chain building
 ```
 
-Covers: join/reconnect flows, spectator promotion, game modes (solo/team/classic), input validation, rate limiting, error boundaries, and the Redis submit lock.
+State is stored entirely in Redis as serialized lobby objects, enabling stateless server processes and straightforward horizontal scaling behind a Socket.io Redis adapter.
 
 ---
 
-## 🚀 Deployment
+## Getting Started
 
-Optimized for platforms like **Render.com**:
-1. Deploy the Node.js server as a **Web Service**.
-2. Provision a separate **Redis** instance.
-3. Map `TMDB_READ_TOKEN`, `REDIS_URL`, and `FRONTEND_URL` environment variables.
+**Prerequisites:** Node.js 18+, Redis 7+, and a [TMDB API read token](https://developer.themoviedb.org/docs/getting-started).
+
+```bash
+git clone https://github.com/Itsbryanfam/MovieMatch.git
+cd MovieMatch
+npm install
+```
+
+Create a `.env` file:
+
+```env
+TMDB_READ_TOKEN=your_tmdb_read_token_here
+REDIS_URL=redis://localhost:6379
+FRONTEND_URL=http://localhost:3000
+```
+
+```bash
+npm start        # production
+npm test         # run test suite (47 tests)
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+---
+
+## Deployment
+
+Designed for PaaS deployment (tested on Render):
+
+1. Deploy as a **Node.js Web Service**
+2. Provision a **Redis** instance
+3. Set `TMDB_READ_TOKEN`, `REDIS_URL`, and `FRONTEND_URL` environment variables
+
+For multi-instance deployments, the Socket.io Redis adapter handles cross-process event broadcasting automatically.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| Runtime | Node.js 18+ |
+| Framework | Express 5 |
+| Real-time | Socket.io 4 with Redis adapter |
+| State store | Redis 7 |
+| External API | TMDB (The Movie Database) |
+| Frontend | Vanilla JS (ES modules), no build step |
+| Testing | Jest — unit, integration, socket tests |
 
 ---
 
 <div align="center">
-Made with ❤️ by <strong>Bryan Cortez</strong>
+Built by <a href="https://x.com/ItsBryanFam"><strong>Bryan Cortez</strong></a>
 </div>
