@@ -44,6 +44,11 @@ const RATE_LIMITS = {
   // real correctness guard; this is just throttling.
   dailyChallenge: { limit: 5, windowMs: 30000 },
   dailyLeaderboard: { limit: 10, windowMs: 10000 },
+  // M3: Typing-indicator pings. Client debounces to ~once per 1.5s while
+  // actively typing, so 8 events in a 5s window covers a continuous
+  // burst with comfortable headroom while still rejecting any kind of
+  // event-flood pattern.
+  typing: { limit: 8, windowMs: 5000 },
 };
 
 // ---------------------------------------------------------------------------
@@ -273,6 +278,15 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (!sender) return;
       const isSpectator = !room.players.find(p => p.id === socket.id);
       io.to(lobbyId).emit('receiveChat', { playerName: sender.name, msg, isSpectator });
+      // M4: bump the per-lobby chat counter so the public-lobby browser
+      // can render a "chatty / casual / quiet" vibe tag. Cheap field
+      // mutation — one extra Redis write per chat message, batched into
+      // a single saveLobby. Fire-and-forget so a Redis blip during chat
+      // doesn't propagate to the broadcast above.
+      try {
+        room.chatCount = (room.chatCount | 0) + 1;
+        await redisUtils.saveLobby(pubClient, lobbyId, room);
+      } catch {}
     });
 
     on('sendReaction', async ({ lobbyId, emoji }) => {
@@ -282,6 +296,30 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (!room) return;
       if (!getParticipantInRoom(room, socket.id)) return;
       io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
+    });
+
+    // -----------------------------------------------------------------------
+    // TYPING INDICATOR (M3) — only the active player's typing is broadcast.
+    // We DO NOT broadcast the typed text — only the fact that they're typing,
+    // plus the player's display name so other clients can render "X is
+    // typing…". Anything more would leak strategy (autocompletion suggests
+    // movies the typer is considering) and isn't necessary for the
+    // presence cue this feature exists to deliver.
+    // -----------------------------------------------------------------------
+
+    on('typing', async (lobbyId) => {
+      if (await rateLimit(socket.id, 'typing', RATE_LIMITS.typing.limit, RATE_LIMITS.typing.windowMs)) return;
+      const room = await redisUtils.getLobby(pubClient, lobbyId);
+      if (!room || room.status !== 'playing') return;
+      // Only the active player's typing is announced — broadcasting other
+      // players' input would clutter the UI with multiple "is typing"
+      // lines that aren't actionable. The active player is the only one
+      // whose typing has stakes for everyone else's anticipation.
+      const activePlayer = room.players[room.currentTurnIndex];
+      if (!activePlayer || activePlayer.id !== socket.id) return;
+      // socket.to(lobbyId) emits to everyone in the room EXCEPT the sender,
+      // so the typer doesn't see their own indicator (which would be noise).
+      socket.to(lobbyId).emit('peerTyping', { playerName: activePlayer.name });
     });
 
     // -----------------------------------------------------------------------

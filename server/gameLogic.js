@@ -1,6 +1,7 @@
 const redisUtils = require('./redisUtils');
 const telemetry = require('./telemetry');
 const statsSystem = require('./systems/statsSystem');
+const soloObjectivesSystem = require('./systems/soloObjectivesSystem');
 const logger = require('pino')();
 
 // In-memory map for active turn timeouts.
@@ -35,6 +36,14 @@ function broadcastState(io, id, state) {
     winner: state.winner || null
   };
   io.to(id).emit('stateUpdate', clientState);
+  // M5: One-shot solo flags are sent in this broadcast and then cleared
+  // on the room so the NEXT broadcast (chat, reaction, etc.) doesn't
+  // re-fire the same celebration. The client sees the flag exactly once,
+  // animates it, and ignores subsequent state updates that don't carry it.
+  if (state.streakMilestone || state.objectiveJustHit) {
+    state.streakMilestone = null;
+    state.objectiveJustHit = false;
+  }
 }
 
 // Records a win for a single player. Goes through redisUtils.recordPlayerWinAtomic
@@ -209,6 +218,11 @@ function scheduleGameReset(io, pubClient, id) {
     try {
       const liveState = await redisUtils.getLobby(pubClient, id);
       if (liveState && liveState.status === 'finished') {
+        // M4: capture the just-finished chain length so the public lobby
+        // browser can advertise it on the next listing. Done BEFORE the
+        // reset so we don't accidentally read 0 from the freshly-cleared
+        // chain. Persists across the reset (it's metadata, not game state).
+        liveState.lastChainLength = (liveState.chain || []).length;
         liveState.status = 'waiting';
         liveState.players = liveState.players.filter(p => p.connected);
         promoteSpectators(liveState);
@@ -327,14 +341,22 @@ async function checkSoloWin(io, pubClient, id, state) {
     ? Math.max(0, state.chain.length - 1)
     : state.chain.length;
 
+  // M5: Solo runs get bonus points from streak milestones and objective
+  // hits — see commitPlay. Daily skips bonuses (those would skew the
+  // daily leaderboard which scores by chain length, not points).
+  const bonusPoints = (!isDaily && state.gameMode === 'solo') ? (state.bonusPoints | 0) : 0;
+  const finalScore = earnedLength + bonusPoints;
+
   state.winner = {
     name: solo ? solo.name : 'Solo Player',
     chainLength: earnedLength,
+    bonusPoints,
     isSolo: true,
     isDaily,
     puzzleNumber: state.dailyPuzzleNumber || null,
     date: state.dailyDate || null,
-    score: earnedLength,
+    score: finalScore,
+    objectiveHit: !!state.objectiveHit,
   };
 
   // H2: Persist the daily attempt as 'done' and update the per-day
@@ -470,6 +492,45 @@ async function startGame(io, pubClient, id, state) {
   // stale value its serialized form had, biasing the very first turn.
   state.currentTurnRetries = 0;
   state.players.forEach(p => { p.isAlive = true; p.score = 0; });
+
+  // M5: Solo-mode-only enrichment — pick an objective for the run and
+  // load the player's personal-best chain length so the UI can show it
+  // ("Beat your best of 12!"). Other modes don't get either field, which
+  // the client checks for before rendering. Daily skips this on purpose:
+  // it has its own implicit objective (the daily seed) and its own
+  // scoring track via dailySystem, so adding another objective layer
+  // would muddle the screen.
+  if (mode === 'solo') {
+    const obj = soloObjectivesSystem.pickObjective();
+    state.objective = soloObjectivesSystem.clientShape(obj);
+    state.objectiveHit = false;
+    state.bonusPoints = 0;
+    state.currentStreak = 0;
+    // Personal-best lookup. Best-effort — getStats swallows its own errors
+    // and returns a zero-shaped record on failure, so a Redis blip can't
+    // crash the game-start path.
+    const solo = state.players[0];
+    if (solo && solo.stableId) {
+      try {
+        const stats = await statsSystem.getStats(pubClient, solo.stableId);
+        state.personalBestChain = (stats && stats.byMode && stats.byMode.solo)
+          ? (stats.byMode.solo.longestChain | 0)
+          : 0;
+      } catch {
+        state.personalBestChain = 0;
+      }
+    } else {
+      state.personalBestChain = 0;
+    }
+  } else {
+    // Defensive: clear the solo-only fields when starting a non-solo
+    // game (host could reuse the same lobby across modes via restart).
+    state.objective = null;
+    state.objectiveHit = false;
+    state.bonusPoints = 0;
+    state.currentStreak = 0;
+    state.personalBestChain = 0;
+  }
 
   // Classic and speed start at a random index; team and solo always start at 0
   state.currentTurnIndex = 0;

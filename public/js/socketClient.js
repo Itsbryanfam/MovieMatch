@@ -118,12 +118,45 @@ export function initSocket() {
       const h3 = document.createElement('h3');
       h3.textContent = lobby.hostName + "'s Lobby";
 
+      // M4: Skill-bracket badge next to the host name. Compact, single
+      // emoji-and-label so the host's experience level is the first
+      // signal a browser sees. New players get a friendly "🌱 New" label
+      // so they aren't joining unaware that the host might be a first-
+      // timer too — sets expectations both ways.
+      if (lobby.skill && lobby.skill.label) {
+        const skillBadge = document.createElement('span');
+        skillBadge.className = 'public-lobby-skill';
+        skillBadge.textContent = `${lobby.skill.icon || ''} ${lobby.skill.label}`;
+        skillBadge.title = `Host wins: ${lobby.hostWins | 0}`;
+        h3.appendChild(document.createTextNode(' '));
+        h3.appendChild(skillBadge);
+      }
+
       const stats = document.createElement('div');
       stats.className = 'public-lobby-stats';
 
       const countSpan = document.createElement('span');
       countSpan.textContent = '👥 ' + lobby.playerCount + ' / 8';
       stats.appendChild(countSpan);
+
+      // M4: Last-game chain-length stat. Only shown when the lobby has
+      // actually finished a game — a brand-new lobby with no plays yet
+      // would render "Last chain: 0" which is misleading.
+      if (typeof lobby.lastChainLength === 'number' && lobby.lastChainLength > 0) {
+        const lastSpan = document.createElement('span');
+        lastSpan.textContent = `🔗 Last: ${lobby.lastChainLength}`;
+        stats.appendChild(lastSpan);
+      }
+
+      // M4: Vibe tag (chatty / casual / quiet). Only shown when the
+      // server returns a non-null vibe — younger lobbies have no
+      // signal yet and we don't want to mislabel them.
+      if (lobby.vibe && lobby.vibe.label) {
+        const vibeSpan = document.createElement('span');
+        vibeSpan.className = 'public-lobby-vibe';
+        vibeSpan.textContent = `${lobby.vibe.icon || ''} ${lobby.vibe.label}`;
+        stats.appendChild(vibeSpan);
+      }
 
       if (lobby.hardcoreMode || lobby.allowTvShows) {
         const tagsDiv = document.createElement('div');
@@ -249,6 +282,23 @@ export function initSocket() {
       if (gameScreen) gameScreen.classList.add('active');
       resetMobileTab();
       renderGame(state, getMyPlayerId(), getIsSpectator());
+
+      // M5: Solo streak / objective celebrations. The server stamps
+      // `streakMilestone` (a count) or `objectiveJustHit` (boolean) on the
+      // very next state broadcast after the milestone fires, then clears
+      // them in broadcastState so subsequent updates don't re-trigger.
+      // We fire on either flag — both award bonus points and deserve a
+      // visible "ding" so the player notices.
+      if (state.gameMode === 'solo' && !getIsSpectator()) {
+        if (state.streakMilestone) {
+          showToast(`🔥 ${state.streakMilestone} in a row! +${state.streakMilestone} bonus`);
+          playSfx('success');
+        }
+        if (state.objectiveJustHit) {
+          showToast('🎯 Objective complete! +5 bonus');
+          playSfx('win');
+        }
+      }
 
       // Only rebuild the timer interval when the turn actually changes.
       // stateUpdate fires on chat messages, reactions, and player joins too —
@@ -492,6 +542,27 @@ export function initSocket() {
 
   socket.on('myStats', (stats) => {
     renderMyStats(stats);
+  });
+
+  // -----------------------------------------------------------------------
+  // PEER TYPING (M3) — server announces that the active player is typing.
+  // We render a subtle "X is typing…" line under the chain area and clear
+  // it after 3s of silence. The 3s timeout is just over the server's
+  // 1.5s ping cadence, so a continuously-typing player keeps the line
+  // visible without flicker.
+  // -----------------------------------------------------------------------
+
+  let typingClearTimeout = null;
+  socket.on('peerTyping', ({ playerName }) => {
+    const el = document.getElementById('peer-typing-indicator');
+    if (!el) return;
+    el.textContent = `${playerName} is typing…`;
+    el.classList.add('visible');
+    if (typingClearTimeout) clearTimeout(typingClearTimeout);
+    typingClearTimeout = setTimeout(() => {
+      el.classList.remove('visible');
+      typingClearTimeout = null;
+    }, 3000);
   });
 
   // -----------------------------------------------------------------------

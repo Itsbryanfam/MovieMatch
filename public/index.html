@@ -311,6 +311,15 @@
             <div class="timer-wrapper">
               <div id="timer-bar"></div>
             </div>
+            <!-- M5: Solo objective + personal-best bar. Hidden by default
+                 (renderTurnControls toggles .visible only in solo mode).
+                 Sits above the input header so it's the first thing the
+                 player reads after the timer — sets the goal before the
+                 prompt asks for the action. -->
+            <div id="solo-objective-bar" class="solo-objective-bar">
+              <span id="solo-objective-text"></span>
+              <span id="solo-pb-text" class="solo-pb-text"></span>
+            </div>
             <div class="input-header">
               <span id="turn-indicator" class="status-indicator">Waiting for game to start...</span>
               <div class="input-header-right">
@@ -337,6 +346,11 @@
               </button>
             </div>
             <p id="hint-text" class="hint-text">Waiting...</p>
+            <!-- M3: "X is typing…" indicator. Hidden by default; the
+                 socketClient.js peerTyping handler toggles .visible on/off
+                 and replaces the text. role="status" + aria-live="polite"
+                 surface the change to screen readers without interrupting. -->
+            <p id="peer-typing-indicator" class="peer-typing" role="status" aria-live="polite"></p>
             <!-- Mobile-only floating suggestions dropdown -->
             <div id="mobile-ac-dropdown" class="mobile-ac-dropdown"></div>
           </div>

@@ -514,8 +514,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') submitMovie();
   });
 
+  // M3: Debounce the typing-indicator broadcast so a typing player emits
+  // at most once per 1.5s. Without the gate, every keystroke would fire
+  // its own server round-trip, which both wastes bandwidth and trips the
+  // server-side rate limit on a normal-speed typist.
+  let typingPingTimeout = null;
+  const TYPING_PING_INTERVAL_MS = 1500;
+  function maybeEmitTyping() {
+    if (typingPingTimeout) return;            // already scheduled — coalesce
+    typingPingTimeout = setTimeout(() => {
+      typingPingTimeout = null;
+    }, TYPING_PING_INTERVAL_MS);
+    socket.emit('typing', getCurrentLobbyId());
+  }
+
   movieInput?.addEventListener('input', (e) => {
     const query = e.target.value.trim();
+    // M3: Notify the room that the active player is typing. Server checks
+    // it's actually their turn before broadcasting; sending always (rather
+    // than gating on local "is it my turn" state) is simpler and safe — a
+    // wrong-turn ping is just dropped server-side.
+    if (query.length > 0) maybeEmitTyping();
     if (query.length < 2) {
       if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
       closeMobileAc();

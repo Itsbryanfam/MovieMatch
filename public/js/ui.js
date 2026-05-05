@@ -399,7 +399,58 @@ function renderTurnControls(gameState, myPlayerId, isSpectator, mode) {
   }
 
   if (mode === 'solo') {
-    turnIndicator.innerHTML = `🔗 Chain: <span class="chain-badge">${gameState.chain.length}</span>`;
+    // M5: Solo HUD now shows three things: chain length, current streak,
+    // and bonus points. Streak only renders when ≥2 (no need to show "1
+    // in a row"); bonus only renders when nonzero. Built via DOM APIs
+    // because turnIndicator can carry user-controlled-ish text in other
+    // modes — keep it consistent.
+    const chainLen = gameState.chain.length;
+    const streak = gameState.currentStreak | 0;
+    const bonus = gameState.bonusPoints | 0;
+    turnIndicator.textContent = '';
+    const link = document.createElement('span');
+    link.innerHTML = `🔗 Chain: <span class="chain-badge">${chainLen}</span>`;
+    turnIndicator.appendChild(link);
+    if (streak >= 2) {
+      const streakSpan = document.createElement('span');
+      streakSpan.className = 'solo-hud-streak';
+      streakSpan.textContent = `🔥 ${streak} in a row`;
+      turnIndicator.appendChild(streakSpan);
+    }
+    if (bonus > 0) {
+      const bonusSpan = document.createElement('span');
+      bonusSpan.className = 'solo-hud-bonus';
+      bonusSpan.textContent = `⭐ +${bonus} bonus`;
+      turnIndicator.appendChild(bonusSpan);
+    }
+
+    // M5: Objective + personal-best bar. Visible only in solo mode and
+    // only when there's something to show (objective + or PB > 0). The
+    // .objective-hit class flips to a "complete" green look once the
+    // server marks objectiveHit true.
+    const bar = document.getElementById('solo-objective-bar');
+    const objTxt = document.getElementById('solo-objective-text');
+    const pbTxt = document.getElementById('solo-pb-text');
+    if (bar && objTxt && pbTxt) {
+      const obj = gameState.objective;
+      const hit = !!gameState.objectiveHit;
+      const pb = gameState.personalBestChain | 0;
+      if (obj && obj.description) {
+        objTxt.textContent = (hit ? '✅ ' : '🎯 ') + obj.description;
+        bar.classList.toggle('objective-hit', hit);
+      } else {
+        objTxt.textContent = '';
+      }
+      pbTxt.textContent = pb > 0 ? `Best: ${pb}` : '';
+      // Show the bar if there's anything in either slot.
+      const hasContent = !!(obj && obj.description) || pb > 0;
+      bar.classList.toggle('visible', hasContent);
+    }
+  } else {
+    // Hide the solo bar in all other modes so a player who plays Classic
+    // after Solo doesn't see stale objective text.
+    const bar = document.getElementById('solo-objective-bar');
+    if (bar) bar.classList.remove('visible');
   }
 
   if (isSpectator && gameState.status !== 'finished') {

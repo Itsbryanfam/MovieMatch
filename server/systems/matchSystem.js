@@ -10,6 +10,7 @@ const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
 const telemetry = require('../telemetry');
 const statsSystem = require('./statsSystem');
+const soloObjectivesSystem = require('./soloObjectivesSystem');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
@@ -507,6 +508,40 @@ function commitPlay(room, socketId, player, validMatch, matchedActors, matchedAc
 
   const pIndex = room.players.findIndex(p => p.id === socketId);
   if (pIndex > -1) room.players[pIndex].score += 100;
+
+  // M5: Solo-only streak + objective bookkeeping. Other modes don't read
+  // these fields, so the work is conditional both for performance and to
+  // keep the broadcast state lean.
+  if (room.gameMode === 'solo') {
+    // Streak grows on every successful play. Milestones (3 / 5 / 10 / 15)
+    // award a flat bonus equal to the streak count — bigger streaks pay
+    // more. Capped at 15 so a player who's a Tom-Hanks expert chaining
+    // 50 doesn't earn ever-growing bonuses; we want the milestones to
+    // feel like checkpoints, not an arithmetic series.
+    room.currentStreak = (room.currentStreak | 0) + 1;
+    const STREAK_MILESTONES = [3, 5, 10, 15];
+    if (STREAK_MILESTONES.includes(room.currentStreak)) {
+      room.bonusPoints = (room.bonusPoints | 0) + room.currentStreak;
+      // Flag the milestone for the broadcast — client clears it after
+      // showing the celebration so subsequent stateUpdates don't re-fire.
+      room.streakMilestone = room.currentStreak;
+    } else {
+      room.streakMilestone = null;
+    }
+
+    // Objective check — first satisfaction wins the one-shot bonus.
+    // matchesObjective via the server-side lookup keeps test functions
+    // out of the serialized state (they aren't Redis-safe anyway).
+    if (room.objective && !room.objectiveHit) {
+      const obj = soloObjectivesSystem.getObjectiveById(room.objective.id);
+      if (obj && obj.test(lightweightMovie)) {
+        room.objectiveHit = true;
+        room.bonusPoints = (room.bonusPoints | 0) + soloObjectivesSystem.OBJECTIVE_BONUS_POINTS;
+        // Flag for the same one-shot client celebration pattern.
+        room.objectiveJustHit = true;
+      }
+    }
+  }
 
   room.timerMultiplier++;
 }

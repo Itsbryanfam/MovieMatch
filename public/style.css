@@ -2772,6 +2772,127 @@ input:disabled {
   padding-bottom: 0.25rem;
 }
 
+/* =============================================
+   M3: PEER TYPING INDICATOR
+   =============================================
+   Sits between the hint text and the mobile autocomplete dropdown so it's
+   always near the player's eye while reading the input area. Subtle on
+   purpose — bright/loud would compete with the timer bar and chain feed.
+   Display:none → block transition + opacity fade keeps the appearance
+   smooth without taking up layout space when nobody is typing. */
+.peer-typing {
+  display: none;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0.25rem 0 0;
+  opacity: 0;
+  transition: opacity 180ms ease-in;
+  /* Faux animated ellipsis via three pseudo-element dots. Pure CSS so it
+     keeps animating after the JS handler does its work. Suppressed under
+     prefers-reduced-motion via the global media query (which zeroes the
+     animation duration). */
+}
+.peer-typing.visible {
+  display: block;
+  opacity: 1;
+}
+.peer-typing::after {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  text-align: left;
+  animation: peer-typing-dots 1.2s steps(4, end) infinite;
+}
+@keyframes peer-typing-dots {
+  0%, 20% { content: ''; }
+  40%     { content: '.'; }
+  60%     { content: '..'; }
+  80%, 100% { content: '...'; }
+}
+
+/* =============================================
+   M4: PUBLIC LOBBY CARD ENRICHMENT
+   =============================================
+   Skill bracket + vibe tag pill styling. Both sit inline with the
+   existing player-count / mode-tag stats so they don't add a new row;
+   keeps the cards compact when scrolling a long list of public lobbies. */
+.public-lobby-skill {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.5rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  vertical-align: middle;
+}
+.public-lobby-vibe {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* =============================================
+   M5: SOLO HUD + OBJECTIVE BAR
+   =============================================
+   Streak and bonus pills in the turn indicator. Inline-block so they sit
+   alongside the chain badge. Subtle warmth (orange/amber tones) to reinforce
+   the "fire / star" iconography without competing with the timer-bar reds. */
+.solo-hud-streak {
+  display: inline-block;
+  margin-left: 0.6rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(249, 115, 22, 0.18);
+  color: #fdba74;
+}
+.solo-hud-bonus {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+/* Objective bar: hidden by default; .visible flips it on. .objective-hit
+   recolors to a "complete" green when the player satisfies the objective. */
+.solo-objective-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  margin: 0 0 0.5rem 0;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+.solo-objective-bar.visible {
+  display: flex;
+}
+.solo-objective-bar.objective-hit {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #d1fae5;
+}
+.solo-pb-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.solo-objective-bar.objective-hit .solo-pb-text {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 /* ---- Elimination notification tint ---- */
 #notification-overlay.notification--elimination {
   background: rgba(50, 5, 5, 0.9);

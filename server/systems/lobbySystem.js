@@ -48,11 +48,19 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
 
   // Build the initial state in memory. We'll only persist it if the
   // atomic NX-create wins; otherwise we use the canonical existing state.
+  // M4: createdAt + chatCount + lastChainLength power the "vibe" tag and
+  // last-game stat shown on each public lobby card. createdAt is set
+  // once per lobby (NX-create wins); the rest are mutated as the lobby
+  // lives. Initialized to safe defaults so older serialized state from
+  // before this deploy reads as 0/null without crashing.
   const initialRoom = {
     id, status: 'waiting', players: [], spectators: [], currentTurnIndex: 0, chain: [],
     usedMovies: [], hardcoreMode: false, previousSharedActors: [],
     allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
-    isValidating: false, gameMode: 'classic'
+    isValidating: false, gameMode: 'classic',
+    createdAt: Date.now(),
+    chatCount: 0,
+    lastChainLength: null,
   };
 
   // Atomic create-or-noop: SET NX returns 'OK' if we created the key,
@@ -460,14 +468,53 @@ async function restartLobby(ctx, socket, lobbyId) {
 // PUBLIC LOBBY BROWSER
 // ---------------------------------------------------------------------------
 
+// M4: Bucket free-form host-win counts into stable skill labels. Visible
+// on every public lobby card so a brand-new player can avoid joining a
+// veteran's room (and vice versa). Numbers are intentionally generous
+// at the low end so a player isn't labeled "Vet" after a single hot
+// streak — the top tier is meant to flag "this person plays a lot."
+function _skillBracketForWins(wins) {
+  if (wins >= 10) return { label: 'Vet', icon: '🏆' };
+  if (wins >= 3)  return { label: 'Casual', icon: '🎯' };
+  return { label: 'New', icon: '🌱' };
+}
+
+// M4: Compute the chat-vibe tag from chat-count and lobby age. Default
+// to "Quiet" for very young lobbies so a brand-new lobby with zero chat
+// (because nobody's joined yet) doesn't read as "silent" — it just hasn't
+// had time. After ~3 minutes of activity the rate becomes meaningful.
+function _vibeTag(chatCount, createdAt) {
+  const ageMs = Math.max(1, Date.now() - (createdAt || Date.now()));
+  const ageMin = ageMs / 60000;
+  if (ageMin < 1.5) return null; // too new to call — render as "no tag"
+  const ratePerMin = (chatCount || 0) / ageMin;
+  if (ratePerMin >= 0.6) return { label: 'Chatty', icon: '🗣️' };
+  if (ratePerMin >= 0.15) return { label: 'Casual chat', icon: '💬' };
+  return { label: 'Quiet', icon: '🔇' };
+}
+
 async function requestPublicLobbies(ctx, socket) {
   const { pubClient } = ctx;
   const all = await redisUtils.getAllLobbies(pubClient);
   const publicList = all.filter(r => r.status === 'waiting' && r.isPublic && r.players.length < 8).map(room => {
     const host = room.players.find(p => p.isHost);
+    const hostWins = host ? (host.wins | 0) : 0;
+    const skill = _skillBracketForWins(hostWins);
+    const vibe = _vibeTag(room.chatCount, room.createdAt);
     return {
-      id: room.id, hostName: host ? host.name : 'Unknown', playerCount: room.players.length,
-      hardcoreMode: room.hardcoreMode, allowTvShows: room.allowTvShows
+      id: room.id,
+      hostName: host ? host.name : 'Unknown',
+      playerCount: room.players.length,
+      hardcoreMode: room.hardcoreMode,
+      allowTvShows: room.allowTvShows,
+      // M4 enrichment fields. All are best-effort — older lobbies (created
+      // before the deploy that added these) will read as null/0/default,
+      // which the client renderer tolerates by hiding the line entirely.
+      hostWins,
+      skill,
+      vibe,
+      lastChainLength: typeof room.lastChainLength === 'number' ? room.lastChainLength : null,
+      gameMode: room.gameMode || 'classic',
     };
   });
   socket.emit('publicLobbiesList', publicList);
