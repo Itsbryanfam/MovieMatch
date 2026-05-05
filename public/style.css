@@ -2287,6 +2287,24 @@ input:disabled {
   to { transform: translateY(0); }
 }
 
+/* =============================================
+   MOBILE ANIMATION BUDGET
+   =============================================
+   Chain reveals stack the dropInNode (0.4s) and three revealElement
+   passes (0.5s each, staggered) for a ~0.7s per-entry cascade. On a
+   6-player game with rapid turns this compounds and feels sluggish on
+   budget Android. Halve durations on small screens. The keyframes
+   themselves are unchanged; only the apparent speed shifts. */
+@media (max-width: 767px) {
+  .chain-item,
+  .chain-item .movie-poster,
+  .chain-item .player-name,
+  .chain-item .movie-title,
+  .chain-item .movie-cast {
+    animation-duration: 0.25s !important;
+  }
+}
+
 /* Layout helpers for lobby panels */
 .btn-stack {
   display: flex;
@@ -3401,14 +3419,18 @@ a:focus-visible,
 }
 
 /* =============================================
-   LANDSCAPE ON SHORT-HEIGHT PHONES
+   LANDSCAPE ON SHORT-HEIGHT PHONES & TABLETS
    =============================================
-   iPhone SE landscape is 667x375 (≈320px usable after browser chrome).
-   Default mobile portrait spacing + min-height: 60vh on the chain feed
-   forces overflow squeezing. This block compresses vertical chrome
-   without redesigning the layout. Wider landscape phones (>=768px wide)
-   already get the tablet 2-column layout; this layers on top. */
-@media (orientation: landscape) and (max-height: 500px) {
+   Catches landscape devices where vertical space is constrained:
+   - iPhone SE landscape: 667x375
+   - iPhone 14 Pro Max landscape: 932x430
+   - Galaxy S Ultra landscape: ~480px tall
+   - iPad mini landscape: 1133x744 (was previously falling through to the
+     desktop 3-column layout despite being touch-only with cramped height)
+   Raised from max-height: 500px to 700px to bring all of these into the
+   same compact-vertical treatment. Wider landscape phones (>=768px wide)
+   still get the tablet 2-column layout; this layers on top of it. */
+@media (orientation: landscape) and (max-height: 700px) {
   .app-header { margin-bottom: 0.4rem; }
   .logo { font-size: 1rem; }
   .nav-link-btn { padding: 0.25rem 0.5rem; font-size: 0.7rem; }
