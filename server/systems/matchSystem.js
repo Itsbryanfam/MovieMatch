@@ -8,6 +8,7 @@
 
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
+const telemetry = require('../telemetry');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
@@ -165,6 +166,16 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
             retriesLeft,
             originalInput: typeof movie === 'string' ? movie : '',
           });
+          // H6: Track every typo retry so we can see if H1's budget is too
+          // tight or too generous. `usedAutocomplete` is the most useful
+          // signal: a high typo rate among autocomplete users means search
+          // ranking is bad; among non-autocomplete users it means the
+          // autocomplete UI isn't discoverable.
+          telemetry.track(pubClient, 'submit_rejected', {
+            mode: room.gameMode,
+            retriesUsed,
+            usedAutocomplete: !!tmdbId,
+          });
           return;
         }
 
@@ -202,6 +213,40 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
           reason: result.reason,
         });
 
+        // H3: Private "why were you eliminated?" payload to the failing
+        // player only. Carries the cast lists of both their guess and the
+        // last chain entry so the client can render a side-by-side
+        // comparison ("here's what was needed, here's what you picked").
+        // Trimmed to top 10 cast members so the payload stays small and
+        // the UI doesn't get visually overwhelming.
+        //
+        // Only sent when there's actually something to compare — i.e. there
+        // was a candidate movie AND a previous chain entry. First-move
+        // failures (chain.length === 0) can't happen by definition (the
+        // first move is always valid), so the check is defensive.
+        const triedCandidate = candidateMovies[0];
+        const lastChainEntry = room.chain.length > 0 ? room.chain[room.chain.length - 1] : null;
+        if (triedCandidate && lastChainEntry) {
+          // Cast may be {id, name} objects (post-H4) or bare strings on
+          // legacy in-flight rooms — normalize to plain names for the
+          // wire format so the client doesn't have to handle both shapes.
+          const namesOnly = (cast) =>
+            (cast || []).slice(0, 10).map(a => typeof a === 'string' ? a : (a && a.name) || '');
+          socket.emit('youWereEliminated', {
+            yourGuess: {
+              title: triedCandidate.title,
+              year: triedCandidate.year,
+              cast: namesOnly(triedCandidate.cast),
+            },
+            lastChainEntry: {
+              title: lastChainEntry.movie.title,
+              year: lastChainEntry.movie.year,
+              cast: namesOnly(lastChainEntry.movie.cast),
+            },
+            reason: result.reason,
+          });
+        }
+
         room.isValidating = false;
         await redisUtils.saveLobby(pubClient, lobbyId, room);
         await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, result.reason);
@@ -212,6 +257,16 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
       // actors too so previousSharedActors carries ids — required for
       // id-precise hardcore-mode comparison on the next turn.
       commitPlay(room, socket.id, player, result.match, result.matchedActors, result.matchedActorObjects);
+
+      // H6: Telemetry — successful play. `usedAutocomplete` distinguishes
+      // pick-from-suggestions players from raw-typers; `chainLength` after
+      // commit lets us study mode-specific chain length distributions.
+      telemetry.track(pubClient, 'submit_success', {
+        mode: room.gameMode,
+        chainLength: room.chain.length,
+        usedAutocomplete: !!tmdbId,
+        mediaType: result.match.mediaType,
+      });
 
       room.isValidating = false;
       await gameLogic.nextTurn(io, pubClient, lobbyId, room);

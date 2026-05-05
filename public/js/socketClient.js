@@ -38,6 +38,14 @@ import {
 // self-elimination screen can take the stage without overlap.
 let selfElimActive = false;
 
+// H3: Most recent `youWereEliminated` payload, buffered so it can be picked
+// up by the alive→dead transition handler in stateUpdate. The events arrive
+// in this order: youWereEliminated → notification → stateUpdate, so by the
+// time stateUpdate detects the transition the payload is already here.
+// Cleared on game start/restart and after consumption to keep stale data
+// from leaking into a future elimination.
+let pendingEliminationDetails = null;
+
 export function initSocket() {
   const socket = io({
     reconnection: true,
@@ -203,7 +211,15 @@ export function initSocket() {
         overlay.classList.add('hidden');
         overlay.classList.remove('is-exiting', 'notification--elimination');
       }
-      showSelfEliminationScreen();
+      // H3: If a youWereEliminated payload is buffered (invalid-connection
+      // path), pass it through so the screen can show the side-by-side
+      // cast comparison. Otherwise (timeout, disconnect, quit) fall back
+      // to the generic screen — those eliminations have no comparison to
+      // surface anyway. Consume the buffer so a stale payload from a
+      // previous game can never leak into a future elimination.
+      const details = pendingEliminationDetails;
+      pendingEliminationDetails = null;
+      showSelfEliminationScreen(details);
     }
 
     // Your-turn glow
@@ -361,6 +377,21 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('attemptFailed', showGhostAttempt);
+
+  // -----------------------------------------------------------------------
+  // YOU WERE ELIMINATED (H3) — private payload sent only to the eliminated
+  // player when the cause is a strategic failure (invalid connection,
+  // hardcore actor reuse, or movie-already-used). Carries the cast lists
+  // for both the player's guess and the last chain entry so the
+  // self-elimination screen can show why no actor connected the two.
+  // Cleared either by consumption (the next stateUpdate that flips the
+  // local player to dead) or by the next `gameStarted`/`stateUpdate` that
+  // resets the game — see resetGame logic below if added later.
+  // -----------------------------------------------------------------------
+
+  socket.on('youWereEliminated', (payload) => {
+    pendingEliminationDetails = payload;
+  });
 
   // -----------------------------------------------------------------------
   // SUBMISSION REJECTED (H1) — server couldn't find the title (typo or

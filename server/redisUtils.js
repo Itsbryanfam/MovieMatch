@@ -106,18 +106,25 @@ async function setPlayerWins(pubClient, playerId, wins) {
 // freezes the game for the entire room until the 30s lock TTL expires.
 const TMDB_FETCH_TIMEOUT_MS = 5000;
 
+// L10: Cache schema version. Bump this whenever the shape of the cached
+// credits payload changes — old entries simply expire over the 7-day TTL,
+// and new fetches start landing under the new prefix immediately. Documented
+// schema history (so future authors know which bump was for what):
+//   v1 — { cast: [{ name }] } (initial)
+//   v2 — { cast: [{ id, name }] } (H4 — id-based actor matching)
+const CREDITS_CACHE_VERSION = 'v2';
+
 /**
  * Get credits from Redis cache or fetch from TMDB and cache for 30 days.
  *
- * H4: Cache key is `credits:v2:` (bumped from v1) because the v2 cache
- * payload now stores `{id, name}` objects per cast member instead of
- * `{name}` only. Reading a v1 entry as v2 would silently lose the id and
- * defeat id-based actor matching, so the version segment ensures we never
- * cross the streams. v1 entries simply expire over 7 days; new submits
- * after this deploy land in v2 from the first miss.
+ * Cache key embeds CREDITS_CACHE_VERSION so a payload-shape change is a
+ * single-line bump above. Reading a v1 entry as v2 would silently lose the
+ * id and defeat id-based actor matching, so the version segment ensures we
+ * never cross the streams. Old-version entries simply expire; new submits
+ * after deploy land in the current version from the first miss.
  */
 async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
-  const cacheKey = `credits:v2:${mediaType}:${tmdbId}`;
+  const cacheKey = `credits:${CREDITS_CACHE_VERSION}:${mediaType}:${tmdbId}`;
   // Companion lock for stampede protection — see logic below.
   // 10s expiry > the 5s TMDB timeout, so the lock can't outlive a stuck fetch.
   const lockKey = `${cacheKey}:fetching`;

@@ -242,3 +242,122 @@ describe('matchSystem.submitMovie — title-not-found retry behaviour (H1)', () 
     expect(state.currentTurnRetries).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// H3 — "Why were you eliminated?" learning surface
+// ---------------------------------------------------------------------------
+// On an invalid-connection elimination, the server should send a private
+// `youWereEliminated` event to the failing socket only, carrying both
+// casts so the client can render a side-by-side comparison. The broadcast
+// `attemptFailed` event continues to fire for everyone else (covered by
+// the existing ghost-attempt client tests).
+
+describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
+  let mockIo, mockSocket, mockPubClient, ctx, logger;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIo = { to: jest.fn().mockReturnThis(), emit: jest.fn() };
+    mockSocket = { id: 'sock-1', emit: jest.fn() };
+    mockPubClient = {};
+    logger = { error: jest.fn(), info: jest.fn(), warn: jest.fn() };
+    ctx = {
+      io: mockIo,
+      pubClient: mockPubClient,
+      TMDB_HEADERS: { Authorization: 'Bearer test', accept: 'application/json' },
+      logger,
+    };
+    redisUtils.acquireSubmitLock.mockResolvedValue('token-abc');
+    redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+    redisUtils.saveLobby.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    gameLogic.clearTurnTimeout('TEST');
+  });
+
+  test('emits youWereEliminated to the failing socket on invalid connection', async () => {
+    // A room with one prior play: chain has "Inception" (Leonardo DiCaprio).
+    // The player is about to submit an unrelated movie with no shared cast,
+    // which should trigger the H3 learning payload.
+    const room = {
+      id: 'TEST',
+      status: 'playing',
+      players: [{
+        id: 'sock-1', name: 'Tester', isHost: true, isAlive: true,
+        connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1'
+      }, {
+        id: 'sock-other', name: 'Other', isHost: false, isAlive: true,
+        connected: true, score: 0, wins: 0, teamId: 1, stableId: 's2'
+      }],
+      spectators: [],
+      chain: [{
+        playerId: 'sock-other',
+        playerName: 'Other',
+        movie: {
+          id: 27205,
+          title: 'Inception',
+          year: '2010',
+          // Object-shape cast (post-H4) — no overlap with the candidate below.
+          cast: [{ id: 6193, name: 'Leonardo DiCaprio' }, { id: 24045, name: 'Joseph Gordon-Levitt' }],
+          mediaType: 'movie',
+        },
+        matchedActors: [],
+      }],
+      usedMovies: ['movie:27205'],
+      hardcoreMode: false,
+      previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0,
+      turnExpiresAt: Date.now() + 60000, isValidating: false, gameMode: 'classic',
+      currentTurnIndex: 0, currentTurnRetries: 0,
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    // Direct TMDB ID lookup path so we don't have to mock fetch — submit
+    // with a tmdbId, server hits getOrFetchCredits which we mock to return
+    // a candidate cast that shares NO actors with Inception.
+    redisUtils.getOrFetchCredits.mockResolvedValue({
+      cast: [{ id: 8784, name: 'Daniel Craig' }, { id: 1283, name: 'Helen Mirren' }]
+    });
+
+    // Direct lookup path: server fetches the movie details via fetch() —
+    // mock the response so resolveCandidates produces a single candidate.
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 36557,
+        title: 'Casino Royale',
+        release_date: '2006-11-14',
+        poster_path: null,
+      }),
+    });
+
+    await matchSystem.submitMovie(ctx, mockSocket, {
+      lobbyId: 'TEST',
+      movie: 'Casino Royale',
+      tmdbId: 36557,
+      mediaType: 'movie',
+    });
+
+    // Assert the H3 payload reached the failing socket.
+    const elimEmit = mockSocket.emit.mock.calls.find(([event]) => event === 'youWereEliminated');
+    expect(elimEmit).toBeDefined();
+    const payload = elimEmit[1];
+
+    // Both casts must be present and bare-name strings (the wire format).
+    expect(payload.lastChainEntry.title).toBe('Inception');
+    expect(payload.lastChainEntry.cast).toEqual(
+      expect.arrayContaining(['Leonardo DiCaprio', 'Joseph Gordon-Levitt'])
+    );
+    expect(payload.yourGuess.title).toBe('Casino Royale');
+    expect(payload.yourGuess.cast).toEqual(
+      expect.arrayContaining(['Daniel Craig', 'Helen Mirren'])
+    );
+    // No actor appears in both — that's the whole reason for the elimination.
+    const overlap = payload.yourGuess.cast.filter(a => payload.lastChainEntry.cast.includes(a));
+    expect(overlap).toEqual([]);
+    // Reason text propagates through so the client UI can show it.
+    expect(typeof payload.reason).toBe('string');
+    expect(payload.reason.length).toBeGreaterThan(0);
+  });
+});

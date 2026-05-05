@@ -472,16 +472,121 @@ export function showEliminationFlash() {
   setTimeout(() => el.remove(), 1500);
 }
 
-export function showSelfEliminationScreen() {
+// H3: Optionally accepts a `details` object with the failed-attempt context
+// (last chain entry's cast vs. the player's guess). When present, renders a
+// side-by-side card so the player learns *why* they lost. When absent
+// (timeout, disconnect, quit), falls back to the original 3-second flash.
+//
+// The detailed card is dismissable instead of auto-removed — players need
+// to be able to read both cast lists, which often takes longer than 3s.
+// All text content is inserted via DOM APIs (textContent / createElement),
+// not innerHTML interpolation, to preserve the codebase's no-innerHTML XSS
+// posture for any user-controlled data (movie titles come from TMDB but
+// the principle is consistent across the file).
+export function showSelfEliminationScreen(details) {
   const el = document.createElement('div');
   el.className = 'self-elim-screen';
-  el.innerHTML = `
-    <div class="self-elim-icon">💀</div>
-    <div class="self-elim-title">You've Been Eliminated</div>
-    <div class="self-elim-sub">Spectating from here on out</div>
-  `;
+
+  // Simple/legacy path — no details, brief auto-dismiss flash.
+  if (!details || !details.lastChainEntry || !details.yourGuess) {
+    el.innerHTML = `
+      <div class="self-elim-icon">💀</div>
+      <div class="self-elim-title">You've Been Eliminated</div>
+      <div class="self-elim-sub">Spectating from here on out</div>
+    `;
+    // The card no longer auto-removes itself when details are absent — but
+    // keep the original behavior for the legacy flash so existing tests and
+    // edge cases (timeouts, disconnects) still feel snappy.
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+    return;
+  }
+
+  // H3 detailed path — render the side-by-side cast comparison.
+  el.classList.add('self-elim-screen--detailed');
+  // Make the screen interactive so the close button can be clicked.
+  el.style.pointerEvents = 'auto';
+
+  const card = document.createElement('div');
+  card.className = 'self-elim-card';
+
+  const head = document.createElement('div');
+  head.className = 'self-elim-head';
+  const icon = document.createElement('div');
+  icon.className = 'self-elim-icon';
+  icon.textContent = '💀';
+  const title = document.createElement('div');
+  title.className = 'self-elim-title';
+  title.textContent = "You've Been Eliminated";
+  const sub = document.createElement('div');
+  sub.className = 'self-elim-sub';
+  sub.textContent = details.reason || 'Invalid connection';
+  head.appendChild(icon);
+  head.appendChild(title);
+  head.appendChild(sub);
+
+  // Two columns: "needed" (last chain entry) and "you played" (the guess).
+  // Cast lists are top-10 only — anything longer would visually overwhelm
+  // the card and the actor that mattered (or didn't) is almost always in
+  // the top of the cast list anyway. Already trimmed server-side.
+  const grid = document.createElement('div');
+  grid.className = 'self-elim-grid';
+
+  const buildColumn = (label, movie, columnClass) => {
+    const col = document.createElement('div');
+    col.className = `self-elim-col ${columnClass}`;
+    const colLabel = document.createElement('div');
+    colLabel.className = 'self-elim-col-label';
+    colLabel.textContent = label;
+    const colTitle = document.createElement('div');
+    colTitle.className = 'self-elim-col-title';
+    // textContent is XSS-safe — escapes interpretation as HTML.
+    colTitle.textContent = `${movie.title || 'Unknown'} (${movie.year || '?'})`;
+    const castList = document.createElement('div');
+    castList.className = 'self-elim-col-cast';
+    (movie.cast || []).forEach((name, i) => {
+      if (i > 0) castList.appendChild(document.createTextNode(', '));
+      castList.appendChild(document.createTextNode(name));
+    });
+    col.appendChild(colLabel);
+    col.appendChild(colTitle);
+    col.appendChild(castList);
+    return col;
+  };
+
+  grid.appendChild(buildColumn('Needed a connection to', details.lastChainEntry, 'self-elim-col--needed'));
+  grid.appendChild(buildColumn('You played', details.yourGuess, 'self-elim-col--played'));
+
+  // Hint line — small, encouraging, generic (we don't compute the literal
+  // "best next move" here; that's a Week 4+ stretch).
+  const hint = document.createElement('div');
+  hint.className = 'self-elim-hint';
+  hint.textContent = 'No actor appears in both casts above. Look for shared names next time.';
+
+  // Dismiss button — explicit close so screen-reader users have a clear
+  // exit. Pressing Escape also dismisses (handled via the close path).
+  const close = document.createElement('button');
+  close.className = 'self-elim-close';
+  close.type = 'button';
+  close.textContent = 'Continue spectating';
+  const dismiss = () => {
+    el.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
+  close.addEventListener('click', dismiss);
+  document.addEventListener('keydown', onKey);
+
+  card.appendChild(head);
+  card.appendChild(grid);
+  card.appendChild(hint);
+  card.appendChild(close);
+  el.appendChild(card);
+
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+  // Move focus into the card for keyboard users so Escape and Tab land
+  // somewhere predictable.
+  close.focus();
 }
 
 export function showWinFlash() {

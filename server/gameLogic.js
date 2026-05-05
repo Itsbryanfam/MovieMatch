@@ -1,4 +1,5 @@
 const redisUtils = require('./redisUtils');
+const telemetry = require('./telemetry');
 const logger = require('pino')();
 
 // In-memory map for active turn timeouts.
@@ -75,11 +76,36 @@ async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
   if (player) {
     player.isAlive = false;
     io.to(id).emit('notification', { msg: `${player.name} eliminated: ${reason}`, kind: 'elimination' });
+    // H6: Telemetry — `reason` is a free-form string so we bucket it into a
+    // small set of stable categories. This is what lets us answer "what % of
+    // eliminations are typos?" without having to grep server logs.
+    telemetry.track(pubClient, 'eliminated', {
+      mode: state.gameMode,
+      reasonCategory: _categorizeReason(reason),
+      chainLength: (state.chain || []).length,
+    });
   }
   await checkWinCondition(io, pubClient, id, state);
   if (state.status === 'playing') {
     await nextTurn(io, pubClient, id, state);
   }
+}
+
+// Bucket free-form elimination reasons into stable categories for telemetry.
+// New reason strings drift over time (copy edits, i18n); the category set
+// stays fixed so dashboards don't break.
+function _categorizeReason(reason) {
+  if (typeof reason !== 'string') return 'unknown';
+  const r = reason.toLowerCase();
+  if (r.includes('quit')) return 'quit';
+  if (r.includes('disconnect')) return 'disconnect';
+  if (r.includes('timed out') || r.includes("time's up")) return 'timeout';
+  if (r.includes('too many invalid title')) return 'too_many_typos';
+  if (r.includes('hardcore')) return 'hardcore_actor_reuse';
+  if (r.includes('already used')) return 'movie_already_used';
+  if (r.includes('api error') || r.includes('timeout')) return 'tmdb_error';
+  if (r.includes('invalid movie connection')) return 'no_shared_cast';
+  return 'other';
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +271,14 @@ async function checkTeamWin(io, pubClient, id, state) {
     isTeamWin: true
   };
   io.to(id).emit('notification', { msg: `Team ${teamLabel} wins!`, kind: 'win' });
+  // H6: Telemetry — fired exactly once per game-end. teamSize covers
+  // imbalanced 1v2 / 2v1 setups that could happen on disconnects.
+  telemetry.track(pubClient, 'game_won', {
+    mode: state.gameMode,
+    chainLength: (state.chain || []).length,
+    isTeamWin: true,
+    teamSize: winningPlayers.length,
+  });
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
   scheduleGameReset(io, pubClient, id);
@@ -269,6 +303,14 @@ async function checkSoloWin(io, pubClient, id, state) {
     isSolo: true,
     score: state.chain.length
   };
+  // H6: Telemetry — solo "wins" are really survival completions; the
+  // chainLength field is the player's score and the most useful number to
+  // aggregate (avg/p50/p95 chain length tells us if Solo is too easy/hard).
+  telemetry.track(pubClient, 'game_won', {
+    mode: 'solo',
+    chainLength: state.chain.length,
+    isSolo: true,
+  });
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
   scheduleGameReset(io, pubClient, id);
@@ -287,6 +329,14 @@ async function checkClassicWin(io, pubClient, id, state) {
     await recordPlayerWin(pubClient, winner);
     state.winner = { name: winner.name, score: winner.score, id: winner.id };
     io.to(id).emit('notification', { msg: `${winner.name} wins!`, kind: 'win' });
+    // H6: Telemetry — classic & speed share this code path; carry through
+    // the actual mode so dashboards can distinguish them.
+    telemetry.track(pubClient, 'game_won', {
+      mode: state.gameMode || 'classic',
+      chainLength: (state.chain || []).length,
+      playerCount: state.players.length,
+      finalScore: winner.score,
+    });
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
     scheduleGameReset(io, pubClient, id);
@@ -356,6 +406,18 @@ async function startGame(io, pubClient, id, state) {
   state.isValidating = false;
 
   resetTimer(state);
+
+  // H6: Telemetry — fired exactly once per game, at the start. Captures the
+  // mode mix and player count distribution so we can answer "what modes do
+  // people actually play?" and "what's the typical lobby size?" without
+  // having to instrument every call site.
+  telemetry.track(pubClient, 'game_started', {
+    mode,
+    playerCount: state.players.length,
+    hardcoreMode: !!state.hardcoreMode,
+    allowTvShows: !!state.allowTvShows,
+  });
+
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
 }

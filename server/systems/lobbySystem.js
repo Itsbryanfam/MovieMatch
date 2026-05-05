@@ -9,6 +9,7 @@
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
 const posterCache = require('../posterCache');
+const telemetry = require('../telemetry');
 
 // Unambiguous charset for lobby codes (Crockford base32 — no 0/O, 1/I/L)
 const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -107,6 +108,17 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
   await redisUtils.saveLobby(pubClient, id, room);
   socket.join(id);
   socket.emit('joined', { lobbyId: id, playerId: socket.id });
+
+  // H6: Telemetry — only fires on the first join (which created the lobby),
+  // not on subsequent joins to an existing lobby. The `mode` field is the
+  // initial mode at creation time; if the host changes it later we'll see
+  // the change reflected in the `game_started` event.
+  if (isNewLobby) {
+    telemetry.track(pubClient, 'lobby_created', {
+      mode: room.gameMode,
+      isPublic: !!room.isPublic,
+    });
+  }
 
   const playerPosters = posterCache.getPosters();
   if (playerPosters.length > 0) socket.emit('posters', playerPosters);
@@ -310,6 +322,15 @@ async function quitGame(ctx, socket, lobbyId) {
   //   2) It's someone else's turn — mark dead, re-check win condition, and
   //      broadcast. Don't disturb the active player's timer.
   const isCurrentTurn = room.players[room.currentTurnIndex]?.id === socket.id;
+  // H6: Telemetry — fired once per quit, regardless of whose turn it was.
+  // Useful for understanding mid-game churn ("how often do people quit?").
+  // Tracked separately from `eliminated` so we can distinguish strategic
+  // losses from voluntary exits in funnel analysis.
+  telemetry.track(pubClient, 'quit_game', {
+    mode: room.gameMode,
+    chainLength: (room.chain || []).length,
+    onOwnTurn: isCurrentTurn,
+  });
   if (isCurrentTurn) {
     await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, 'Quit');
   } else {
