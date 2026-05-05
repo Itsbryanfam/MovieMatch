@@ -1,0 +1,11 @@
+{
+  "name": "MovieMatch",
+  "short_name": "MovieMatch",
+  "description": "Chain movies and TV shows through shared cast members. Multiplayer party game.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "categories": ["games", "entertainment"]
+}

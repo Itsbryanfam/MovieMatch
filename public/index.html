@@ -4,6 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
+  <!-- PWA-relevant meta tags. theme-color tints mobile browser chrome
+       (Safari status bar, Chrome address bar) to match the dark UI so the
+       app doesn't feel framed by a bright system bar. The apple-mobile-*
+       tags enable proper full-screen behavior when the user adds the app
+       to their iOS home screen. The manifest enables installability and
+       theme integration on Android Chrome. -->
+  <meta name="theme-color" content="#09090b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MovieMatch">
+  <link rel="manifest" href="/manifest.json">
+
   <!-- Primary SEO -->
   <title>MovieMatch — Chain Movies With Friends | Free Multiplayer Game</title>
   <meta name="description" content="MovieMatch is a free multiplayer game where players chain movies and TV shows through shared cast members. Last one standing wins!">
@@ -354,7 +366,7 @@
               <!-- aria-label: the button's only content is an SVG; without this, screen readers
                    announce it as just "button" with no purpose. aria-hidden on the SVG hides
                    the decorative path data so assistive tech reads only the button's accessible name. -->
-              <button id="submit-btn" class="btn-icon" aria-label="Submit movie" disabled>
+              <button id="submit-btn" class="btn-icon" aria-label="Submit movie" title="Submit movie" disabled>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
               </button>
             </div>
@@ -408,7 +420,7 @@
             <div class="chat-input-wrapper">
               <input type="text" id="chat-input" placeholder="Say something..." autocomplete="off">
               <!-- Same accessibility pattern as the movie submit button above. -->
-              <button id="chat-send-btn" class="btn-icon chat-send-btn" aria-label="Send chat message">
+              <button id="chat-send-btn" class="btn-icon chat-send-btn" aria-label="Send chat message" title="Send chat message">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
               </button>
             </div>
