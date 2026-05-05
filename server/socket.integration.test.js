@@ -372,6 +372,87 @@ describe('Socket.io Integration', () => {
   });
 
   // ========================
+  // QUIT GAME (M7)
+  // ========================
+  // Pre-M7 the only way to leave a game in progress was to disconnect, which
+  // armed a 15-second grace period before elimination. These tests pin the
+  // post-M7 contract: a quitGame event from a participating, alive player
+  // ends their run immediately, with the right side-effects per turn-state.
+
+  // Helper: build a minimal playing-state room with two players, one of whom
+  // is the connected client (their socket.id is filled in at emit time).
+  function buildPlayingRoom(currentClientId, currentTurnIndex = 0) {
+    return {
+      id: 'QUIT01',
+      status: 'playing',
+      players: [
+        { id: currentClientId, name: 'Quitter', isHost: true, isAlive: true,
+          connected: true, score: 0, wins: 0, teamId: 0, stableId: 's_quit' },
+        { id: 'p_other', name: 'Other', isHost: false, isAlive: true,
+          connected: true, score: 0, wins: 0, teamId: 1, stableId: 's_other' },
+      ],
+      spectators: [],
+      chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0,
+      turnExpiresAt: Date.now() + 60000, isValidating: false, gameMode: 'classic',
+      currentTurnIndex,
+    };
+  }
+
+  test('quitGame on your own turn eliminates you and saves the lobby', async () => {
+    await connect();
+    const room = buildPlayingRoom(client.id, 0);
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('quitGame', 'QUIT01');
+
+    // Wait for the elimination to land — the handler is async so we can't
+    // await the emit directly. 250ms is plenty for the local in-memory path.
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // The quitter must be marked dead — that's the whole point of the
+    // feature. Without this assertion a regression that no-ops the handler
+    // would silently pass.
+    expect(room.players[0].isAlive).toBe(false);
+    // The lobby state must be persisted at least once during the elimination
+    // path (called from inside eliminateCurrentPlayer → nextTurn).
+    expect(redisUtils.saveLobby).toHaveBeenCalled();
+  });
+
+  test('quitGame on someone else’s turn marks you dead without disturbing the active player', async () => {
+    await connect();
+    // currentTurnIndex=1 → the OTHER player has the turn; client is index 0.
+    const room = buildPlayingRoom(client.id, 1);
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('quitGame', 'QUIT01');
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // Only the quitter is marked dead — the active player is untouched.
+    expect(room.players[0].isAlive).toBe(false);
+    expect(room.players[1].isAlive).toBe(true);
+    // The current turn index didn't advance — the active player keeps their
+    // remaining time. (Pre-M7 this case would either no-op or accidentally
+    // advance the turn; the integration test pins which.)
+    expect(room.currentTurnIndex).toBe(1);
+  });
+
+  test('quitGame is a no-op when the game is not in playing state', async () => {
+    await connect();
+    const room = buildPlayingRoom(client.id, 0);
+    room.status = 'waiting'; // not in a playable state — quit makes no sense
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('quitGame', 'QUIT01');
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // The player should NOT be marked dead — they're in the lobby, not a game.
+    // (Use leaveLobby for that flow.) Regression-guards a path that'd cause a
+    // confusing 'X eliminated' notification while still in the waiting room.
+    expect(room.players[0].isAlive).toBe(true);
+  });
+
+  // ========================
   // ERROR BOUNDARY
   // ========================
 

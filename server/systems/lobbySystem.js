@@ -283,6 +283,48 @@ async function requestPublicLobbies(ctx, socket) {
 }
 
 // ---------------------------------------------------------------------------
+// QUIT GAME (M7) — graceful in-game leave with no grace period
+// ---------------------------------------------------------------------------
+// Pre-M7 the only way to leave a game in progress was to disconnect, which
+// triggered the 15-second reconnection grace timer in handleDisconnect.
+// During those 15 seconds the rest of the table sat watching a frozen turn
+// before finally resuming. M7 lets a player explicitly forfeit so the room
+// snaps to the next turn without the courtesy delay.
+
+async function quitGame(ctx, socket, lobbyId) {
+  const { io, pubClient } = ctx;
+
+  const room = await redisUtils.getLobby(pubClient, lobbyId);
+  if (!room) return;
+  // Only meaningful while the game is actually playing — in waiting/finished
+  // states the player should use leaveLobby (which removes them entirely).
+  if (room.status !== 'playing') return;
+
+  const player = room.players.find(p => p.id === socket.id);
+  if (!player || !player.isAlive) return;
+
+  // Two cases, mirroring handleDisconnect's grace-timer expiry:
+  //   1) It's the quitter's turn — eliminate cleanly via the canonical path
+  //      so the timer is cleared, win condition is re-checked, and the next
+  //      player gets a fresh turn timer.
+  //   2) It's someone else's turn — mark dead, re-check win condition, and
+  //      broadcast. Don't disturb the active player's timer.
+  const isCurrentTurn = room.players[room.currentTurnIndex]?.id === socket.id;
+  if (isCurrentTurn) {
+    await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, 'Quit');
+  } else {
+    player.isAlive = false;
+    // 'info' kind = no shake/sound effects — quitting isn't a strategic
+    // failure to celebrate or mourn, just a player departing.
+    io.to(lobbyId).emit('notification', { msg: `${player.name} quit the game.`, kind: 'info' });
+    await redisUtils.saveLobby(pubClient, lobbyId, room);
+    await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
+    const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+    if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // DISCONNECT / LEAVE
 // ---------------------------------------------------------------------------
 
@@ -392,5 +434,6 @@ module.exports = {
   startLobby,
   restartLobby,
   requestPublicLobbies,
+  quitGame,
   handleDisconnect,
 };

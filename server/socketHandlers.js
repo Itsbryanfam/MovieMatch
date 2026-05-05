@@ -34,6 +34,10 @@ const RATE_LIMITS = {
   chat:         { limit: 5,  windowMs: 5000  },
   reaction:     { limit: 10, windowMs: 5000  },
   kickPlayer:   { limit: 5,  windowMs: 10000 },
+  // M7: quit-game is destructive but not spammable — a single click ends the
+  // player's run, so two events in a 5s window is plenty (covers a stuck-key
+  // double-fire while still rejecting any kind of automated abuse pattern).
+  quitGame:     { limit: 2,  windowMs: 5000  },
 };
 
 // ---------------------------------------------------------------------------
@@ -159,6 +163,14 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
     on('restartLobby', async (lobbyId) => {
       await lobbySystem.restartLobby(ctx, socket, lobbyId);
+    });
+
+    on('quitGame', async (lobbyId) => {
+      // M7: Server-authoritative — the client only sends a request; the
+      // lobbySystem decides whether to eliminate the current turn or just
+      // mark the quitter dead based on whose turn it is.
+      if (await rateLimit(socket.id, 'quitGame', RATE_LIMITS.quitGame.limit, RATE_LIMITS.quitGame.windowMs)) return;
+      await lobbySystem.quitGame(ctx, socket, lobbyId);
     });
 
     on('requestPublicLobbies', async () => {

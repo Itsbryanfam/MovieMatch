@@ -102,6 +102,11 @@ async function nextTurn(io, pubClient, id, state) {
   // but don't arm a new timer on a dead player if it somehow slips through.
   if (!state.players[state.currentTurnIndex].isAlive) return;
 
+  // H1: Reset the per-turn "title not found" retry budget. The counter is
+  // scoped to a single player's turn — once the turn advances (whether via
+  // a successful play or an elimination), the next player starts fresh.
+  state.currentTurnRetries = 0;
+
   resetTimer(state);
 
   // Server-side hard timeout: eliminates the current player if they haven't
@@ -337,6 +342,10 @@ async function startGame(io, pubClient, id, state) {
   state.usedMovies = [];
   state.timerMultiplier = 0;
   state.previousSharedActors = [];
+  // H1: Initialize the per-turn typo-retry counter. Without this, an old
+  // state object loaded from before this field existed would carry whatever
+  // stale value its serialized form had, biasing the very first turn.
+  state.currentTurnRetries = 0;
   state.players.forEach(p => { p.isAlive = true; p.score = 0; });
 
   // Classic and speed start at a random index; team and solo always start at 0
@@ -355,27 +364,69 @@ async function startGame(io, pubClient, id, state) {
 // CHAIN VALIDATION (pure — no I/O, exported for testing)
 // ---------------------------------------------------------------------------
 
+// H4: Each cast entry can be either a legacy bare string ("Tom Hanks") or
+// a current {id, name} object. Normalize both shapes into {id, name} so the
+// comparison logic below can prefer id-equality (correct across name
+// collisions and punctuation drift) and fall back to case-insensitive name
+// match only when one side is missing an id.
+//
+// Why support both shapes: in-flight rooms loaded from Redis at deploy time
+// may still have legacy string casts on chain entries, while a fresh
+// candidate fetched after deploy carries object casts. Without normalization
+// the very next play in such a room would crash on `.id` access.
+function _normalizeActor(a) {
+  return typeof a === 'string' ? { id: null, name: a } : a;
+}
+
+// True iff a and b refer to the same person. Prefer id-equality (precise);
+// fall back to lowercase name match only when at least one side has no id.
+function _sameActor(a, b) {
+  if (a.id != null && b.id != null) return a.id === b.id;
+  if (!a.name || !b.name) return false;
+  return a.name.toLowerCase() === b.name.toLowerCase();
+}
+
 function validateConnection(lastNodeCast, candidateCast, hardcoreMode, previousSharedActors) {
-  const sharedActors = candidateCast.filter(actor =>
-    lastNodeCast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase())
-  );
+  const last = (lastNodeCast || []).map(_normalizeActor);
+  const cand = (candidateCast || []).map(_normalizeActor);
+  const prev = (previousSharedActors || []).map(_normalizeActor);
+
+  const sharedActors = cand.filter(a => last.some(l => _sameActor(l, a)));
 
   if (sharedActors.length === 0) {
     return { valid: false, reason: "Invalid movie connection." };
   }
 
-  if (hardcoreMode && previousSharedActors.length > 0) {
-    // Hardcore mode: the connecting actor must be different from last turn's connector
-    const newSharedActors = sharedActors.filter(actor =>
-      !previousSharedActors.some(pActor => pActor.toLowerCase() === actor.toLowerCase())
-    );
+  if (hardcoreMode && prev.length > 0) {
+    // M1: Hardcore mode is CUMULATIVE — `previousSharedActors` carries every
+    // connector used in this chain so far (commitPlay maintains this), so
+    // the filter below excludes anyone who has ever connected. Pre-M1 the
+    // exclusion was just last turn's connector, which let players ping-pong
+    // the same pair of actors and made "Hardcore" a misnomer.
+    const newSharedActors = sharedActors.filter(a => !prev.some(p => _sameActor(p, a)));
     if (newSharedActors.length === 0) {
-      return { valid: false, reason: "Hardcore Mode: You cannot reuse the exact same connecting actor from the previous turn!" };
+      return { valid: false, reason: "Hardcore Mode: That actor has already connected somewhere in this chain — pick a different one." };
     }
-    return { valid: true, matchedActors: newSharedActors };
+    // Return BOTH shapes so callers don't have to choose:
+    //   matchedActors        — bare name strings, what the client renders
+    //                          (chain.matchedActors[0] feeds the share-card
+    //                          text and the connection label in the chain UI).
+    //   matchedActorObjects  — {id, name} entries, what the server stores in
+    //                          room.previousSharedActors so the NEXT turn's
+    //                          hardcore check can compare by id (precise across
+    //                          name collisions and punctuation drift).
+    return {
+      valid: true,
+      matchedActors: newSharedActors.map(a => a.name),
+      matchedActorObjects: newSharedActors,
+    };
   }
 
-  return { valid: true, matchedActors: sharedActors };
+  return {
+    valid: true,
+    matchedActors: sharedActors.map(a => a.name),
+    matchedActorObjects: sharedActors,
+  };
 }
 
 module.exports = {

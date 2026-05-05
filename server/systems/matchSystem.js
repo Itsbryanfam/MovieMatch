@@ -13,6 +13,37 @@ const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
 const TMDB_FETCH_TIMEOUT_MS = 5000;
 
+// H1: Per-turn budget for "title not found" retries before falling back to
+// elimination. A typo or off-canon title is almost never a strategic mistake —
+// eliminating on the first miss made early-game frustration the #1 player
+// pain point. Three swings is enough to recover from typos but small enough
+// that a determined troll can't stall the game indefinitely (the existing
+// 8-submits-per-10s socket rate limit is a hard ceiling on top of this).
+const MAX_TITLE_NOT_FOUND_RETRIES = 3;
+
+// ---------------------------------------------------------------------------
+// CAST-ENTRY HELPERS (H4)
+// ---------------------------------------------------------------------------
+// A cast entry is `{id, name}` post-H4, but in-flight rooms loaded from
+// Redis at deploy time may still hold legacy bare-string entries. These
+// helpers normalize on the fly so the rest of the file can stay shape-
+// agnostic without each call site re-implementing the fallback.
+
+function _toActor(a) {
+  return typeof a === 'string' ? { id: null, name: a } : a;
+}
+
+// True iff two cast entries refer to the same person. Prefers id-equality
+// when both sides have one (precise across name collisions like two
+// "Sam Rockwell"s); falls back to case-insensitive name match otherwise.
+function _castEntryMatches(a, b) {
+  const x = _toActor(a);
+  const y = _toActor(b);
+  if (x.id != null && y.id != null) return x.id === y.id;
+  if (!x.name || !y.name) return false;
+  return x.name.toLowerCase() === y.name.toLowerCase();
+}
+
 // ---------------------------------------------------------------------------
 // STRING SIMILARITY (for fuzzy movie title matching)
 // ---------------------------------------------------------------------------
@@ -106,10 +137,41 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
       const topCandidates = await resolveCandidates(room, movie, tmdbId, mediaType, TMDB_HEADERS);
 
       if (topCandidates.length === 0) {
+        // H1: A "title not found" is almost always a typo or an off-canon
+        // title TMDB doesn't index — not a strategic mistake. Instead of
+        // immediately eliminating, allow up to MAX_TITLE_NOT_FOUND_RETRIES
+        // per turn. The turn timer is NOT reset, so the player still pays
+        // for fumbling in lost seconds; they just keep their life. Whether
+        // the limit is hit determines elimination vs. a private retry hint.
         room = await redisUtils.getLobby(pubClient, lobbyId);
+        // Default the counter to 0 for older states that pre-date this field.
+        room.currentTurnRetries = (room.currentTurnRetries || 0) + 1;
+        const retriesUsed = room.currentTurnRetries;
+        const retriesLeft = MAX_TITLE_NOT_FOUND_RETRIES - retriesUsed;
+
         room.isValidating = false;
         await redisUtils.saveLobby(pubClient, lobbyId, room);
-        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Title not found!");
+
+        if (retriesLeft >= 0) {
+          // Emit only to the submitting socket — nobody else needs to learn
+          // about typos (no broadcast = no leaked strategy, no chat noise).
+          // `retriesLeft` lets the client warn the player as they approach
+          // the elimination threshold so it doesn't feel arbitrary.
+          // `originalInput` lets the client restore the typed text into the
+          // input field so the player can edit a typo instead of retyping.
+          socket.emit('submissionRejected', {
+            reason: 'Title not found',
+            message: movie ? `"${movie}" — couldn't find that title.` : "Couldn't find that title.",
+            retriesLeft,
+            originalInput: typeof movie === 'string' ? movie : '',
+          });
+          return;
+        }
+
+        // Out of retries: fall through to elimination with a clearer reason
+        // than the original "Title not found!" so the eliminated player and
+        // spectators understand what actually happened.
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Too many invalid title attempts");
         return;
       }
 
@@ -146,8 +208,10 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
         return;
       }
 
-      // Step 5: Commit the valid play
-      commitPlay(room, socket.id, player, result.match, result.matchedActors);
+      // Step 5: Commit the valid play. Pass the object form of matched
+      // actors too so previousSharedActors carries ids — required for
+      // id-precise hardcore-mode comparison on the next turn.
+      commitPlay(room, socket.id, player, result.match, result.matchedActors, result.matchedActorObjects);
 
       room.isValidating = false;
       await gameLogic.nextTurn(io, pubClient, lobbyId, room);
@@ -223,11 +287,22 @@ async function enrichWithCredits(candidates, pubClient, headers, logger) {
       const date = mt === 'tv' ? c.first_air_date : c.release_date;
       const credData = await redisUtils.getOrFetchCredits(pubClient, c.id, mt, headers);
 
+      // H4: cast is now an array of {id, name} objects rather than bare
+      // names. The id is what validateConnection compares against (so two
+      // actors named "Sam Rockwell" stay distinct), while the name is what
+      // the client renders. Pre-H4, ambiguous-name collisions and TMDB
+      // punctuation drift ("Robert Downey Jr." vs "Robert Downey, Jr.")
+      // could cause silent false negatives that eliminated players unfairly.
       return {
         id: c.id,
         title,
         year: date ? date.split('-')[0] : 'Unknown',
-        cast: (credData.cast || []).map(actor => actor.name),
+        cast: (credData.cast || []).map(actor =>
+          // getOrFetchCredits already shapes entries as {id, name}, but
+          // tolerate a bare string here to keep this function defensive
+          // against any future change to the cache shape.
+          typeof actor === 'string' ? { id: null, name: actor } : actor
+        ),
         poster: c.poster_path ? `${TMDB_POSTER_BASE}${c.poster_path}` : null,
         mediaType: mt
       };
@@ -264,8 +339,14 @@ function validateChainConnection(room, candidateMovies) {
     );
 
     if (result.valid) {
-      // Return matchedActors to the caller; commitPlay writes it onto the room.
-      return { match: candidate, matchedActors: result.matchedActors };
+      // Pass through both shapes so commitPlay can store the id-bearing
+      // object form on previousSharedActors (precise hardcore matching) AND
+      // the bare-name form on the chain entry (client-rendered display).
+      return {
+        match: candidate,
+        matchedActors: result.matchedActors,           // [name, ...]
+        matchedActorObjects: result.matchedActorObjects, // [{id, name}, ...]
+      };
     }
 
     if (i === 0) failReason = result.reason;
@@ -274,21 +355,66 @@ function validateChainConnection(room, candidateMovies) {
   return { match: null, reason: failReason };
 }
 
-function commitPlay(room, socketId, player, validMatch, matchedActors) {
-  // Write previousSharedActors here — only after we've committed to the play.
-  // Validation no longer mutates the room (#13), so this is the canonical site.
-  room.previousSharedActors = matchedActors;
+function commitPlay(room, socketId, player, validMatch, matchedActors, matchedActorObjects) {
+  // H4: Store the id-bearing form on the room so the next turn's hardcore
+  // check can compare by id. Falls back to a name-only object array when the
+  // caller didn't pass objects (e.g. first move in chain has no matched
+  // actors at all, so the array is empty either way).
+  //
+  // M1: Hardcore mode is now CUMULATIVE — once any actor has been used as a
+  // connector in this chain, they're locked out for the rest of the game.
+  // Pre-M1 the list was overwritten each turn, which only blocked the
+  // immediately-previous connector and let chains ping-pong A→B→A→B in
+  // perpetuity. The cumulative set is what most players expect from "no
+  // actor reuse" and is what the lobby copy now claims.
+  //
+  // Outside hardcore mode the cumulative list is harmless — validateConnection
+  // only consults it when hardcoreMode is true. We grow it unconditionally so
+  // toggling hardcore mid-game (host change, future feature) doesn't reset
+  // history.
+  const newConnectorObjs = matchedActorObjects && matchedActorObjects.length > 0
+    ? matchedActorObjects
+    : matchedActors.map(name => ({ id: null, name }));
 
-  // Trim cast for display (keep top 30 + any matched actors)
+  const prior = Array.isArray(room.previousSharedActors) ? room.previousSharedActors : [];
+  // Dedupe by id when both sides have one, otherwise by lowercase name.
+  // Without this, a chain that re-connects via the same already-locked
+  // actor in non-hardcore mode would pile up duplicate entries forever.
+  const seen = new Set();
+  const dedupKey = (a) => {
+    const obj = typeof a === 'string' ? { id: null, name: a } : a;
+    return obj.id != null ? `id:${obj.id}` : `name:${(obj.name || '').toLowerCase()}`;
+  };
+  const merged = [];
+  for (const a of [...prior, ...newConnectorObjs]) {
+    const k = dedupKey(a);
+    if (k === 'name:' || seen.has(k)) continue;
+    seen.add(k);
+    merged.push(typeof a === 'string' ? { id: null, name: a } : a);
+  }
+  room.previousSharedActors = merged;
+
+  // Trim cast for display (keep top 30 + any matched actors).
+  // H4: cast entries are now {id, name} objects, so equality and append
+  // logic work in object terms. The matched-actor lookup below uses the
+  // object form when available (precise) and the bare name otherwise.
   const displayCast = validMatch.cast.slice(0, 30);
-  matchedActors.forEach(actor => {
-    if (!displayCast.some(d => d.toLowerCase() === actor.toLowerCase())) {
+  // Build a lookup of matched actors as objects for the backfill below — we
+  // need ids when present so we don't accidentally double-push the same
+  // person under a slightly different name spelling.
+  const matchedObjs = (matchedActorObjects && matchedActorObjects.length > 0)
+    ? matchedActorObjects
+    : matchedActors.map(name => ({ id: null, name }));
+
+  matchedObjs.forEach(actor => {
+    if (!displayCast.some(d => _castEntryMatches(d, actor))) {
       displayCast.push(actor);
     }
-    // Backfill matched actor into previous chain node if missing
+    // Backfill matched actor into previous chain node if missing — keeps
+    // the chain self-consistent for the share card and chain replay.
     if (room.chain.length > 0) {
       const prevNode = room.chain[room.chain.length - 1];
-      if (!prevNode.movie.cast.some(d => d.toLowerCase() === actor.toLowerCase())) {
+      if (!prevNode.movie.cast.some(d => _castEntryMatches(d, actor))) {
         prevNode.movie.cast.push(actor);
       }
     }

@@ -231,7 +231,7 @@
         <div class="lobby-settings" id="lobby-settings" style="display:none;">
           <label class="setting-toggle">
             <input type="checkbox" id="hardcore-toggle" disabled>
-            <span>Hardcore Mode <small style="opacity:0.7;">(No back-to-back actors)</small></span>
+            <span>Hardcore Mode <small style="opacity:0.7;">(No actor reuse anywhere in chain)</small></span>
           </label>
           <label class="setting-toggle">
             <input type="checkbox" id="tv-shows-toggle" disabled>
@@ -303,6 +303,11 @@
                      title is just a tooltip and is unreliable for screen readers (especially mobile). -->
                 <button id="mute-btn" class="btn-icon mute-btn" aria-label="Toggle sound" aria-pressed="false" title="Toggle sound">🔊</button>
                 <button id="game-invite-btn" class="btn-icon" aria-label="Copy invite link" title="Copy invite link">🔗</button>
+                <!-- M7: quit-game button. Hidden by default — shown only when
+                     the player is alive in a playing-state game (handled in
+                     ui.js renderTurnControls). Click triggers a confirm()
+                     dialog so an accidental tap can't end the run. -->
+                <button id="quit-game-btn" class="btn-icon quit-btn hidden" aria-label="Quit game" title="Quit game">🏳️</button>
               </div>
             </div>
             
@@ -425,7 +430,7 @@
 
       <h3 class="modal-section-title">⚙️ Modifiers</h3>
       <div class="how-to-modes">
-        <div class="mode-badge">🔥 <strong>Hardcore Mode</strong> — you can't reuse the same connecting actor from the previous turn.</div>
+        <div class="mode-badge">🔥 <strong>Hardcore Mode</strong> — once an actor has connected anywhere in the chain, they're locked out for the rest of the game.</div>
         <div class="mode-badge">📺 <strong>TV Shows</strong> — expands the pool to include television series alongside films.</div>
       </div>
     </div>

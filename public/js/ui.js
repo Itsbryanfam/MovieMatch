@@ -343,9 +343,23 @@ function renderChainItems(gameState, myPlayerId) {
     castDiv.className = 'movie-cast';
     castDiv.appendChild(document.createTextNode('Cast: '));
     const castList = item.movie.cast || [];
-    castList.forEach((actorName, ci) => {
+    castList.forEach((actor, ci) => {
+      // H4: cast entries are now {id, name} objects. Tolerate the legacy
+      // string shape for in-flight rooms whose state was serialized before
+      // the deploy that introduced ids.
+      const actorName = typeof actor === 'string' ? actor : (actor && actor.name) || '';
+      const actorId = typeof actor === 'object' ? actor && actor.id : null;
+      if (!actorName) return;
       if (ci > 0) castDiv.appendChild(document.createTextNode(', '));
-      const isMatched = index > 0 && previousActors.some(pa => pa.toLowerCase() === actorName.toLowerCase());
+      // Highlighted iff this actor appears in the previous node's cast.
+      // Compare by id when both sides have one (id-precise across name
+      // collisions), otherwise fall back to case-insensitive name compare.
+      const isMatched = index > 0 && previousActors.some(pa => {
+        const paName = typeof pa === 'string' ? pa : (pa && pa.name) || '';
+        const paId = typeof pa === 'object' ? pa && pa.id : null;
+        if (actorId != null && paId != null) return actorId === paId;
+        return paName.toLowerCase() === actorName.toLowerCase();
+      });
       if (isMatched) {
         const strong = document.createElement('strong');
         strong.textContent = actorName;
@@ -370,6 +384,18 @@ function renderChainItems(gameState, myPlayerId) {
 // Updates the input area, turn indicator, and hint text based on whose turn it is.
 function renderTurnControls(gameState, myPlayerId, isSpectator, mode) {
   const activePlayer = gameState.players[gameState.currentTurnIndex];
+
+  // M7: Show the quit button only when the local player can meaningfully
+  // quit — alive, in a playing game, not a spectator (spectators have no
+  // run to end). Toggling .hidden every render keeps the visibility state
+  // in sync with eliminations, win conditions, and game restarts without
+  // additional event wiring.
+  const quitBtnEl = document.getElementById('quit-game-btn');
+  if (quitBtnEl) {
+    const me = gameState.players.find(p => p.id === myPlayerId);
+    const canQuit = !isSpectator && gameState.status === 'playing' && me && me.isAlive;
+    quitBtnEl.classList.toggle('hidden', !canQuit);
+  }
 
   if (mode === 'solo') {
     turnIndicator.innerHTML = `🔗 Chain: <span class="chain-badge">${gameState.chain.length}</span>`;
@@ -800,9 +826,13 @@ export function scoreChainEntry(item, index, chain) {
 
     const actor = (item.matchedActors || [])[0];
     if (actor) {
-        const pos = (item.movie.cast || []).findIndex(
-            c => c.toLowerCase() === actor.toLowerCase()
-        );
+        // H4: cast entries are now {id, name} objects (with legacy bare-string
+        // entries possible during the transition). Compare on the name field;
+        // matchedActors stays as bare strings for client-display compatibility.
+        const pos = (item.movie.cast || []).findIndex(c => {
+            const cName = typeof c === 'string' ? c : (c && c.name) || '';
+            return cName.toLowerCase() === actor.toLowerCase();
+        });
         if (pos > 4) score += 2;
     }
 

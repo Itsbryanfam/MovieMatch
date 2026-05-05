@@ -1143,6 +1143,18 @@ input:disabled {
   color: var(--text-muted);
 }
 
+/* M7: quit-game button. Subtle muted background by default — destructive
+   actions shouldn't visually compete with primary affordances — but the
+   hover state turns warm so a deliberate click feels intentional. */
+.btn-icon.quit-btn {
+  background: linear-gradient(135deg, #4b3a3a, #3a2828);
+  color: #ffd9d2;
+}
+.btn-icon.quit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b54a3b, #8a2b1f);
+  color: #fff;
+}
+
 .hint-text {
   margin-top: 0.75rem;
   font-size: 0.8rem;
@@ -2618,6 +2630,25 @@ input:disabled {
   .poster-row {
     animation: none !important;
   }
+}
+
+/* =============================================
+   FOCUS RING FOR KEYBOARD USERS (L6)
+   =============================================
+   :focus-visible activates only when the browser detects keyboard navigation
+   (e.g. Tab) — mouse clicks won't trigger it. Without an explicit ring, the
+   default browser outline is suppressed by various reset rules and keyboard
+   users can't tell what element is focused. Color matches the existing
+   accent so the ring feels native to the design rather than bolted on. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--accent-primary, #6366f1);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* =============================================

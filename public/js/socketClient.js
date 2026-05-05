@@ -13,7 +13,7 @@ import {
   showNotification, renderAutocompleteResults, closeMobileAc,
   openShareModal, showGameOverBanner, resetMobileTab,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
-  showGhostAttempt,
+  showGhostAttempt, showToast,
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
@@ -361,6 +361,61 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('attemptFailed', showGhostAttempt);
+
+  // -----------------------------------------------------------------------
+  // SUBMISSION REJECTED (H1) — server couldn't find the title (typo or
+  // off-canon name TMDB doesn't index). The player is NOT eliminated; they
+  // can submit again until they exhaust the per-turn retry budget. This
+  // event is emitted only to the submitting socket — other players don't
+  // need to learn about typos, so we keep it private and quiet.
+  // -----------------------------------------------------------------------
+
+  socket.on('submissionRejected', ({ message, retriesLeft, originalInput }) => {
+    // Show the count tail only when we still have retries — once retriesLeft
+    // hits 0, the server has already used the elimination path and a
+    // separate notification is on its way.
+    let tail = '';
+    if (typeof retriesLeft === 'number') {
+      if (retriesLeft > 1) tail = ` (${retriesLeft} tries left)`;
+      else if (retriesLeft === 1) tail = ' (1 try left)';
+      else if (retriesLeft === 0) tail = ' (last chance!)';
+    }
+    showToast((message || "Couldn't find that title.") + tail);
+
+    // Re-enable the input. submitMovie() in app.js disables the input/button
+    // locally when the player presses Enter, expecting a server-side state
+    // update to re-enable them on the next turn. On a rejected submission
+    // we *don't* broadcast a state update (no point telling everyone about
+    // a typo), so the local controls would otherwise stay stuck disabled.
+    const movieInputEl = document.getElementById('movie-input');
+    const submitBtnEl = document.getElementById('submit-btn');
+    const hintEl = document.getElementById('hint-text');
+    if (movieInputEl) {
+      movieInputEl.disabled = false;
+      // Restore the rejected text into the input — submitMovie() in app.js
+      // clears the field on emit (optimistic UI for the success case), so
+      // without restoring it the player would be left with an empty box and
+      // no easy way to fix a typo.
+      if (typeof originalInput === 'string' && originalInput.length > 0) {
+        movieInputEl.value = originalInput;
+      }
+      // Select-on-focus so a fresh keystroke replaces everything if the
+      // player prefers to start over. Skipped on mobile to avoid summoning
+      // the keyboard unexpectedly (matches the existing mobile focus guard).
+      if (window.innerWidth > 767) {
+        movieInputEl.focus();
+        movieInputEl.select();
+      }
+    }
+    if (submitBtnEl) submitBtnEl.disabled = false;
+    if (hintEl) {
+      hintEl.innerText = retriesLeft > 0
+        ? `Try again — pick a suggestion or check the spelling.`
+        : `Last chance — get this one right!`;
+    }
+    // Brief haptic so a player whose eyes are off the screen still notices.
+    vibrate(40);
+  });
 
   // -----------------------------------------------------------------------
   // AUTOCOMPLETE

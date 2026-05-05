@@ -30,7 +30,7 @@ import {
 
 import { initSocket, leaveLobby } from './socketClient.js';
 import { getSocket, getCurrentLobbyId, getGameState } from './state.js';
-import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute } from './utils.js';
+import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute, prefersReducedMotion } from './utils.js';
 
 // ============================================================================
 // INITIALIZATION
@@ -79,6 +79,26 @@ document.addEventListener('DOMContentLoaded', () => {
     navigator.clipboard.writeText(url)
       .then(() => showToast('Invite link copied! 🔗'))
       .catch(() => showToast('Room code: ' + code));
+  });
+
+  // =========================================================================
+  // QUIT GAME BUTTON (M7)
+  // =========================================================================
+  // Confirm dialog before emitting — quitting mid-game is irreversible and
+  // a misclick (especially on mobile, where the icon is small) shouldn't
+  // end someone's run. The server is authoritative; we just send the intent.
+
+  const quitGameBtn = document.getElementById('quit-game-btn');
+  quitGameBtn?.addEventListener('click', () => {
+    const lobbyId = getCurrentLobbyId();
+    if (!lobbyId) return;
+    // window.confirm is intentionally synchronous + native — it's blocking,
+    // simple, and ships with screen-reader support out of the box. A custom
+    // modal would be nicer visually but adds focus-management complexity for
+    // a low-frequency action.
+    const ok = window.confirm('Quit the game? You’ll be eliminated immediately.');
+    if (!ok) return;
+    getSocket().emit('quitGame', lobbyId);
   });
 
   // 4. Request background posters
@@ -582,6 +602,78 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // =========================================================================
+  // MODAL FOCUS TRAP + RESTORATION (L6)
+  // =========================================================================
+  // Watches every .modal-overlay element for visibility changes (via class
+  // mutation). When a modal opens, focus moves inside it and the element
+  // that previously had focus is remembered. When it closes, focus returns
+  // there. A document-level Tab handler keeps focus inside the visible modal.
+  //
+  // Implemented as a MutationObserver instead of wrapping each open call
+  // site so the trap works regardless of HOW the modal was shown (button
+  // click, programmatic show, user click on overlay close, Escape key).
+
+  const focusableSelector =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  document.querySelectorAll('.modal-overlay').forEach(modal => {
+    let priorFocus = null;
+    new MutationObserver(() => {
+      const isOpen = !modal.classList.contains('hidden');
+      // _wasOpen lets us only act on transitions, not every class change.
+      if (isOpen && !modal._wasOpen) {
+        modal._wasOpen = true;
+        priorFocus = document.activeElement;
+        // Move focus inside the modal so the next Tab cycles within it and
+        // screen readers announce the modal's content. Prefer the close
+        // button (it's the safest first stop — Tab moves forward into the
+        // modal, Shift+Tab to the last element).
+        const closeBtn = modal.querySelector('.modal-close');
+        const target = closeBtn || modal.querySelector(focusableSelector);
+        if (target && typeof target.focus === 'function') target.focus();
+      } else if (!isOpen && modal._wasOpen) {
+        modal._wasOpen = false;
+        // Restore focus to whoever opened the modal so keyboard users don't
+        // get dumped at the top of the page.
+        if (priorFocus && typeof priorFocus.focus === 'function') {
+          try { priorFocus.focus(); } catch {}
+        }
+      }
+    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+  });
+
+  // Single document-level Tab interceptor — runs only when a modal is open.
+  // Wraps Tab/Shift+Tab around the modal's focusable elements. Without this,
+  // Tab would cycle through the underlying screen and hide focus from the
+  // user.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const modal = document.querySelector('.modal-overlay:not(.hidden)');
+    if (!modal) return;
+    // offsetParent === null filters out elements hidden via display:none —
+    // querySelectorAll alone would also return e.g. hidden close buttons.
+    const focusable = Array.from(modal.querySelectorAll(focusableSelector))
+      .filter(el => el.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey && (active === first || !modal.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    } else if (!modal.contains(active)) {
+      // Focus drifted outside the modal somehow (extension, dev tools) —
+      // pull it back to the first element so Tab still works predictably.
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
+  // =========================================================================
   // MOBILE TABS
   // =========================================================================
 
@@ -659,7 +751,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
 
   const bgCarousel = document.getElementById('poster-carousel');
-  if (bgCarousel) {
+  // L7: Skip the parallax wiring entirely when the user has requested
+  // reduced motion. The CSS reduced-motion block already neutralizes the
+  // 0.2s transition on the carousel transform, but the mousemove handler
+  // would still fire 60+ times/sec and trigger constant repaints — silly
+  // when the user doesn't want motion. Mobile is also skipped (existing
+  // behavior — the touch UI doesn't have a "cursor" to track).
+  if (bgCarousel && !prefersReducedMotion()) {
     document.addEventListener('mousemove', (e) => {
       if (window.innerWidth <= 767) return;
       const xShift = (e.clientX / window.innerWidth - 0.5) * -30;

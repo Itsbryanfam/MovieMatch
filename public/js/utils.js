@@ -60,13 +60,38 @@ export function playTick() {
 }
 
 // ---------------------------------------------------------------------------
+// REDUCED-MOTION HELPER (L7)
+// ---------------------------------------------------------------------------
+// Users who set `prefers-reduced-motion: reduce` at the OS/browser level are
+// asking us to suppress all decorative motion. CSS already respects this via
+// the global media query in style.css, but JS-driven motion (parallax,
+// haptics, animation timeouts) needs an explicit check.
+//
+// Wrapped in a try/catch because matchMedia is unavailable in old WebViews
+// and SSR/test environments — we'd rather degrade silently than throw on
+// boot.
+export function prefersReducedMotion() {
+  try {
+    return typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // HAPTICS
 // ---------------------------------------------------------------------------
 // navigator.vibrate is supported on Android Chrome and most Android browsers,
-// silently no-op'd on iOS Safari. We gate on the existing `muted` flag so the
-// audio mute toggle covers vibration too — one fewer setting to maintain.
+// silently no-op'd on iOS Safari. We gate on:
+//   - the existing `muted` flag — audio mute covers vibration too, one fewer
+//     setting for users to discover
+//   - prefers-reduced-motion (L7) — vibration IS motion; honor the OS hint
+//     even when sound is on
 export function vibrate(pattern) {
   if (muted) return;
+  if (prefersReducedMotion()) return;
   if (typeof navigator === 'undefined' || !navigator.vibrate) return;
   try { navigator.vibrate(pattern); } catch {}
 }
