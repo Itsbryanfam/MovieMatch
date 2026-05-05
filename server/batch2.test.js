@@ -4,8 +4,17 @@ const { clampString } = require('./socketHandlers');
 const redisUtils = require('./redisUtils');
 
 jest.mock('./redisUtils');
-redisUtils.incrementPlayerWins.mockReturnValue(Promise.resolve());
-redisUtils.recordWin.mockReturnValue(Promise.resolve());
+
+// Default mock implementations — set in beforeEach (not at module load) so the
+// setup is robust to someone later swapping `clearAllMocks` for `resetAllMocks`,
+// which would wipe module-load mockReturnValues. clearAllMocks preserves
+// implementations; resetAllMocks does not.
+beforeEach(() => {
+  redisUtils.incrementPlayerWins.mockResolvedValue(undefined);
+  redisUtils.recordWin.mockResolvedValue(undefined);
+  redisUtils.recordPlayerWinAtomic.mockResolvedValue(undefined);
+  redisUtils.saveLobby.mockResolvedValue(undefined);
+});
 
 describe('clampString', () => {
   test('returns empty string for non-string input', () => {
@@ -117,7 +126,9 @@ describe('gameLogic — team mode', () => {
     expect(state.winner.isTeamWin).toBe(true);
     expect(state.winner.teamId).toBe(0);
     expect(state.players[0].wins).toBe(1);
-    expect(redisUtils.incrementPlayerWins).toHaveBeenCalledWith(mockPubClient, 'p_abc');
+    // Win counts now flow through recordPlayerWinAtomic, which writes the
+    // per-player count, leaderboard ZSET, and name in one Redis transaction.
+    expect(redisUtils.recordPlayerWinAtomic).toHaveBeenCalledWith(mockPubClient, 'p_abc', 'A');
   });
 });
 
@@ -131,7 +142,7 @@ describe('gameLogic — stableId fallback', () => {
     mockPubClient = {};
   });
 
-  test('incrementPlayerWins uses stableId when present', async () => {
+  test('recordPlayerWinAtomic uses stableId when present', async () => {
     const state = {
       gameMode: 'classic',
       players: [
@@ -144,10 +155,12 @@ describe('gameLogic — stableId fallback', () => {
       turnExpiresAt: Date.now() + 30000
     };
     await gameLogic.checkWinCondition(mockIo, mockPubClient, 'LOBBY1', state);
-    expect(redisUtils.incrementPlayerWins).toHaveBeenCalledWith(mockPubClient, 'p_stable1');
+    // stableId is canonical — the leaderboard and per-player count are keyed by it
+    // so wins persist across socket reconnects.
+    expect(redisUtils.recordPlayerWinAtomic).toHaveBeenCalledWith(mockPubClient, 'p_stable1', 'Winner');
   });
 
-  test('incrementPlayerWins falls back to socket id when stableId is missing', async () => {
+  test('recordPlayerWinAtomic falls back to socket id when stableId is missing', async () => {
     const state = {
       gameMode: 'classic',
       players: [
@@ -160,7 +173,9 @@ describe('gameLogic — stableId fallback', () => {
       turnExpiresAt: Date.now() + 30000
     };
     await gameLogic.checkWinCondition(mockIo, mockPubClient, 'LOBBY1', state);
-    expect(redisUtils.incrementPlayerWins).toHaveBeenCalledWith(mockPubClient, 'sock1');
+    // Without stableId we use socket.id — wins won't persist across reconnects,
+    // but the gameLogic shouldn't crash on legacy/test states that lack one.
+    expect(redisUtils.recordPlayerWinAtomic).toHaveBeenCalledWith(mockPubClient, 'sock1', 'Winner');
   });
 });
 
@@ -193,25 +208,49 @@ describe('gameLogic — all players eliminated', () => {
 });
 
 describe('submitLock functions', () => {
-  test('acquireSubmitLock returns true when lock is available', async () => {
+  test('acquireSubmitLock returns a unique token when lock is available', async () => {
+    // The mock always returns 'OK' so both acquires "succeed" — we're asserting
+    // the contract that each acquire generates its OWN token, not the same one.
+    // That uniqueness is what makes the Lua compare-and-delete release safe.
     const mockClient = { set: jest.fn().mockResolvedValue('OK') };
-    const result = await acquireSubmitLock(mockClient, 'LOBBY1');
-    expect(result).toBe(true);
+    const t1 = await acquireSubmitLock(mockClient, 'LOBBY1');
+    const t2 = await acquireSubmitLock(mockClient, 'LOBBY1');
+    expect(t1).toBeTruthy();
+    expect(t2).toBeTruthy();
+    expect(t1).not.toBe(t2);
+    // Verify the SET call shape — NX EX is the canonical Redis-lock acquire.
     expect(mockClient.set).toHaveBeenCalledWith(
-      'lock:submit:LOBBY1', '1', { NX: true, EX: 30 }
+      'lock:submit:LOBBY1', expect.any(String), { NX: true, EX: 30 }
     );
   });
 
-  test('acquireSubmitLock returns false when lock is already held', async () => {
+  test('acquireSubmitLock returns null when lock is already held', async () => {
+    // Redis returns null for SET NX when the key already exists — our wrapper
+    // surfaces that as a falsy return so callers can `if (!token) return`.
     const mockClient = { set: jest.fn().mockResolvedValue(null) };
     const result = await acquireSubmitLock(mockClient, 'LOBBY1');
-    expect(result).toBe(false);
+    expect(result).toBeNull();
   });
 
-  test('releaseSubmitLock deletes the lock key', async () => {
-    const mockClient = { del: jest.fn().mockResolvedValue(1) };
-    await releaseSubmitLock(mockClient, 'LOBBY1');
-    expect(mockClient.del).toHaveBeenCalledWith('lock:submit:LOBBY1');
+  test('releaseSubmitLock invokes the Lua compare-and-delete script with the token', async () => {
+    // The Lua script does atomic "if value matches token, delete". We can't
+    // exercise the actual delete here without real Redis, but we CAN verify
+    // the token is forwarded — that's the difference between this fix and
+    // the old unconditional del.
+    const mockClient = { eval: jest.fn().mockResolvedValue(1) };
+    await releaseSubmitLock(mockClient, 'LOBBY1', 'tok_abc123');
+    expect(mockClient.eval).toHaveBeenCalledWith(
+      expect.any(String),
+      { keys: ['lock:submit:LOBBY1'], arguments: ['tok_abc123'] }
+    );
+  });
+
+  test('releaseSubmitLock no-ops when token is missing', async () => {
+    // Caller may pass null after a failed acquire. The release MUST do nothing
+    // in that case — otherwise we'd run an unnecessary Lua eval against Redis.
+    const mockClient = { eval: jest.fn() };
+    await releaseSubmitLock(mockClient, 'LOBBY1', null);
+    expect(mockClient.eval).not.toHaveBeenCalled();
   });
 });
 
@@ -300,15 +339,22 @@ describe('leaderboard functions', () => {
     expect(mockClient.zRangeWithScores).toHaveBeenCalledWith('leaderboard', 0, 19, { REV: true });
   });
 
-  test('getLeaderboard shows Unknown Player for missing names', async () => {
+  test('getLeaderboard prunes stale entries whose names have expired', async () => {
+    // Lazy prune: when a playerName key has TTL'd out, the corresponding ZSET
+    // entry is removed and excluded from the response. Replaces the old
+    // "Unknown Player" placeholder behavior — those rows were just visual noise.
     const mockClient = {
       zRangeWithScores: jest.fn().mockResolvedValue([
         { value: 'p_ghost', score: 2 },
       ]),
       mGet: jest.fn().mockResolvedValue([null]),
+      zRem: jest.fn().mockResolvedValue(1),
     };
     const result = await getLeaderboard(mockClient);
-    expect(result).toEqual([{ name: 'Unknown Player', wins: 2 }]);
+    expect(result).toEqual([]);
+    // Verify the prune actually fires — without this assertion a regression
+    // that drops the zRem call would still pass the empty-result check.
+    expect(mockClient.zRem).toHaveBeenCalledWith('leaderboard', ['p_ghost']);
   });
 
   test('getLeaderboard returns empty array when no entries exist', async () => {

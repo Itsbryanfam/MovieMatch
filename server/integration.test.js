@@ -10,7 +10,9 @@ describe('MovieMatch Integration / Smoke Tests', () => {
     const lastNodeCast = ['Tom Hanks'];
     const candidateCast = ['Tom Hanks', 'Meg Ryan'];
 
-    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, false, [], []);
+    // Match the current 4-arg signature: (lastNodeCast, candidateCast, hardcoreMode, previousSharedActors).
+    // The trailing extra [] in the old call was silently ignored.
+    const result = gameLogic.validateConnection(lastNodeCast, candidateCast, false, []);
     expect(result.valid).toBe(true);
     expect(result.matchedActors).toContain('Tom Hanks');
   });

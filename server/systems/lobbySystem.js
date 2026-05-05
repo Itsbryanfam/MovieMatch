@@ -37,17 +37,38 @@ async function generateLobbyId(pubClient) {
 async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
   const { io, pubClient } = ctx;
 
+  // Uppercase normalization — generated IDs are uppercase, so a lowercase invite link still works.
   let id = (lobbyId || '').trim().toUpperCase() || await generateLobbyId(pubClient);
-  let room = await redisUtils.getLobby(pubClient, id);
 
-  const isNewLobby = !room;
-  if (isNewLobby) {
-    room = {
-      id, status: 'waiting', players: [], spectators: [], currentTurnIndex: 0, chain: [],
-      usedMovies: [], hardcoreMode: false, previousSharedActors: [],
-      allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
-      isValidating: false, gameMode: 'classic'
-    };
+  // Build the initial state in memory. We'll only persist it if the
+  // atomic NX-create wins; otherwise we use the canonical existing state.
+  const initialRoom = {
+    id, status: 'waiting', players: [], spectators: [], currentTurnIndex: 0, chain: [],
+    usedMovies: [], hardcoreMode: false, previousSharedActors: [],
+    allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
+    isValidating: false, gameMode: 'classic'
+  };
+
+  // Atomic create-or-noop: SET NX returns 'OK' if we created the key,
+  // null if it already exists. Without this, two players hitting joinLobby
+  // simultaneously could both see a null room, both create their own version,
+  // and one player's join would be silently overwritten by the other's
+  // saveLobby. EX 7200 = 2-hour idle expiry, matching saveLobby's default.
+  const wonCreateRace = await pubClient.set(
+    `lobby:${id}`,
+    JSON.stringify(initialRoom),
+    { NX: true, EX: 7200 }
+  );
+  const isNewLobby = wonCreateRace === 'OK';
+
+  // If we just created the lobby, use our in-memory copy directly — no point
+  // re-fetching what we just wrote. If another caller won the race, fetch
+  // their canonical state.
+  let room = isNewLobby ? initialRoom : await redisUtils.getLobby(pubClient, id);
+  if (!room) {
+    // The key existed during NX (we lost the race) but expired before we
+    // could re-fetch. Extremely rare; bail rather than silently retry.
+    return socket.emit('error', 'Lobby unavailable — please try again.');
   }
 
   // Spectator path: join as watcher if game is in progress
@@ -106,9 +127,18 @@ async function rejoinLobby(ctx, socket, { lobbyId, playerId, stableId }) {
     return;
   }
 
-  // Primary lookup: by current socket.id. Fallback: disconnected player by stableId
-  // (socket.id changes on page refresh, stableId is persistent in localStorage).
-  const player = room.players.find(p => p.id === playerId)
+  // stableId is the only identity field that is NOT broadcast in player lists
+  // (broadcastState strips it). The rejoin caller must prove they know it,
+  // otherwise anyone who sees a victim's socket.id could hijack the slot.
+  if (typeof stableId !== 'string' || stableId.length === 0) {
+    socket.emit('rejoinFailed', 'Missing identity');
+    return;
+  }
+
+  // Two paths:
+  //   1) Same socket id (transient reconnect on the same tab) — still require stableId match
+  //   2) New socket id (page refresh) — only allow if the player is currently disconnected
+  const player = room.players.find(p => p.id === playerId && p.stableId === stableId)
     || room.players.find(p => p.stableId === stableId && !p.connected);
 
   if (!player) {
@@ -312,7 +342,8 @@ async function handleDisconnect(ctx, socketId) {
     if (room.status === 'playing') {
       // Broadcast immediately so others see the player as disconnected
       gameLogic.broadcastState(io, lobbyId, room);
-      io.to(lobbyId).emit('notification', `${player.name} disconnected — waiting 15s...`);
+      // 'info' kind: no sound/shake effects on the client, just the text overlay.
+      io.to(lobbyId).emit('notification', { msg: `${player.name} disconnected — waiting 15s...`, kind: 'info' });
 
       const graceKey = `${lobbyId}:${socketId}`;
       const graceTimeoutId = setTimeout(async () => {

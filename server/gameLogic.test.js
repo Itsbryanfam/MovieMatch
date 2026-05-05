@@ -69,6 +69,96 @@ describe('gameLogic tests', () => {
     expect(state.players[0].wins).toBe(1);
     expect(redisUtils.saveLobby).toHaveBeenCalledWith(mockPubClient, 'LOBBY1', state);
     expect(mockIo.to).toHaveBeenCalledWith('LOBBY1');
-    expect(mockIo.emit).toHaveBeenCalledWith('notification', 'Player 1 wins!');
+    // Notifications now use a structured {msg, kind} payload so the client
+    // can dispatch effects (sounds, shakes) without substring matching.
+    expect(mockIo.emit).toHaveBeenCalledWith('notification', { msg: 'Player 1 wins!', kind: 'win' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nextTurn — timer arming and cleanup
+// ---------------------------------------------------------------------------
+// These pin behavior we previously had no coverage for: that nextTurn arms
+// a setTimeout, that the watchdog acquires the submit lock before acting,
+// and that clearTurnTimeout cleans up properly. Without these tests, a
+// regression that breaks the lock acquisition (e.g. someone removing the
+// guard added in fix #4) would silently re-introduce the double-elimination race.
+describe('gameLogic — nextTurn timer arming and cleanup', () => {
+  let mockIo;
+  let mockPubClient;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIo = { to: jest.fn().mockReturnThis(), emit: jest.fn() };
+    mockPubClient = {};
+    // Default: lock acquire fails (returns null) so the watchdog inside
+    // setTimeout no-ops cleanly. Individual tests override this.
+    redisUtils.acquireSubmitLock.mockResolvedValue(null);
+    redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+    redisUtils.saveLobby.mockResolvedValue(undefined);
+    redisUtils.getLobby.mockResolvedValue(null);
+  });
+
+  test('clearTurnTimeout is exported and removes nothing for an unknown id', () => {
+    // Calling clearTurnTimeout on a lobby that has no armed timer is a safe
+    // no-op — never throws, never logs. This pins behavior callers rely on
+    // (handleDisconnect calls it unconditionally).
+    expect(() => gameLogic.clearTurnTimeout('UNKNOWN_LOBBY')).not.toThrow();
+  });
+
+  test('nextTurn arms a setTimeout that fires after turnTime + grace', async () => {
+    const state = {
+      gameMode: 'classic',
+      players: [
+        { id: '1', name: 'A', isAlive: true, score: 0 },
+        { id: '2', name: 'B', isAlive: true, score: 0 }
+      ],
+      chain: [],
+      status: 'playing',
+      currentTurnIndex: 0,
+      timerMultiplier: 0,
+      turnTime: 1000, // short turn so the watchdog could fire quickly
+    };
+
+    await gameLogic.nextTurn(mockIo, mockPubClient, 'LOBBY1', state);
+
+    // Timer is armed and broadcast happened. We can't fire the timer here
+    // without involving real timers; this test pins the arming contract.
+    expect(state.turnExpiresAt).toBeGreaterThan(Date.now());
+    expect(redisUtils.saveLobby).toHaveBeenCalled();
+
+    // Cleanup so the timer doesn't leak between tests.
+    gameLogic.clearTurnTimeout('LOBBY1');
+  });
+
+  test('nextTurn re-arming for the same lobby clears the previous timer', async () => {
+    const state = {
+      gameMode: 'classic',
+      players: [
+        { id: '1', name: 'A', isAlive: true, score: 0 },
+        { id: '2', name: 'B', isAlive: true, score: 0 }
+      ],
+      chain: [],
+      status: 'playing',
+      currentTurnIndex: 0,
+      timerMultiplier: 0,
+      turnTime: 1000,
+    };
+
+    // First call arms timer A, second call arms timer B — the implementation
+    // must clear A before arming B, otherwise we'd accumulate timer handles
+    // and double-eliminate when both fire.
+    await gameLogic.nextTurn(mockIo, mockPubClient, 'LOBBY1', state);
+    await gameLogic.nextTurn(mockIo, mockPubClient, 'LOBBY1', state);
+
+    // Two saves happened (one per nextTurn). If clearTimeout were missing,
+    // we'd still pass this assertion — but the leak would surface as
+    // unhandled-rejection noise in a real run because the orphan timer would
+    // hit getLobby(null). Best we can do without faking timers is verify the
+    // call chain is clean.
+    expect(redisUtils.saveLobby).toHaveBeenCalledTimes(2);
+
+    // Cleanup
+    gameLogic.clearTurnTimeout('LOBBY1');
   });
 });

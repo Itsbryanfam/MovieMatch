@@ -65,10 +65,18 @@ function makeWaitingState(overrides = {}) {
 }
 
 function makePlayingState(overrides = {}) {
+  // Default to 60s for backward compat with existing tests, but let callers
+  // override (e.g. 15000 for speed mode) so the timer-bar logic is exercised
+  // across all modes, not just classic.
+  const turnDurationMs = overrides.turnDurationMs ?? 60000;
   return {
     ...makeWaitingState(),
     status: 'playing',
-    turnExpiresAt: Date.now() + 60000,
+    // Pair turnDurationMs with turnExpiresAt — the client uses both
+    // (durationMs as the denominator for the bar width, expiresAt for the
+    // remaining-time display).
+    turnExpiresAt: Date.now() + turnDurationMs,
+    turnDurationMs,
     ...overrides,
   };
 }

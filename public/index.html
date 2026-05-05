@@ -299,15 +299,20 @@
               <span id="turn-indicator" class="status-indicator">Waiting for game to start...</span>
               <div class="input-header-right">
                 <span id="time-text" class="time-text">60s</span>
-                <button id="mute-btn" class="btn-icon mute-btn" title="Toggle sound">🔊</button>
-                <button id="game-invite-btn" class="btn-icon" title="Copy invite link">🔗</button>
+                <!-- aria-label gives an accessible name; aria-pressed surfaces the on/off state.
+                     title is just a tooltip and is unreliable for screen readers (especially mobile). -->
+                <button id="mute-btn" class="btn-icon mute-btn" aria-label="Toggle sound" aria-pressed="false" title="Toggle sound">🔊</button>
+                <button id="game-invite-btn" class="btn-icon" aria-label="Copy invite link" title="Copy invite link">🔗</button>
               </div>
             </div>
             
             <div class="input-row">
               <input type="text" id="movie-input" class="search-input" placeholder="Name a connecting movie..." autocomplete="off" disabled />
-              <button id="submit-btn" class="btn-icon" disabled>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              <!-- aria-label: the button's only content is an SVG; without this, screen readers
+                   announce it as just "button" with no purpose. aria-hidden on the SVG hides
+                   the decorative path data so assistive tech reads only the button's accessible name. -->
+              <button id="submit-btn" class="btn-icon" aria-label="Submit movie" disabled>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
               </button>
             </div>
             <p id="hint-text" class="hint-text">Waiting...</p>
@@ -343,8 +348,9 @@
             </div>
             <div class="chat-input-wrapper">
               <input type="text" id="chat-input" placeholder="Say something..." autocomplete="off">
-              <button id="chat-send-btn" class="btn-icon chat-send-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              <!-- Same accessibility pattern as the movie submit button above. -->
+              <button id="chat-send-btn" class="btn-icon chat-send-btn" aria-label="Send chat message">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
               </button>
             </div>
           </div>
@@ -395,7 +401,9 @@
           <div class="step-number">3</div>
           <div class="step-body">
             <strong>Beat the Clock</strong>
-            <p>You have 60 seconds per turn. The timer shrinks every two successful plays — don't freeze up!</p>
+            <!-- Mode-aware copy — Speed mode is 15s flat (see mode badges below).
+                 The old text said "60 seconds per turn" which contradicts that. -->
+            <p>You have up to 60 seconds per turn in Classic — less in Speed mode. The timer shrinks every two successful plays in Classic and Hardcore — don't freeze up!</p>
           </div>
         </div>
         <div class="step">
@@ -434,11 +442,12 @@
       <div class="credits-role">Creator &amp; Developer</div>
       <div class="credits-links">
         <a href="https://x.com/ItsBryanFam" target="_blank" rel="noopener" class="credits-link">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+          <!-- Decorative icon — the link text "@ItsBryanFam" already names the link for screen readers. -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
           @ItsBryanFam
         </a>
         <a href="mailto:cortezfam7@gmail.com" class="credits-link">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
           cortezfam7@gmail.com
         </a>
       </div>
@@ -463,7 +472,15 @@
     </div>
   </div>
 
-  <div id="notification-overlay" class="hidden">
+  <!--
+    role="status" + aria-live="polite": screen readers announce changes to
+    #notification-text without interrupting the user's current speech.
+    aria-atomic="true": read the whole text on each update, not just the diff,
+    so messages like "Player X eliminated" are read as a complete sentence.
+    Without this, blind/low-vision players miss every elimination, "your turn"
+    cue, and win announcement.
+  -->
+  <div id="notification-overlay" class="hidden" role="status" aria-live="polite" aria-atomic="true">
     <div id="notification-text"></div>
   </div>
 
