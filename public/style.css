@@ -1143,6 +1143,18 @@ input:disabled {
   color: var(--text-muted);
 }
 
+/* M7: quit-game button. Subtle muted background by default — destructive
+   actions shouldn't visually compete with primary affordances — but the
+   hover state turns warm so a deliberate click feels intentional. */
+.btn-icon.quit-btn {
+  background: linear-gradient(135deg, #4b3a3a, #3a2828);
+  color: #ffd9d2;
+}
+.btn-icon.quit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b54a3b, #8a2b1f);
+  color: #fff;
+}
+
 .hint-text {
   margin-top: 0.75rem;
   font-size: 0.8rem;
@@ -2387,6 +2399,668 @@ input:disabled {
   text-transform: uppercase;
 }
 
+/* ---- H3: Detailed elimination card (side-by-side cast comparison) ---- */
+/* Override the default flash animation when details are present — this card
+   is read material, not a flash, so it stays put until dismissed. */
+.self-elim-screen--detailed {
+  animation: none;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.self-elim-card {
+  background: rgba(20, 8, 8, 0.98);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 16px;
+  padding: 1.5rem;
+  max-width: 640px;
+  width: calc(100% - 2rem);
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+.self-elim-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+}
+
+.self-elim-grid {
+  display: grid;
+  /* Two columns on tablet/desktop; collapse to one on phones so cast lists
+     don't get squeezed into unreadable widths. */
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 540px) {
+  .self-elim-grid { grid-template-columns: 1fr; }
+}
+
+.self-elim-col {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Subtle red accent on the "you played" column to reinforce that this
+   is the move that ended the run — without making either column feel like
+   the wrong answer (the lesson is: no overlap, not "this cast is bad"). */
+.self-elim-col--played {
+  border-color: rgba(248, 113, 113, 0.25);
+}
+
+.self-elim-col-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.self-elim-col-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+  color: #fff;
+}
+
+.self-elim-col-cast {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.45;
+}
+
+.self-elim-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+}
+
+.self-elim-close {
+  align-self: center;
+  background: linear-gradient(135deg, var(--accent-primary, #6366f1), var(--accent-primary-hover, #4f46e5));
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.4rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.self-elim-close:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4); }
+
+/* =============================================
+   H2: DAILY CHALLENGE — hero button + result modal
+   =============================================
+   Hero button uses a warm amber accent so it reads as a distinct option
+   from the primary indigo "Play Now" — the player's eye should clearly
+   parse "two different tracks" rather than "two paths to the same thing." */
+.hero-daily-btn {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  border: none;
+}
+.hero-daily-btn:hover {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+}
+
+/* Result modal — score readout (big number, small label) */
+.daily-score-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 0.5rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(217, 119, 6, 0.06));
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+.daily-score-num {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #fbbf24;
+  line-height: 1;
+}
+.daily-score-label {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+/* Result modal — leaderboard */
+.daily-lb-header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 1rem 0 0.5rem;
+  text-align: center;
+}
+.daily-lb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.daily-lb-row {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.95rem;
+}
+.daily-lb-rank {
+  flex: 0 0 2.5rem;
+  text-align: center;
+  font-weight: 600;
+}
+.daily-lb-name {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0 0.5rem;
+}
+.daily-lb-len {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* =============================================
+   H5: MY STATS MODAL
+   =============================================
+   Hero grid: 4 stat cards (games, wins, longest chain, total plays).
+   Tablet/desktop: 4-up; phones: 2x2. Cards are flat numbers so the player's
+   eye lands on the count without prose getting in the way. */
+.stats-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 540px) {
+  .stats-hero-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.stats-hero-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+}
+.stats-hero-num {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.stats-hero-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.stats-winrate {
+  text-align: center;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.9rem;
+  color: var(--accent-primary, #6366f1);
+  font-weight: 600;
+}
+
+.stats-section-header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 1rem 0 0.5rem;
+}
+
+/* By-mode table — 4 columns (mode label + 3 numeric stats). The label
+   column flexes; numeric columns are tabular-nums so digits stay aligned. */
+.stats-mode-table {
+  display: grid;
+  grid-template-columns: 1.4fr repeat(3, 1fr);
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.stats-mode-th {
+  padding: 0.5rem 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-align: right;
+}
+.stats-mode-th:first-child { text-align: left; }
+.stats-mode-td {
+  padding: 0.5rem 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.9rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+}
+.stats-mode-td--label { text-align: left; font-weight: 600; }
+
+.stats-favorite {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.10), rgba(217, 119, 6, 0.04));
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+.stats-favorite-label { color: var(--text-muted); }
+.stats-favorite-count { color: var(--text-muted); margin-left: 0.25rem; }
+
+/* =============================================
+   M2: WIN CONFETTI
+   =============================================
+   ~40 absolutely-positioned pieces falling from the top of the viewport.
+   Per-piece variation comes from CSS custom properties set by JS so a
+   single keyframe definition covers all the colors / positions / rotations.
+   Pointer-events:none so confetti never blocks clicks on underlying UI. */
+.confetti-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1100;
+}
+.confetti-piece {
+  position: absolute;
+  top: -20px;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  /* --sway and --rotate are set per-piece via inline style. Defaults
+     here so a piece without them still falls cleanly rather than NaN-
+     translating into the void. */
+  --sway: 0px;
+  --rotate: 360deg;
+  animation: confetti-fall linear forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes confetti-fall {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translate3d(var(--sway), 110vh, 0) rotate(var(--rotate)); opacity: 0; }
+}
+
+/* Reduced motion respect — global media query already zeroes the
+   animation-duration, but we belt-and-suspenders by also disabling the
+   transform so the pieces don't briefly appear at the top before being
+   removed. */
+@media (prefers-reduced-motion: reduce) {
+  .confetti-container { display: none; }
+}
+
+/* =============================================
+   L2: ANIMATED CHAIN REPLAY (post-game)
+   =============================================
+   "Replay your chain" button + container that fills with chain entries
+   one at a time via JS-triggered appendChild. Each .replay-entry uses a
+   short fade-in keyframe so new entries appear gracefully rather than
+   popping into the DOM. The keyframe's duration is short enough that
+   reduced-motion users only see a brief opacity change. */
+.daily-replay-wrap {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.daily-replay-btn {
+  align-self: center;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.9rem;
+}
+.daily-replay-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.daily-replay-container {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.replay-entry {
+  /* Inherit the existing chain-item layout but tighten padding and add
+     the entry animation. */
+  padding: 0.5rem 0.75rem;
+  animation: replay-entry-in 320ms ease-out both;
+}
+@keyframes replay-entry-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.replay-connector {
+  font-size: 0.8rem;
+  color: var(--accent-primary, #6366f1);
+  font-weight: 600;
+  margin-top: 0.2rem;
+}
+.replay-skipped-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+  padding-bottom: 0.25rem;
+}
+
+/* =============================================
+   M3: PEER TYPING INDICATOR
+   =============================================
+   Sits between the hint text and the mobile autocomplete dropdown so it's
+   always near the player's eye while reading the input area. Subtle on
+   purpose — bright/loud would compete with the timer bar and chain feed.
+   Display:none → block transition + opacity fade keeps the appearance
+   smooth without taking up layout space when nobody is typing. */
+.peer-typing {
+  display: none;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0.25rem 0 0;
+  opacity: 0;
+  transition: opacity 180ms ease-in;
+  /* Faux animated ellipsis via three pseudo-element dots. Pure CSS so it
+     keeps animating after the JS handler does its work. Suppressed under
+     prefers-reduced-motion via the global media query (which zeroes the
+     animation duration). */
+}
+.peer-typing.visible {
+  display: block;
+  opacity: 1;
+}
+.peer-typing::after {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  text-align: left;
+  animation: peer-typing-dots 1.2s steps(4, end) infinite;
+}
+@keyframes peer-typing-dots {
+  0%, 20% { content: ''; }
+  40%     { content: '.'; }
+  60%     { content: '..'; }
+  80%, 100% { content: '...'; }
+}
+
+/* =============================================
+   M4: PUBLIC LOBBY CARD ENRICHMENT
+   =============================================
+   Skill bracket + vibe tag pill styling. Both sit inline with the
+   existing player-count / mode-tag stats so they don't add a new row;
+   keeps the cards compact when scrolling a long list of public lobbies. */
+.public-lobby-skill {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.5rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  vertical-align: middle;
+}
+.public-lobby-vibe {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* =============================================
+   M5: SOLO HUD + OBJECTIVE BAR
+   =============================================
+   Streak and bonus pills in the turn indicator. Inline-block so they sit
+   alongside the chain badge. Subtle warmth (orange/amber tones) to reinforce
+   the "fire / star" iconography without competing with the timer-bar reds. */
+.solo-hud-streak {
+  display: inline-block;
+  margin-left: 0.6rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(249, 115, 22, 0.18);
+  color: #fdba74;
+}
+.solo-hud-bonus {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+/* Objective bar: hidden by default; .visible flips it on. .objective-hit
+   recolors to a "complete" green when the player satisfies the objective. */
+.solo-objective-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  margin: 0 0 0.5rem 0;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+.solo-objective-bar.visible {
+  display: flex;
+}
+.solo-objective-bar.objective-hit {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #d1fae5;
+}
+.solo-pb-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.solo-objective-bar.objective-hit .solo-pb-text {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* =============================================
+   M6: TUTORIAL OVERLAY
+   =============================================
+   Sits above everything else (z-index higher than other modals so a
+   tutorial-while-confused-modal-open scenario stays readable). Reuses
+   the existing .modal-overlay backdrop + transition, then layers a
+   tutorial-specific card with a step indicator, growing chain area,
+   and explanation panel. */
+.tutorial-overlay {
+  z-index: 1200;
+}
+.tutorial-card {
+  max-width: 600px;
+  width: calc(100% - 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.tutorial-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.tutorial-skip-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 0.25rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tutorial-skip-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.tutorial-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.tutorial-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.tutorial-dot.active {
+  background: var(--accent-primary, #6366f1);
+  transform: scale(1.3);
+}
+.tutorial-dot.done {
+  background: rgba(99, 102, 241, 0.5);
+}
+.tutorial-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 35vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+.tutorial-chain-item {
+  /* Reuse the live chain-item layout but add a fade-in animation per
+     entry so each step "lands" rather than popping in. */
+  animation: tutorial-entry-in 320ms ease-out both;
+}
+@keyframes tutorial-entry-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.tutorial-explain {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(99, 102, 241, 0.10);
+  border: 1px solid rgba(99, 102, 241, 0.24);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  min-height: 3.5em; /* Prevents layout shift between short and long explanations */
+}
+.tutorial-advance-btn {
+  align-self: center;
+  padding: 0.6rem 1.4rem;
+}
+
+/* =============================================
+   L1: ACTIVE THEME BADGE
+   =============================================
+   Shown in the in-game input header alongside the mute / invite / quit
+   buttons. Compact pill so it doesn't crowd the existing icon set.
+   Display:none → inline-flex transition keeps the row layout clean
+   when no theme is set. */
+.active-theme-badge {
+  display: none;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.18);
+  color: #e9d5ff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.active-theme-badge.visible {
+  display: inline-flex;
+}
+
+/* =============================================
+   L3: SPECTATOR PREDICTION BAR
+   =============================================
+   Sits below the input area, above the reaction bar. Hidden by default;
+   only shown to spectators while the game is in playing state.
+   .voted-yes / .voted-no give the chosen button a tinted background so
+   the spectator's commitment is visible at a glance. */
+.spectator-prediction-bar {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.85rem;
+}
+.spectator-prediction-bar.visible {
+  display: flex;
+  flex-wrap: wrap;
+}
+.spec-pred-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.spec-pred-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.spec-pred-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.10);
+}
+.spec-pred-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.spectator-prediction-bar.voted-yes #spec-pred-yes,
+.spectator-prediction-bar.voted-no #spec-pred-no {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #fff;
+}
+.spec-pred-tally {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Elimination notification tint ---- */
 #notification-overlay.notification--elimination {
   background: rgba(50, 5, 5, 0.9);
@@ -2618,6 +3292,25 @@ input:disabled {
   .poster-row {
     animation: none !important;
   }
+}
+
+/* =============================================
+   FOCUS RING FOR KEYBOARD USERS (L6)
+   =============================================
+   :focus-visible activates only when the browser detects keyboard navigation
+   (e.g. Tab) — mouse clicks won't trigger it. Without an explicit ring, the
+   default browser outline is suppressed by various reset rules and keyboard
+   users can't tell what element is focused. Color matches the existing
+   accent so the ring feels native to the design rather than bolted on. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--accent-primary, #6366f1);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* =============================================

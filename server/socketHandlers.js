@@ -34,6 +34,26 @@ const RATE_LIMITS = {
   chat:         { limit: 5,  windowMs: 5000  },
   reaction:     { limit: 10, windowMs: 5000  },
   kickPlayer:   { limit: 5,  windowMs: 10000 },
+  // M7: quit-game is destructive but not spammable — a single click ends the
+  // player's run, so two events in a 5s window is plenty (covers a stuck-key
+  // double-fire while still rejecting any kind of automated abuse pattern).
+  quitGame:     { limit: 2,  windowMs: 5000  },
+  // H2: Daily Challenge entry point. Same pattern — generous enough for
+  // double-clicks, tight enough that a misbehaving client can't pound the
+  // TMDB seed-fetch path. The atomic NX claim inside dailySystem is the
+  // real correctness guard; this is just throttling.
+  dailyChallenge: { limit: 5, windowMs: 30000 },
+  dailyLeaderboard: { limit: 10, windowMs: 10000 },
+  // M3: Typing-indicator pings. Client debounces to ~once per 1.5s while
+  // actively typing, so 8 events in a 5s window covers a continuous
+  // burst with comfortable headroom while still rejecting any kind of
+  // event-flood pattern.
+  typing: { limit: 8, windowMs: 5000 },
+  // L3: Spectator predictions — one vote per turn, but a spectator might
+  // change their mind once before settling. Capping at 3 in 30s lets the
+  // intent ("vote yes, then change to no, then back") through while still
+  // rejecting any kind of automated tally manipulation.
+  spectatorPredict: { limit: 3, windowMs: 30000 },
 };
 
 // ---------------------------------------------------------------------------
@@ -99,6 +119,17 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     const cached = posterCache.getPosters();
     if (cached.length > 0) socket.emit('posters', cached);
 
+    // L1: Send the theme list once per connection so the lobby's theme
+    // picker can populate without a round-trip when the player enters
+    // the lobby screen. ~600 bytes, sent once. Same pattern as posters.
+    try {
+      const themesSystem = require('./systems/themesSystem');
+      socket.emit('themesList', themesSystem.listThemes());
+    } catch {
+      // No themes available is degenerate — client falls back to a
+      // single "Any" entry it hardcodes.
+    }
+
     // Every handler below registers via safeOn instead of socket.on directly.
     // safeOn wraps the handler in a try/catch so an unhandled rejection can't
     // crash the process. This replaces an earlier monkey-patch on socket.on,
@@ -137,6 +168,12 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       await lobbySystem.setGameMode(ctx, socket, data);
     });
 
+    on('setTheme', async (data) => {
+      // L1: Host-only setter; lobbySystem validates the theme id against
+      // the whitelist so a buggy/malicious client can't write garbage.
+      await lobbySystem.setTheme(ctx, socket, data);
+    });
+
     on('assignTeam', async (data) => {
       await lobbySystem.assignTeam(ctx, socket, data);
     });
@@ -159,6 +196,60 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
     on('restartLobby', async (lobbyId) => {
       await lobbySystem.restartLobby(ctx, socket, lobbyId);
+    });
+
+    on('quitGame', async (lobbyId) => {
+      // M7: Server-authoritative — the client only sends a request; the
+      // lobbySystem decides whether to eliminate the current turn or just
+      // mark the quitter dead based on whose turn it is.
+      if (await rateLimit(socket.id, 'quitGame', RATE_LIMITS.quitGame.limit, RATE_LIMITS.quitGame.windowMs)) return;
+      await lobbySystem.quitGame(ctx, socket, lobbyId);
+    });
+
+    // -----------------------------------------------------------------------
+    // DAILY CHALLENGE (H2) — single-player, async, one attempt per UTC day
+    // -----------------------------------------------------------------------
+
+    on('startDailyChallenge', async ({ name, stableId }) => {
+      if (await rateLimit(socket.id, 'dailyChallenge', RATE_LIMITS.dailyChallenge.limit, RATE_LIMITS.dailyChallenge.windowMs)) return;
+      // Defensive name sanitization same as joinLobby — keeps the daily
+      // attempt record's display name within bounds. stableId validation
+      // is done inside startDailyChallenge (it's the auth signal for the
+      // attempt-NX claim).
+      const cleanName = clampString(name, 24);
+      await lobbySystem.startDailyChallenge(ctx, socket, { name: cleanName, stableId });
+    });
+
+    on('requestDailyLeaderboard', async (date) => {
+      if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
+      // Lazy require to keep the existing top-of-file imports stable; this
+      // module is only used by this one handler so a top-level require would
+      // be slightly out of place.
+      const dailySystem = require('./systems/dailySystem');
+      const safeDate = (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))
+        ? date
+        : dailySystem.getTodayDate();
+      const leaderboard = await dailySystem.getDailyLeaderboard(pubClient, safeDate, 20);
+      const puzzleNumber = dailySystem.getPuzzleNumber(safeDate);
+      socket.emit('dailyLeaderboard', { date: safeDate, puzzleNumber, leaderboard });
+    });
+
+    // -----------------------------------------------------------------------
+    // PERSONAL STATS (H5) — request the caller's own lifetime stats.
+    // Auth model: stableId IS the auth — it's a 16-byte random value the
+    // client generated on first visit and persisted to localStorage. Only
+    // the owner has it, and we don't gate access by socket.id (which would
+    // miss the use case of viewing stats from the hero screen pre-lobby).
+    // The ratelimit is shared with dailyLeaderboard since both are simple
+    // reads gated by the same kind of player intent.
+    // -----------------------------------------------------------------------
+
+    on('requestMyStats', async (stableId) => {
+      if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
+      if (typeof stableId !== 'string' || stableId.length === 0 || stableId.length > 64) return;
+      const statsSystem = require('./systems/statsSystem');
+      const stats = await statsSystem.getStats(pubClient, stableId);
+      socket.emit('myStats', stats);
     });
 
     on('requestPublicLobbies', async () => {
@@ -209,6 +300,15 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (!sender) return;
       const isSpectator = !room.players.find(p => p.id === socket.id);
       io.to(lobbyId).emit('receiveChat', { playerName: sender.name, msg, isSpectator });
+      // M4: bump the per-lobby chat counter so the public-lobby browser
+      // can render a "chatty / casual / quiet" vibe tag. Cheap field
+      // mutation — one extra Redis write per chat message, batched into
+      // a single saveLobby. Fire-and-forget so a Redis blip during chat
+      // doesn't propagate to the broadcast above.
+      try {
+        room.chatCount = (room.chatCount | 0) + 1;
+        await redisUtils.saveLobby(pubClient, lobbyId, room);
+      } catch {}
     });
 
     on('sendReaction', async ({ lobbyId, emoji }) => {
@@ -218,6 +318,60 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (!room) return;
       if (!getParticipantInRoom(room, socket.id)) return;
       io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
+    });
+
+    // -----------------------------------------------------------------------
+    // SPECTATOR PREDICTIONS (L3) — spectators vote will-they-get-it on
+    // each turn. Vote totals broadcast via the standard stateUpdate (so
+    // every spectator sees the running tally without an extra round-trip)
+    // and the play-resolution path emits a one-shot `predictionResult`
+    // with accuracy data after each turn settles.
+    // -----------------------------------------------------------------------
+
+    on('spectatorPredict', async ({ lobbyId, prediction }) => {
+      if (await rateLimit(socket.id, 'spectatorPredict', RATE_LIMITS.spectatorPredict.limit, RATE_LIMITS.spectatorPredict.windowMs)) return;
+      if (prediction !== 'yes' && prediction !== 'no') return;
+      const room = await redisUtils.getLobby(pubClient, lobbyId);
+      if (!room || room.status !== 'playing') return;
+      // Spectator-only — players can't vote on their own table since they
+      // know what they're going to play. Limits the spectator-prediction
+      // game to actual observers and keeps the tally meaningful.
+      const isPlayer = room.players.some(p => p.id === socket.id);
+      const isSpectator = !isPlayer && (room.spectators || []).some(s => s.id === socket.id);
+      if (!isSpectator) return;
+      // Allow vote-changing within the rate limit — overwrite the prior
+      // vote rather than reject. Spectators reading the tally evolve their
+      // confidence through the turn and shouldn't be locked to a first guess.
+      if (!room.spectatorPredictions || typeof room.spectatorPredictions !== 'object') {
+        room.spectatorPredictions = {};
+      }
+      room.spectatorPredictions[socket.id] = prediction;
+      await redisUtils.saveLobby(pubClient, lobbyId, room);
+      gameLogic.broadcastState(io, lobbyId, room);
+    });
+
+    // -----------------------------------------------------------------------
+    // TYPING INDICATOR (M3) — only the active player's typing is broadcast.
+    // We DO NOT broadcast the typed text — only the fact that they're typing,
+    // plus the player's display name so other clients can render "X is
+    // typing…". Anything more would leak strategy (autocompletion suggests
+    // movies the typer is considering) and isn't necessary for the
+    // presence cue this feature exists to deliver.
+    // -----------------------------------------------------------------------
+
+    on('typing', async (lobbyId) => {
+      if (await rateLimit(socket.id, 'typing', RATE_LIMITS.typing.limit, RATE_LIMITS.typing.windowMs)) return;
+      const room = await redisUtils.getLobby(pubClient, lobbyId);
+      if (!room || room.status !== 'playing') return;
+      // Only the active player's typing is announced — broadcasting other
+      // players' input would clutter the UI with multiple "is typing"
+      // lines that aren't actionable. The active player is the only one
+      // whose typing has stakes for everyone else's anticipation.
+      const activePlayer = room.players[room.currentTurnIndex];
+      if (!activePlayer || activePlayer.id !== socket.id) return;
+      // socket.to(lobbyId) emits to everyone in the room EXCEPT the sender,
+      // so the typer doesn't see their own indicator (which would be noise).
+      socket.to(lobbyId).emit('peerTyping', { playerName: activePlayer.name });
     });
 
     // -----------------------------------------------------------------------

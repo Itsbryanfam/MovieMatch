@@ -20,7 +20,7 @@ import {
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
   tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
   showPrivateBtn, backToJoinBtn, backToJoinBtn2, refreshLobbiesBtn,
-  heroPlayBtn, heroCodeBtn, howToPlayBtn, creditsBtn, howToPlayModal,
+  heroPlayBtn, heroCodeBtn, heroDailyBtn, howToPlayBtn, creditsBtn, howToPlayModal,
   creditsModal, closeHowToPlay, closeCredits, leaderboardBtn,
   leaderboardModal, closeLeaderboard, leaderboardList, submitBtn,
   movieInput, autocompleteContainer, chatInput, modeChips, joinRedBtn,
@@ -30,7 +30,8 @@ import {
 
 import { initSocket, leaveLobby } from './socketClient.js';
 import { getSocket, getCurrentLobbyId, getGameState } from './state.js';
-import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute } from './utils.js';
+import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute, prefersReducedMotion } from './utils.js';
+import { shouldShowTutorial, runTutorial } from './tutorial.js';
 
 // ============================================================================
 // INITIALIZATION
@@ -81,10 +82,73 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(() => showToast('Room code: ' + code));
   });
 
+  // =========================================================================
+  // DAILY CHALLENGE BUTTON (H2)
+  // =========================================================================
+  // Single-click entry point. Server checks attempt-NX; if the player has
+  // already played today, server emits dailyAlreadyPlayed and the result
+  // modal opens with their prior score + leaderboard. Otherwise it creates
+  // an ephemeral daily lobby with the seed pre-populated as chain[0] and
+  // the player joins via the standard 'joined' event flow.
+  heroDailyBtn?.addEventListener('click', () => {
+    const name = playerNameInput ? playerNameInput.value.trim() : '';
+    if (!name) {
+      showNotification('Enter a name first to track your Daily score!');
+      // Scroll the name input into view + focus it so the player can fix
+      // the gap immediately. Skipped on mobile to avoid summoning the
+      // keyboard before the player has time to read the message.
+      if (window.innerWidth > 767) playerNameInput?.focus();
+      return;
+    }
+    // Persist the name (same pattern as the existing join flow) so a
+    // refresh after a daily run still shows the player's name on their
+    // future daily attempts and on the daily leaderboard.
+    localStorage.setItem('mm_playerName', name);
+    getSocket().emit('startDailyChallenge', {
+      name,
+      stableId: getStableId(),
+    });
+  });
+
+  // =========================================================================
+  // QUIT GAME BUTTON (M7)
+  // =========================================================================
+  // Confirm dialog before emitting — quitting mid-game is irreversible and
+  // a misclick (especially on mobile, where the icon is small) shouldn't
+  // end someone's run. The server is authoritative; we just send the intent.
+
+  const quitGameBtn = document.getElementById('quit-game-btn');
+  quitGameBtn?.addEventListener('click', () => {
+    const lobbyId = getCurrentLobbyId();
+    if (!lobbyId) return;
+    // window.confirm is intentionally synchronous + native — it's blocking,
+    // simple, and ships with screen-reader support out of the box. A custom
+    // modal would be nicer visually but adds focus-management complexity for
+    // a low-frequency action.
+    const ok = window.confirm('Quit the game? You’ll be eliminated immediately.');
+    if (!ok) return;
+    getSocket().emit('quitGame', lobbyId);
+  });
+
   // 4. Request background posters
   setTimeout(() => {
     if (socket) socket.emit('requestPosters');
   }, 300);
+
+  // M6: First-time tutorial. Fires once per browser (gated on the
+  // mm_completedTutorial localStorage flag). Runs entirely client-side
+  // — no server round-trips, so a fresh visit + tutorial completion
+  // doesn't add any boot latency for returning players. Wrapped in a
+  // brief setTimeout so the hero screen has a chance to paint first;
+  // the tutorial overlay then layers on top.
+  if (shouldShowTutorial()) {
+    setTimeout(() => {
+      // .catch is defensive — runTutorial returns a Promise that resolves
+      // on dismiss, never rejects. If a future change makes it throw, we
+      // still want the rest of the app to function.
+      runTutorial().catch(() => {});
+    }, 600);
+  }
 
   // =========================================================================
   // NAVIGATION
@@ -423,6 +487,35 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.emit('startLobby', getCurrentLobbyId());
   });
 
+  // L1: Theme picker change emits setTheme. Server validates the theme
+  // id against the whitelist so an injected option value can't bypass
+  // the picker — if it does, the server simply drops the change.
+  document.getElementById('theme-select')?.addEventListener('change', (e) => {
+    socket.emit('setTheme', { lobbyId: getCurrentLobbyId(), theme: e.target.value });
+  });
+
+  // L3: Spectator prediction vote buttons. Disabled after click so the
+  // spectator can't double-vote within the same turn (the server's rate
+  // limit is the real ceiling, but disabling locally avoids the visual
+  // flicker of a click that's silently dropped). The buttons re-enable
+  // on the next turn via renderTurnControls's turnKey check.
+  function emitPrediction(prediction) {
+    const lobbyId = getCurrentLobbyId();
+    if (!lobbyId) return;
+    socket.emit('spectatorPredict', { lobbyId, prediction });
+    const bar = document.getElementById('spectator-prediction-bar');
+    if (bar) {
+      bar.classList.toggle('voted-yes', prediction === 'yes');
+      bar.classList.toggle('voted-no', prediction === 'no');
+    }
+    const yesBtn = document.getElementById('spec-pred-yes');
+    const noBtn = document.getElementById('spec-pred-no');
+    if (yesBtn) yesBtn.disabled = true;
+    if (noBtn) noBtn.disabled = true;
+  }
+  document.getElementById('spec-pred-yes')?.addEventListener('click', () => emitPrediction('yes'));
+  document.getElementById('spec-pred-no')?.addEventListener('click', () => emitPrediction('no'));
+
   hardcoreToggle?.addEventListener('change', (e) => {
     socket.emit('toggleHardcore', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
   });
@@ -466,8 +559,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') submitMovie();
   });
 
+  // M3: Debounce the typing-indicator broadcast so a typing player emits
+  // at most once per 1.5s. Without the gate, every keystroke would fire
+  // its own server round-trip, which both wastes bandwidth and trips the
+  // server-side rate limit on a normal-speed typist.
+  let typingPingTimeout = null;
+  const TYPING_PING_INTERVAL_MS = 1500;
+  function maybeEmitTyping() {
+    if (typingPingTimeout) return;            // already scheduled — coalesce
+    typingPingTimeout = setTimeout(() => {
+      typingPingTimeout = null;
+    }, TYPING_PING_INTERVAL_MS);
+    socket.emit('typing', getCurrentLobbyId());
+  }
+
   movieInput?.addEventListener('input', (e) => {
     const query = e.target.value.trim();
+    // M3: Notify the room that the active player is typing. Server checks
+    // it's actually their turn before broadcasting; sending always (rather
+    // than gating on local "is it my turn" state) is simpler and safe — a
+    // wrong-turn ping is just dropped server-side.
+    if (query.length > 0) maybeEmitTyping();
     if (query.length < 2) {
       if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
       closeMobileAc();
@@ -515,6 +627,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   howToPlayBtn?.addEventListener('click', () => howToPlayModal?.classList.remove('hidden'));
   creditsBtn?.addEventListener('click', () => creditsModal?.classList.remove('hidden'));
+
+  // M6: Returning players can replay the tutorial from the How-to-Play
+  // modal. We close the modal first (avoid stacked overlays competing
+  // for focus) then clear the gate flag so runTutorial doesn't no-op,
+  // then run it. The runTutorial promise resolves on dismiss; nothing
+  // chains off it here.
+  document.getElementById('replay-tutorial-btn')?.addEventListener('click', () => {
+    if (howToPlayModal) howToPlayModal.classList.add('hidden');
+    try { localStorage.removeItem('mm_completedTutorial'); } catch {}
+    runTutorial().catch(() => {});
+  });
 
   async function loadLeaderboard() {
     leaderboardModal.classList.remove('hidden');
@@ -565,6 +688,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   leaderboardBtn?.addEventListener('click', loadLeaderboard);
 
+  // =========================================================================
+  // MY STATS BUTTON (H5)
+  // =========================================================================
+  // Opens the modal optimistically (so the player sees something immediately)
+  // and asks the server for their stats. The 'myStats' socket handler in
+  // socketClient.js calls renderMyStats() with the response.
+  const myStatsBtn = document.getElementById('my-stats-btn');
+  myStatsBtn?.addEventListener('click', () => {
+    const sock = getSocket();
+    if (!sock) {
+      showNotification("Stats aren't available right now — try again in a sec.");
+      return;
+    }
+    // Show the modal immediately with a loading state — the server response
+    // will repaint the body within a few hundred ms. Without this, a slow
+    // network would leave the user wondering whether the click registered.
+    const modal = document.getElementById('my-stats-modal');
+    const sub = document.getElementById('my-stats-subtitle');
+    const body = document.getElementById('my-stats-body');
+    if (modal) modal.classList.remove('hidden');
+    if (sub) sub.textContent = 'Loading…';
+    if (body) body.textContent = '';
+    sock.emit('requestMyStats', getStableId());
+  });
+
   document.body.addEventListener('click', (e) => {
     if (e.target.classList.contains('modal-overlay')) {
       e.target.classList.add('hidden');
@@ -578,6 +726,78 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
+    }
+  });
+
+  // =========================================================================
+  // MODAL FOCUS TRAP + RESTORATION (L6)
+  // =========================================================================
+  // Watches every .modal-overlay element for visibility changes (via class
+  // mutation). When a modal opens, focus moves inside it and the element
+  // that previously had focus is remembered. When it closes, focus returns
+  // there. A document-level Tab handler keeps focus inside the visible modal.
+  //
+  // Implemented as a MutationObserver instead of wrapping each open call
+  // site so the trap works regardless of HOW the modal was shown (button
+  // click, programmatic show, user click on overlay close, Escape key).
+
+  const focusableSelector =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  document.querySelectorAll('.modal-overlay').forEach(modal => {
+    let priorFocus = null;
+    new MutationObserver(() => {
+      const isOpen = !modal.classList.contains('hidden');
+      // _wasOpen lets us only act on transitions, not every class change.
+      if (isOpen && !modal._wasOpen) {
+        modal._wasOpen = true;
+        priorFocus = document.activeElement;
+        // Move focus inside the modal so the next Tab cycles within it and
+        // screen readers announce the modal's content. Prefer the close
+        // button (it's the safest first stop — Tab moves forward into the
+        // modal, Shift+Tab to the last element).
+        const closeBtn = modal.querySelector('.modal-close');
+        const target = closeBtn || modal.querySelector(focusableSelector);
+        if (target && typeof target.focus === 'function') target.focus();
+      } else if (!isOpen && modal._wasOpen) {
+        modal._wasOpen = false;
+        // Restore focus to whoever opened the modal so keyboard users don't
+        // get dumped at the top of the page.
+        if (priorFocus && typeof priorFocus.focus === 'function') {
+          try { priorFocus.focus(); } catch {}
+        }
+      }
+    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+  });
+
+  // Single document-level Tab interceptor — runs only when a modal is open.
+  // Wraps Tab/Shift+Tab around the modal's focusable elements. Without this,
+  // Tab would cycle through the underlying screen and hide focus from the
+  // user.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const modal = document.querySelector('.modal-overlay:not(.hidden)');
+    if (!modal) return;
+    // offsetParent === null filters out elements hidden via display:none —
+    // querySelectorAll alone would also return e.g. hidden close buttons.
+    const focusable = Array.from(modal.querySelectorAll(focusableSelector))
+      .filter(el => el.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey && (active === first || !modal.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    } else if (!modal.contains(active)) {
+      // Focus drifted outside the modal somehow (extension, dev tools) —
+      // pull it back to the first element so Tab still works predictably.
+      e.preventDefault();
+      first.focus();
     }
   });
 
@@ -659,7 +879,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
 
   const bgCarousel = document.getElementById('poster-carousel');
-  if (bgCarousel) {
+  // L7: Skip the parallax wiring entirely when the user has requested
+  // reduced motion. The CSS reduced-motion block already neutralizes the
+  // 0.2s transition on the carousel transform, but the mousemove handler
+  // would still fire 60+ times/sec and trigger constant repaints — silly
+  // when the user doesn't want motion. Mobile is also skipped (existing
+  // behavior — the touch UI doesn't have a "cursor" to track).
+  if (bgCarousel && !prefersReducedMotion()) {
     document.addEventListener('mousemove', (e) => {
       if (window.innerWidth <= 767) return;
       const xShift = (e.clientX / window.innerWidth - 0.5) * -30;

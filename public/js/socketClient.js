@@ -13,18 +13,18 @@ import {
   showNotification, renderAutocompleteResults, closeMobileAc,
   openShareModal, showGameOverBanner, resetMobileTab,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
-  showGhostAttempt,
+  showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
   chatMessages
 } from './ui.js';
 
-import { prepareAudio, playSuccess, playFail, playTick, vibrate, escapeHtml, getStableId } from './utils.js';
+import { prepareAudio, playSuccess, playFail, playTick, playSfx, vibrate, escapeHtml, getStableId } from './utils.js';
 
 import {
   getSocket, setSocket, getCurrentLobbyId, getMyPlayerId, getGameState,
-  getIsSpectator, getTurnInterval, getLastTickSound,
+  getIsSpectator, getIsDaily, getTurnInterval, getLastTickSound,
   setTurnInterval, setLastTickSound, clearTurnTimer,
   onJoined, onStateUpdate, onRejoined, resetSession
 } from './state.js';
@@ -37,6 +37,14 @@ import {
 // Suppresses the generic notification overlay so the full-screen
 // self-elimination screen can take the stage without overlap.
 let selfElimActive = false;
+
+// H3: Most recent `youWereEliminated` payload, buffered so it can be picked
+// up by the alive→dead transition handler in stateUpdate. The events arrive
+// in this order: youWereEliminated → notification → stateUpdate, so by the
+// time stateUpdate detects the transition the payload is already here.
+// Cleared on game start/restart and after consumption to keep stale data
+// from leaking into a future elimination.
+let pendingEliminationDetails = null;
 
 export function initSocket() {
   const socket = io({
@@ -75,7 +83,12 @@ export function initSocket() {
       if (waitingRoomEl) waitingRoomEl.classList.remove('hidden');
       if (lobbyScreenEl) lobbyScreenEl.classList.add('active');
     }
-    if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = getCurrentLobbyId();
+    // H2: For daily lobbies, the lobby ID is an internal `DAILY-xxx-...`
+    // string not meant to be shared. Show a friendlier label instead so
+    // the in-game header doesn't expose plumbing.
+    if (lobbyCodeDisplay) {
+      lobbyCodeDisplay.innerText = getIsDaily() ? '🗓️ Daily Challenge' : getCurrentLobbyId();
+    }
   });
 
   socket.on('error', (msg) => showNotification(msg));
@@ -105,12 +118,45 @@ export function initSocket() {
       const h3 = document.createElement('h3');
       h3.textContent = lobby.hostName + "'s Lobby";
 
+      // M4: Skill-bracket badge next to the host name. Compact, single
+      // emoji-and-label so the host's experience level is the first
+      // signal a browser sees. New players get a friendly "🌱 New" label
+      // so they aren't joining unaware that the host might be a first-
+      // timer too — sets expectations both ways.
+      if (lobby.skill && lobby.skill.label) {
+        const skillBadge = document.createElement('span');
+        skillBadge.className = 'public-lobby-skill';
+        skillBadge.textContent = `${lobby.skill.icon || ''} ${lobby.skill.label}`;
+        skillBadge.title = `Host wins: ${lobby.hostWins | 0}`;
+        h3.appendChild(document.createTextNode(' '));
+        h3.appendChild(skillBadge);
+      }
+
       const stats = document.createElement('div');
       stats.className = 'public-lobby-stats';
 
       const countSpan = document.createElement('span');
       countSpan.textContent = '👥 ' + lobby.playerCount + ' / 8';
       stats.appendChild(countSpan);
+
+      // M4: Last-game chain-length stat. Only shown when the lobby has
+      // actually finished a game — a brand-new lobby with no plays yet
+      // would render "Last chain: 0" which is misleading.
+      if (typeof lobby.lastChainLength === 'number' && lobby.lastChainLength > 0) {
+        const lastSpan = document.createElement('span');
+        lastSpan.textContent = `🔗 Last: ${lobby.lastChainLength}`;
+        stats.appendChild(lastSpan);
+      }
+
+      // M4: Vibe tag (chatty / casual / quiet). Only shown when the
+      // server returns a non-null vibe — younger lobbies have no
+      // signal yet and we don't want to mislabel them.
+      if (lobby.vibe && lobby.vibe.label) {
+        const vibeSpan = document.createElement('span');
+        vibeSpan.className = 'public-lobby-vibe';
+        vibeSpan.textContent = `${lobby.vibe.icon || ''} ${lobby.vibe.label}`;
+        stats.appendChild(vibeSpan);
+      }
 
       if (lobby.hardcoreMode || lobby.allowTvShows) {
         const tagsDiv = document.createElement('div');
@@ -146,6 +192,26 @@ export function initSocket() {
       card.appendChild(joinButton);
       publicLobbiesList.appendChild(card);
     });
+  });
+
+  // -----------------------------------------------------------------------
+  // THEMES LIST (L1) — server sends this once per connection. Cached on
+  // window.__mmThemes so renderLobby can populate the picker without a
+  // round-trip when the player enters the lobby screen. Window-global
+  // (vs a state.js field) keeps this concern off the hot path; themes
+  // are a static, rarely-touched taxonomy.
+  // -----------------------------------------------------------------------
+
+  socket.on('themesList', (themes) => {
+    if (Array.isArray(themes)) {
+      window.__mmThemes = themes;
+      // Repopulate the picker if the lobby screen is already rendered
+      // (e.g. on socket reconnect after a brief drop). renderLobby reads
+      // from window.__mmThemes so a fresh render naturally picks up the
+      // updated list — but if no fresh render fires, dispatch a custom
+      // event the picker code listens for.
+      window.dispatchEvent(new CustomEvent('mm:themes-updated'));
+    }
   });
 
   // -----------------------------------------------------------------------
@@ -203,7 +269,15 @@ export function initSocket() {
         overlay.classList.add('hidden');
         overlay.classList.remove('is-exiting', 'notification--elimination');
       }
-      showSelfEliminationScreen();
+      // H3: If a youWereEliminated payload is buffered (invalid-connection
+      // path), pass it through so the screen can show the side-by-side
+      // cast comparison. Otherwise (timeout, disconnect, quit) fall back
+      // to the generic screen — those eliminations have no comparison to
+      // surface anyway. Consume the buffer so a stale payload from a
+      // previous game can never leak into a future elimination.
+      const details = pendingEliminationDetails;
+      pendingEliminationDetails = null;
+      showSelfEliminationScreen(details);
     }
 
     // Your-turn glow
@@ -228,6 +302,23 @@ export function initSocket() {
       if (gameScreen) gameScreen.classList.add('active');
       resetMobileTab();
       renderGame(state, getMyPlayerId(), getIsSpectator());
+
+      // M5: Solo streak / objective celebrations. The server stamps
+      // `streakMilestone` (a count) or `objectiveJustHit` (boolean) on the
+      // very next state broadcast after the milestone fires, then clears
+      // them in broadcastState so subsequent updates don't re-trigger.
+      // We fire on either flag — both award bonus points and deserve a
+      // visible "ding" so the player notices.
+      if (state.gameMode === 'solo' && !getIsSpectator()) {
+        if (state.streakMilestone) {
+          showToast(`🔥 ${state.streakMilestone} in a row! +${state.streakMilestone} bonus`);
+          playSfx('success');
+        }
+        if (state.objectiveJustHit) {
+          showToast('🎯 Objective complete! +5 bonus');
+          playSfx('win');
+        }
+      }
 
       // Only rebuild the timer interval when the turn actually changes.
       // stateUpdate fires on chat messages, reactions, and player joins too —
@@ -304,6 +395,60 @@ export function initSocket() {
       clearTurnTimer();
       document.title = 'MovieMatch';
       renderGame(state, getMyPlayerId(), getIsSpectator());
+
+      // H2: Daily Challenge end-of-game modal. Only fires once per
+      // finished transition to avoid duplicate opens when stateUpdate
+      // re-fires for unrelated reasons (chat messages, reactions).
+      // We piggyback on prevState.status to detect the playing→finished
+      // edge — same pattern as the win-flash handler above.
+      const justFinished = prevState?.status === 'playing' && state.status === 'finished';
+      if (justFinished && getIsDaily() && state.winner?.isDaily) {
+        // Ask the server for the latest leaderboard so the player's freshly
+        // recorded entry shows up. Render the modal as soon as we get it.
+        const date = state.winner.date;
+        socket.emit('requestDailyLeaderboard', date);
+        // L2: Capture the chain at the moment of finishing so the daily-
+        // result modal can replay it. Take a snapshot rather than holding
+        // a live reference because subsequent stateUpdates (e.g. the 7s
+        // game-reset transition to 'waiting') would clear it.
+        const finishedChain = Array.isArray(state.chain) ? state.chain.slice() : [];
+        // The leaderboard response handler stores on socket._lastDailyLeaderboard;
+        // poll briefly for it (server is local, expected within a few hundred ms).
+        // Caps at ~2s so a slow network still surfaces the modal with whatever
+        // leaderboard came back, even if it's empty.
+        let elapsed = 0;
+        const pollMs = 100;
+        const maxMs = 2000;
+        const tryRender = () => {
+          const lb = socket._lastDailyLeaderboard;
+          if (lb && lb.date === date) {
+            socket._lastDailyLeaderboard = null;
+            renderDailyResult({
+              alreadyPlayed: false,
+              puzzleNumber: state.winner.puzzleNumber,
+              date,
+              chainLength: state.winner.chainLength || 0,
+              leaderboard: lb.leaderboard || [],
+              chain: finishedChain, // L2: enables the "▶ Replay" button in the modal
+            });
+            return;
+          }
+          elapsed += pollMs;
+          if (elapsed >= maxMs) {
+            renderDailyResult({
+              alreadyPlayed: false,
+              puzzleNumber: state.winner.puzzleNumber,
+              date,
+              chainLength: state.winner.chainLength || 0,
+              leaderboard: [],
+              chain: finishedChain,
+            });
+            return;
+          }
+          setTimeout(tryRender, pollMs);
+        };
+        setTimeout(tryRender, pollMs);
+      }
     }
   });
 
@@ -345,11 +490,15 @@ export function initSocket() {
       // Win takes precedence over any in-flight elimination flash from the
       // same losing turn — clean those up before the celebration plays.
       document.querySelectorAll('.elimination-flash').forEach(el => el.remove());
-      playSuccess();
-      setTimeout(playSuccess, 300);
-      setTimeout(playSuccess, 600);
+      // M2: Single melodic 3-note arpeggio replaces the old three-success-
+      // ding pattern. Sounds intentional rather than a stuck button.
+      playSfx('win');
       vibrate([60, 80, 60, 80, 60]); // celebration pattern on win
       showWinFlash();
+      // M2: Confetti burst. CSS-driven via showConfetti so it auto-cleans
+      // up after the animation; respects prefers-reduced-motion via the
+      // existing global media query (animation-duration→0 disables it).
+      showConfetti();
     }
     // kind === 'info' (or unknown): no effects, just the text overlay.
   });
@@ -361,6 +510,159 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('attemptFailed', showGhostAttempt);
+
+  // -----------------------------------------------------------------------
+  // YOU WERE ELIMINATED (H3) — private payload sent only to the eliminated
+  // player when the cause is a strategic failure (invalid connection,
+  // hardcore actor reuse, or movie-already-used). Carries the cast lists
+  // for both the player's guess and the last chain entry so the
+  // self-elimination screen can show why no actor connected the two.
+  // Cleared either by consumption (the next stateUpdate that flips the
+  // local player to dead) or by the next `gameStarted`/`stateUpdate` that
+  // resets the game — see resetGame logic below if added later.
+  // -----------------------------------------------------------------------
+
+  socket.on('youWereEliminated', (payload) => {
+    pendingEliminationDetails = payload;
+  });
+
+  // -----------------------------------------------------------------------
+  // DAILY CHALLENGE (H2)
+  // -----------------------------------------------------------------------
+  // dailyAlreadyPlayed — sent when the player tried to start today's daily
+  // but their attempt for this UTC day already exists. The client just
+  // shows the result modal pre-populated with their previous score and
+  // the leaderboard; no lobby is created.
+
+  socket.on('dailyAlreadyPlayed', (payload) => {
+    renderDailyResult({
+      alreadyPlayed: true,
+      puzzleNumber: payload.puzzleNumber,
+      date: payload.date,
+      chainLength: payload.attempt?.chainLength || 0,
+      leaderboard: payload.leaderboard || [],
+    });
+  });
+
+  // dailyLeaderboard — response to requestDailyLeaderboard (used when the
+  // result modal needs a refresh, e.g. after the player just finished and
+  // we want the latest standings to reflect their entry).
+  socket.on('dailyLeaderboard', (payload) => {
+    // Keep the most recent leaderboard so renderDailyResult can pull it
+    // when the post-game flow fires below. Stored on a property of the
+    // function so we don't have to expose another state-module field.
+    socket._lastDailyLeaderboard = payload;
+  });
+
+  // -----------------------------------------------------------------------
+  // PERSONAL STATS (H5) — response to requestMyStats. Server returns a
+  // fully-shaped payload (zeros for unset fields) so the client can render
+  // unconditionally without null-checking every nested field.
+  // -----------------------------------------------------------------------
+
+  socket.on('myStats', (stats) => {
+    renderMyStats(stats);
+  });
+
+  // -----------------------------------------------------------------------
+  // PEER TYPING (M3) — server announces that the active player is typing.
+  // We render a subtle "X is typing…" line under the chain area and clear
+  // it after 3s of silence. The 3s timeout is just over the server's
+  // 1.5s ping cadence, so a continuously-typing player keeps the line
+  // visible without flicker.
+  // -----------------------------------------------------------------------
+
+  let typingClearTimeout = null;
+  // -----------------------------------------------------------------------
+  // PREDICTION RESULT (L3) — fired by the server when a turn resolves
+  // (success or failure). Carries per-voter correctness so the spectator
+  // sees a personal "you called it!" / "wrong call" toast, plus the
+  // overall correct/total tally everyone hears about ("3 of 5 called it").
+  // Players who didn't vote get the tally line only.
+  // -----------------------------------------------------------------------
+
+  socket.on('predictionResult', ({ outcome, correct, total, perVoter }) => {
+    if (!total) return; // no votes this turn — nothing to surface
+    const myVoteCorrect = perVoter && perVoter[socket.id];
+    const overall = `${correct} of ${total} called it`;
+    if (myVoteCorrect === true) {
+      showToast(`✅ You called it! (${overall})`);
+      playSfx('success');
+    } else if (myVoteCorrect === false) {
+      showToast(`❌ Wrong call (${overall})`);
+      playSfx('fail');
+    } else {
+      // Player or non-voting spectator — just the room-level summary.
+      showToast(`🔮 ${overall}`);
+    }
+  });
+
+  socket.on('peerTyping', ({ playerName }) => {
+    const el = document.getElementById('peer-typing-indicator');
+    if (!el) return;
+    el.textContent = `${playerName} is typing…`;
+    el.classList.add('visible');
+    if (typingClearTimeout) clearTimeout(typingClearTimeout);
+    typingClearTimeout = setTimeout(() => {
+      el.classList.remove('visible');
+      typingClearTimeout = null;
+    }, 3000);
+  });
+
+  // -----------------------------------------------------------------------
+  // SUBMISSION REJECTED (H1) — server couldn't find the title (typo or
+  // off-canon name TMDB doesn't index). The player is NOT eliminated; they
+  // can submit again until they exhaust the per-turn retry budget. This
+  // event is emitted only to the submitting socket — other players don't
+  // need to learn about typos, so we keep it private and quiet.
+  // -----------------------------------------------------------------------
+
+  socket.on('submissionRejected', ({ message, retriesLeft, originalInput }) => {
+    // Show the count tail only when we still have retries — once retriesLeft
+    // hits 0, the server has already used the elimination path and a
+    // separate notification is on its way.
+    let tail = '';
+    if (typeof retriesLeft === 'number') {
+      if (retriesLeft > 1) tail = ` (${retriesLeft} tries left)`;
+      else if (retriesLeft === 1) tail = ' (1 try left)';
+      else if (retriesLeft === 0) tail = ' (last chance!)';
+    }
+    showToast((message || "Couldn't find that title.") + tail);
+
+    // Re-enable the input. submitMovie() in app.js disables the input/button
+    // locally when the player presses Enter, expecting a server-side state
+    // update to re-enable them on the next turn. On a rejected submission
+    // we *don't* broadcast a state update (no point telling everyone about
+    // a typo), so the local controls would otherwise stay stuck disabled.
+    const movieInputEl = document.getElementById('movie-input');
+    const submitBtnEl = document.getElementById('submit-btn');
+    const hintEl = document.getElementById('hint-text');
+    if (movieInputEl) {
+      movieInputEl.disabled = false;
+      // Restore the rejected text into the input — submitMovie() in app.js
+      // clears the field on emit (optimistic UI for the success case), so
+      // without restoring it the player would be left with an empty box and
+      // no easy way to fix a typo.
+      if (typeof originalInput === 'string' && originalInput.length > 0) {
+        movieInputEl.value = originalInput;
+      }
+      // Select-on-focus so a fresh keystroke replaces everything if the
+      // player prefers to start over. Skipped on mobile to avoid summoning
+      // the keyboard unexpectedly (matches the existing mobile focus guard).
+      if (window.innerWidth > 767) {
+        movieInputEl.focus();
+        movieInputEl.select();
+      }
+    }
+    if (submitBtnEl) submitBtnEl.disabled = false;
+    if (hintEl) {
+      hintEl.innerText = retriesLeft > 0
+        ? `Try again — pick a suggestion or check the spelling.`
+        : `Last chance — get this one right!`;
+    }
+    // Brief haptic so a player whose eyes are off the screen still notices.
+    vibrate(40);
+  });
 
   // -----------------------------------------------------------------------
   // AUTOCOMPLETE
@@ -473,6 +775,12 @@ export function initSocket() {
       if (lobbyScreen) lobbyScreen.classList.add('active');
       if (waitingRoom) waitingRoom.classList.remove('hidden');
       renderLobby(data.state, getMyPlayerId());
+    }
+    // H2: Same lobby-code-display override as the 'joined' handler \u2014 after
+    // refresh during a Daily run, show the friendly label rather than the
+    // internal DAILY-...-... lobby ID.
+    if (lobbyCodeDisplay) {
+      lobbyCodeDisplay.innerText = getIsDaily() ? '\ud83d\uddd3\ufe0f Daily Challenge' : data.lobbyId;
     }
     showNotification('\u2705 Reconnected to game!');
   });

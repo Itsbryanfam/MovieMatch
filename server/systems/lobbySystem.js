@@ -9,6 +9,12 @@
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
 const posterCache = require('../posterCache');
+const telemetry = require('../telemetry');
+const dailySystem = require('./dailySystem');
+
+const TMDB_API_BASE = 'https://api.themoviedb.org/3';
+const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
+const TMDB_FETCH_TIMEOUT_MS = 5000;
 
 // Unambiguous charset for lobby codes (Crockford base32 — no 0/O, 1/I/L)
 const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -42,11 +48,22 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
 
   // Build the initial state in memory. We'll only persist it if the
   // atomic NX-create wins; otherwise we use the canonical existing state.
+  // M4: createdAt + chatCount + lastChainLength power the "vibe" tag and
+  // last-game stat shown on each public lobby card. createdAt is set
+  // once per lobby (NX-create wins); the rest are mutated as the lobby
+  // lives. Initialized to safe defaults so older serialized state from
+  // before this deploy reads as 0/null without crashing.
+  // L1: theme defaults to 'any' (no filter). When set to a real theme,
+  // matchSystem filters candidates before validation.
   const initialRoom = {
     id, status: 'waiting', players: [], spectators: [], currentTurnIndex: 0, chain: [],
     usedMovies: [], hardcoreMode: false, previousSharedActors: [],
     allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
-    isValidating: false, gameMode: 'classic'
+    isValidating: false, gameMode: 'classic',
+    createdAt: Date.now(),
+    chatCount: 0,
+    lastChainLength: null,
+    theme: 'any',
   };
 
   // Atomic create-or-noop: SET NX returns 'OK' if we created the key,
@@ -107,6 +124,17 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
   await redisUtils.saveLobby(pubClient, id, room);
   socket.join(id);
   socket.emit('joined', { lobbyId: id, playerId: socket.id });
+
+  // H6: Telemetry — only fires on the first join (which created the lobby),
+  // not on subsequent joins to an existing lobby. The `mode` field is the
+  // initial mode at creation time; if the host changes it later we'll see
+  // the change reflected in the `game_started` event.
+  if (isNewLobby) {
+    telemetry.track(pubClient, 'lobby_created', {
+      mode: room.gameMode,
+      isPublic: !!room.isPublic,
+    });
+  }
 
   const playerPosters = posterCache.getPosters();
   if (playerPosters.length > 0) socket.emit('posters', playerPosters);
@@ -184,6 +212,22 @@ async function setGameMode(ctx, socket, { lobbyId, mode }) {
   gameLogic.broadcastState(io, lobbyId, room);
 }
 
+// L1: Host-only setter for the lobby theme. Validated against the
+// themesSystem whitelist so a malicious client can't set an arbitrary
+// string (which would degrade safely via matchesTheme's fallback, but
+// would also clutter the room state with junk).
+async function setTheme(ctx, socket, { lobbyId, theme }) {
+  const { io, pubClient } = ctx;
+  const themesSystem = require('./themesSystem');
+  if (!themesSystem.isValidTheme(theme)) return;
+  const room = await redisUtils.getLobby(pubClient, lobbyId);
+  if (!room || room.status !== 'waiting') return;
+  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
+  room.theme = theme;
+  await redisUtils.saveLobby(pubClient, lobbyId, room);
+  gameLogic.broadcastState(io, lobbyId, room);
+}
+
 async function assignTeam(ctx, socket, { lobbyId, teamId }) {
   const { io, pubClient } = ctx;
   if (teamId !== 0 && teamId !== 1) return;
@@ -245,6 +289,180 @@ async function startLobby(ctx, socket, lobbyId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// DAILY CHALLENGE (H2)
+// ---------------------------------------------------------------------------
+// Creates an ephemeral single-player lobby pre-populated with today's seed
+// movie as chain[0], then routes the player into the standard playing flow.
+// The lobby ID is deterministic per (player, date) so two parallel clicks
+// from the same player produce the same lobby (the second hit short-
+// circuits via the existing rejoin path) — and players who refresh mid-
+// run land back on their lobby via sessionStorage like in regular play.
+
+async function startDailyChallenge(ctx, socket, { name, stableId }) {
+  const { io, pubClient, TMDB_HEADERS } = ctx;
+
+  if (typeof stableId !== 'string' || stableId.length === 0) {
+    return socket.emit('error', 'Daily Challenge requires a stable identity.');
+  }
+  const playerName = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 24) : 'Player';
+
+  const date = dailySystem.getTodayDate();
+  const puzzleNumber = dailySystem.getPuzzleNumber(date);
+
+  // Atomic claim — one attempt per stableId per UTC day. NX ensures two
+  // concurrent clicks (double-tap) can't both create a fresh attempt.
+  const claim = await dailySystem.claimDailyAttempt(pubClient, stableId, playerName, date);
+  if (!claim) {
+    return socket.emit('error', 'Could not start Daily Challenge — please try again.');
+  }
+
+  // Already played today: just send the result + leaderboard so the client
+  // can show the "you already played, here's your score" view. We do NOT
+  // create a new lobby in this case — the previous run's chain is captured
+  // in the attempt record (chainLength only; the full chain is ephemeral
+  // on the lobby and gets cleaned up after the game ends).
+  if (!claim.created) {
+    const leaderboard = await dailySystem.getDailyLeaderboard(pubClient, date, 10);
+    return socket.emit('dailyAlreadyPlayed', {
+      date,
+      puzzleNumber,
+      attempt: claim.attempt,
+      leaderboard,
+    });
+  }
+
+  // Fresh attempt — bootstrap the lobby with the seed movie as chain[0].
+  // Fetch the seed's cast (cached for 7 days via getOrFetchCredits) AND
+  // the movie details (for poster + canonical title/year). Two TMDB calls
+  // total per player per day — most days hit cache after the first claim.
+  let seedMovie;
+  try {
+    const credits = await redisUtils.getOrFetchCredits(pubClient, claim.seed.id, claim.seed.mediaType, TMDB_HEADERS);
+    // We also want the poster path. The credits cache doesn't carry that,
+    // so a separate /movie/{id} call. AbortSignal timeout matches the rest
+    // of the codebase so a TMDB stall can't freeze the player on the
+    // hero screen indefinitely.
+    const detailsRes = await fetch(
+      `${TMDB_API_BASE}/${claim.seed.mediaType}/${claim.seed.id}?language=en-US`,
+      { headers: TMDB_HEADERS, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
+    );
+    const details = await detailsRes.json();
+    const posterPath = details.poster_path;
+    seedMovie = {
+      id: claim.seed.id,
+      title: details.title || details.name || claim.seed.title,
+      year: String(claim.seed.year || (details.release_date || '').split('-')[0] || ''),
+      poster: posterPath ? `${TMDB_POSTER_BASE}${posterPath}` : null,
+      cast: (credits.cast || []).map(a => typeof a === 'string' ? { id: null, name: a } : a),
+      mediaType: claim.seed.mediaType,
+    };
+  } catch {
+    // TMDB unreachable on the bootstrap call — bail rather than start a
+    // broken daily run. The attempt key was claimed via NX, so leave it as
+    // in_progress (it'll auto-expire) and let the player retry tomorrow or
+    // contact support. Note: NOT idempotent if TMDB recovers in the next
+    // few hours — they'd be locked out of today's puzzle.
+    return socket.emit('error', "Couldn't reach the movie database. Please try again later.");
+  }
+
+  // Lobby ID encodes the player + date so a refresh re-lands on the same
+  // run. Truncating the stableId keeps the ID short enough for sessionStorage
+  // and URL params if we ever expose it.
+  const lobbyId = `DAILY-${stableId.slice(0, 12)}-${date.replace(/-/g, '')}`.toUpperCase().slice(0, 32);
+
+  // Build the lobby. Single-player, daily mode, chain pre-populated with
+  // the seed movie (and seed marked as used so it can't be re-played).
+  // teamId 0 by convention — never matters in solo modes but the field is
+  // expected by various player iterations.
+  const room = {
+    id: lobbyId,
+    status: 'playing',
+    players: [{
+      id: socket.id,
+      name: playerName,
+      isHost: true,
+      isAlive: true,
+      connected: true,
+      score: 0,
+      wins: 0,
+      teamId: 0,
+      stableId,
+    }],
+    spectators: [],
+    chain: [{
+      // playerId 'daily_seed' is a sentinel — no real player owns the seed;
+      // the client renders it as "Today's puzzle" rather than someone's
+      // name. The existing chain renderer uses playerName for display.
+      playerId: 'daily_seed',
+      playerName: `🎬 Daily #${puzzleNumber}`,
+      movie: seedMovie,
+      matchedActors: [],
+    }],
+    usedMovies: [`${seedMovie.mediaType}:${seedMovie.id}`],
+    hardcoreMode: false,
+    previousSharedActors: [],
+    allowTvShows: false,
+    isPublic: false,
+    timerMultiplier: 0,
+    turnExpiresAt: null,
+    isValidating: false,
+    gameMode: 'daily',
+    currentTurnIndex: 0,
+    currentTurnRetries: 0,
+    // Daily-specific metadata so client and server can read puzzle context
+    // without recomputing dates everywhere.
+    dailyDate: date,
+    dailyPuzzleNumber: puzzleNumber,
+  };
+
+  // Set the timer for the player's first move (post-seed). Reuses the
+  // resetTimer helper, which special-cases gameMode='daily' to a flat 60s.
+  gameLogic.resetTimer(room);
+
+  await redisUtils.saveLobby(pubClient, lobbyId, room);
+  await redisUtils.setSocketLobby(pubClient, socket.id, lobbyId);
+  socket.join(lobbyId);
+
+  // 'joined' tells the client it's in a lobby and can transition screens.
+  // We add `isDaily: true` so the client knows to render daily-specific UI
+  // (no invite button, daily header instead of room code, etc.).
+  socket.emit('joined', { lobbyId, playerId: socket.id, isDaily: true });
+
+  // Push the initial state so the client renders the seed chain entry and
+  // turn indicator without a separate request.
+  gameLogic.broadcastState(io, lobbyId, room);
+
+  // H6: Telemetry — fired on each fresh claim, NOT on the already-played
+  // path. Lets us measure daily DAU and check-in rate over time.
+  telemetry.track(pubClient, 'daily_played', {
+    date,
+    puzzleNumber,
+    seedId: seedMovie.id,
+  });
+}
+
+// Called by gameLogic.checkSoloWin when a daily run ends, so the player's
+// final chain length is recorded on the leaderboard and the attempt is
+// flipped to 'done'. Lives here (not in gameLogic) to keep the daily-
+// specific Redis schema isolated from generic game logic.
+async function finalizeDailyOnGameEnd(pubClient, room) {
+  if (!room || room.gameMode !== 'daily' || !room.dailyDate) return;
+  const player = room.players && room.players[0];
+  if (!player || !player.stableId) return;
+  // chainLength excludes the seed entry — the seed was supplied, not
+  // earned, so a player who couldn't connect on move 1 scores 0, a
+  // player with one valid play scores 1, etc.
+  const earnedLength = Math.max(0, (room.chain || []).length - 1);
+  await dailySystem.finalizeDailyAttempt(
+    pubClient,
+    player.stableId,
+    player.name,
+    earnedLength,
+    room.dailyDate
+  );
+}
+
 async function restartLobby(ctx, socket, lobbyId) {
   const { io, pubClient } = ctx;
   const room = await redisUtils.getLobby(pubClient, lobbyId);
@@ -269,17 +487,107 @@ async function restartLobby(ctx, socket, lobbyId) {
 // PUBLIC LOBBY BROWSER
 // ---------------------------------------------------------------------------
 
+// M4: Bucket free-form host-win counts into stable skill labels. Visible
+// on every public lobby card so a brand-new player can avoid joining a
+// veteran's room (and vice versa). Numbers are intentionally generous
+// at the low end so a player isn't labeled "Vet" after a single hot
+// streak — the top tier is meant to flag "this person plays a lot."
+function _skillBracketForWins(wins) {
+  if (wins >= 10) return { label: 'Vet', icon: '🏆' };
+  if (wins >= 3)  return { label: 'Casual', icon: '🎯' };
+  return { label: 'New', icon: '🌱' };
+}
+
+// M4: Compute the chat-vibe tag from chat-count and lobby age. Default
+// to "Quiet" for very young lobbies so a brand-new lobby with zero chat
+// (because nobody's joined yet) doesn't read as "silent" — it just hasn't
+// had time. After ~3 minutes of activity the rate becomes meaningful.
+function _vibeTag(chatCount, createdAt) {
+  const ageMs = Math.max(1, Date.now() - (createdAt || Date.now()));
+  const ageMin = ageMs / 60000;
+  if (ageMin < 1.5) return null; // too new to call — render as "no tag"
+  const ratePerMin = (chatCount || 0) / ageMin;
+  if (ratePerMin >= 0.6) return { label: 'Chatty', icon: '🗣️' };
+  if (ratePerMin >= 0.15) return { label: 'Casual chat', icon: '💬' };
+  return { label: 'Quiet', icon: '🔇' };
+}
+
 async function requestPublicLobbies(ctx, socket) {
   const { pubClient } = ctx;
   const all = await redisUtils.getAllLobbies(pubClient);
   const publicList = all.filter(r => r.status === 'waiting' && r.isPublic && r.players.length < 8).map(room => {
     const host = room.players.find(p => p.isHost);
+    const hostWins = host ? (host.wins | 0) : 0;
+    const skill = _skillBracketForWins(hostWins);
+    const vibe = _vibeTag(room.chatCount, room.createdAt);
     return {
-      id: room.id, hostName: host ? host.name : 'Unknown', playerCount: room.players.length,
-      hardcoreMode: room.hardcoreMode, allowTvShows: room.allowTvShows
+      id: room.id,
+      hostName: host ? host.name : 'Unknown',
+      playerCount: room.players.length,
+      hardcoreMode: room.hardcoreMode,
+      allowTvShows: room.allowTvShows,
+      // M4 enrichment fields. All are best-effort — older lobbies (created
+      // before the deploy that added these) will read as null/0/default,
+      // which the client renderer tolerates by hiding the line entirely.
+      hostWins,
+      skill,
+      vibe,
+      lastChainLength: typeof room.lastChainLength === 'number' ? room.lastChainLength : null,
+      gameMode: room.gameMode || 'classic',
     };
   });
   socket.emit('publicLobbiesList', publicList);
+}
+
+// ---------------------------------------------------------------------------
+// QUIT GAME (M7) — graceful in-game leave with no grace period
+// ---------------------------------------------------------------------------
+// Pre-M7 the only way to leave a game in progress was to disconnect, which
+// triggered the 15-second reconnection grace timer in handleDisconnect.
+// During those 15 seconds the rest of the table sat watching a frozen turn
+// before finally resuming. M7 lets a player explicitly forfeit so the room
+// snaps to the next turn without the courtesy delay.
+
+async function quitGame(ctx, socket, lobbyId) {
+  const { io, pubClient } = ctx;
+
+  const room = await redisUtils.getLobby(pubClient, lobbyId);
+  if (!room) return;
+  // Only meaningful while the game is actually playing — in waiting/finished
+  // states the player should use leaveLobby (which removes them entirely).
+  if (room.status !== 'playing') return;
+
+  const player = room.players.find(p => p.id === socket.id);
+  if (!player || !player.isAlive) return;
+
+  // Two cases, mirroring handleDisconnect's grace-timer expiry:
+  //   1) It's the quitter's turn — eliminate cleanly via the canonical path
+  //      so the timer is cleared, win condition is re-checked, and the next
+  //      player gets a fresh turn timer.
+  //   2) It's someone else's turn — mark dead, re-check win condition, and
+  //      broadcast. Don't disturb the active player's timer.
+  const isCurrentTurn = room.players[room.currentTurnIndex]?.id === socket.id;
+  // H6: Telemetry — fired once per quit, regardless of whose turn it was.
+  // Useful for understanding mid-game churn ("how often do people quit?").
+  // Tracked separately from `eliminated` so we can distinguish strategic
+  // losses from voluntary exits in funnel analysis.
+  telemetry.track(pubClient, 'quit_game', {
+    mode: room.gameMode,
+    chainLength: (room.chain || []).length,
+    onOwnTurn: isCurrentTurn,
+  });
+  if (isCurrentTurn) {
+    await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, 'Quit');
+  } else {
+    player.isAlive = false;
+    // 'info' kind = no shake/sound effects — quitting isn't a strategic
+    // failure to celebrate or mourn, just a player departing.
+    io.to(lobbyId).emit('notification', { msg: `${player.name} quit the game.`, kind: 'info' });
+    await redisUtils.saveLobby(pubClient, lobbyId, room);
+    await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
+    const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+    if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -387,10 +695,14 @@ module.exports = {
   rejoinLobby,
   kickPlayer,
   setGameMode,
+  setTheme,
   assignTeam,
   toggleSetting,
   startLobby,
   restartLobby,
   requestPublicLobbies,
+  quitGame,
+  startDailyChallenge,
+  finalizeDailyOnGameEnd,
   handleDisconnect,
 };

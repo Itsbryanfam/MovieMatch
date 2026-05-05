@@ -164,6 +164,50 @@ app.get('/api/leaderboard', async (req, res) => {
   }
 });
 
+// H6: Admin telemetry stats endpoint. Returns per-event-type counts within
+// the requested time window. The data lives in Redis ZSETs populated by
+// server/telemetry.js — see that file for the event schema and retention.
+//
+// Query params:
+//   days  — window size in days (default 7, clamped to [1, telemetry retention])
+//   event — optional single event type; when set, returns the raw events
+//           in the window instead of a summary (useful for ad-hoc spelunking)
+//
+// Auth: same x-admin-secret pattern as /api/admin/flush-credits — constant-
+// time compare, 403 on miss, structured warn-log on failure.
+app.get('/api/admin/stats', async (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (!safeEqual(secret, process.env.ADMIN_SECRET)) {
+    logger.warn({ ip: req.ip, path: req.path }, 'Admin auth failed');
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  logger.info({ ip: req.ip, action: 'stats' }, 'Admin action');
+  try {
+    // Parse and clamp `days` so a malformed or absurd value can't blow out
+    // memory by trying to read multi-decade ranges. Cap at retention
+    // because anything older has been pruned anyway.
+    const requestedDays = parseInt(req.query.days, 10);
+    const days = Math.min(
+      Math.max(Number.isFinite(requestedDays) ? requestedDays : 7, 1),
+      telemetry.TEL_RETENTION_DAYS
+    );
+    const windowMs = days * 24 * 60 * 60 * 1000;
+
+    // Single-event mode: return the raw events for ad-hoc analysis.
+    if (typeof req.query.event === 'string' && req.query.event) {
+      const events = await telemetry.getEvents(pubClient, req.query.event, windowMs);
+      return res.json({ days, event: req.query.event, count: events.length, events });
+    }
+
+    // Summary mode: counts per event type for the window.
+    const summary = await telemetry.getSummary(pubClient, windowMs);
+    res.json({ days, summary });
+  } catch (err) {
+    logger.error(err, 'Failed to read telemetry stats');
+    res.status(500).json({ error: 'Stats failed' });
+  }
+});
+
 const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
 const subClient = pubClient.duplicate();
 
@@ -209,6 +253,7 @@ async function fetchBackgroundPosters() {
 const { setupSocketHandlers } = require('./server/socketHandlers');
 const redisUtils = require('./server/redisUtils');
 const posterCache = require('./server/posterCache');
+const telemetry = require('./server/telemetry');
 
 const POSTER_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 

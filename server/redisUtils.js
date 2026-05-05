@@ -106,11 +106,25 @@ async function setPlayerWins(pubClient, playerId, wins) {
 // freezes the game for the entire room until the 30s lock TTL expires.
 const TMDB_FETCH_TIMEOUT_MS = 5000;
 
+// L10: Cache schema version. Bump this whenever the shape of the cached
+// credits payload changes — old entries simply expire over the 7-day TTL,
+// and new fetches start landing under the new prefix immediately. Documented
+// schema history (so future authors know which bump was for what):
+//   v1 — { cast: [{ name }] } (initial)
+//   v2 — { cast: [{ id, name }] } (H4 — id-based actor matching)
+const CREDITS_CACHE_VERSION = 'v2';
+
 /**
- * Get credits from Redis cache or fetch from TMDB and cache for 30 days
+ * Get credits from Redis cache or fetch from TMDB and cache for 30 days.
+ *
+ * Cache key embeds CREDITS_CACHE_VERSION so a payload-shape change is a
+ * single-line bump above. Reading a v1 entry as v2 would silently lose the
+ * id and defeat id-based actor matching, so the version segment ensures we
+ * never cross the streams. Old-version entries simply expire; new submits
+ * after deploy land in the current version from the first miss.
  */
 async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
-  const cacheKey = `credits:${mediaType}:${tmdbId}`;
+  const cacheKey = `credits:${CREDITS_CACHE_VERSION}:${mediaType}:${tmdbId}`;
   // Companion lock for stampede protection — see logic below.
   // 10s expiry > the 5s TMDB timeout, so the lock can't outlive a stuck fetch.
   const lockKey = `${cacheKey}:fetching`;
@@ -157,10 +171,14 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
 
     const raw = await response.json();
 
-    // Strip to just cast names — the only field the game uses.
-    // Raw responses are 50-100KB; stripped is ~1-2KB. Saves massive Redis memory.
+    // Strip to id+name per cast member — id powers H4 (correct id-based
+    // matching across name collisions and punctuation drift), name remains
+    // for client display. Raw TMDB cast entries are ~50 fields each; the
+    // stripped form keeps Redis at ~1-2KB per movie.
     const stripped = {
-      cast: (raw.cast || []).map(actor => ({ name: actor.name }))
+      cast: (raw.cast || [])
+        .filter(a => a && a.name) // skip malformed entries (rare but real on obscure films)
+        .map(actor => ({ id: actor.id, name: actor.name }))
     };
 
     await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days

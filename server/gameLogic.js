@@ -1,4 +1,7 @@
 const redisUtils = require('./redisUtils');
+const telemetry = require('./telemetry');
+const statsSystem = require('./systems/statsSystem');
+const soloObjectivesSystem = require('./systems/soloObjectivesSystem');
 const logger = require('pino')();
 
 // In-memory map for active turn timeouts.
@@ -19,11 +22,25 @@ function clearTurnTimeout(id) {
 }
 
 function broadcastState(io, id, state) {
+  // L3: Roll the spectator-predictions map up into a tally before
+  // broadcasting. The raw map keys are socket ids — broadcasting them
+  // would let an observer correlate which spectator voted which way,
+  // which is needless surveillance. The tally is the only thing the
+  // client UI needs, and it's a tiny derived value.
+  const rawPreds = state.spectatorPredictions || {};
+  let tallyYes = 0, tallyNo = 0;
+  for (const v of Object.values(rawPreds)) {
+    if (v === 'yes') tallyYes++;
+    else if (v === 'no') tallyNo++;
+  }
   const clientState = {
     ...state,
     players: state.players.map(({ stableId, ...rest }) => rest),
     spectators: undefined,
     spectatorCount: (state.spectators || []).filter(s => s.connected).length,
+    // Strip the raw predictions map; ship just the tally.
+    spectatorPredictions: undefined,
+    predictionTally: { yes: tallyYes, no: tallyNo },
     chain: state.chain.map(item => ({
       playerId: item.playerId,
       playerName: item.playerName,
@@ -33,6 +50,14 @@ function broadcastState(io, id, state) {
     winner: state.winner || null
   };
   io.to(id).emit('stateUpdate', clientState);
+  // M5: One-shot solo flags are sent in this broadcast and then cleared
+  // on the room so the NEXT broadcast (chat, reaction, etc.) doesn't
+  // re-fire the same celebration. The client sees the flag exactly once,
+  // animates it, and ignores subsequent state updates that don't carry it.
+  if (state.streakMilestone || state.objectiveJustHit) {
+    state.streakMilestone = null;
+    state.objectiveJustHit = false;
+  }
 }
 
 // Records a win for a single player. Goes through redisUtils.recordPlayerWinAtomic
@@ -65,6 +90,13 @@ async function eliminateTeam(io, pubClient, id, state, teamId, reason) {
 }
 
 async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
+  // L3: If spectators voted on this turn, settle their predictions
+  // BEFORE the elimination notification fires. Outcome here is "no" —
+  // the player did NOT get it. We compute correctness for each vote
+  // and broadcast a one-shot result that the client uses for its
+  // "you called it!" / "wrong call" toast.
+  _settlePredictions(io, id, state, /* outcome */ 'no');
+
   if (state.gameMode === 'team') {
     const player = state.players[state.currentTurnIndex];
     const teamId = player ? player.teamId : 0;
@@ -75,11 +107,72 @@ async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
   if (player) {
     player.isAlive = false;
     io.to(id).emit('notification', { msg: `${player.name} eliminated: ${reason}`, kind: 'elimination' });
+    // H6: Telemetry — `reason` is a free-form string so we bucket it into a
+    // small set of stable categories. This is what lets us answer "what % of
+    // eliminations are typos?" without having to grep server logs.
+    telemetry.track(pubClient, 'eliminated', {
+      mode: state.gameMode,
+      reasonCategory: _categorizeReason(reason),
+      chainLength: (state.chain || []).length,
+    });
   }
   await checkWinCondition(io, pubClient, id, state);
   if (state.status === 'playing') {
     await nextTurn(io, pubClient, id, state);
   }
+}
+
+// L3: Settle the spectator-prediction tally for the just-resolved turn.
+// `outcome` is 'yes' (the player got it) or 'no' (they didn't). Emits a
+// one-shot `predictionResult` to everyone in the room with per-vote
+// accuracy + the totals so the client can show "X of Y called it."
+// Clears the predictions map so the next turn starts fresh — without
+// this, votes would carry across turns and pollute the next tally.
+function _settlePredictions(io, id, state, outcome) {
+  const preds = state.spectatorPredictions || {};
+  const entries = Object.entries(preds);
+  if (entries.length === 0) {
+    // No spectator votes this turn — nothing to settle. Skip the broadcast
+    // so we don't add chatter to a quiet room.
+    return;
+  }
+  let correct = 0;
+  // Each spectator's vote correctness — sent as a map keyed by socketId so
+  // each spectator can look up THEIR own outcome client-side and ignore
+  // everyone else's. The map is small (one entry per voting spectator)
+  // and not sensitive (a spectator already knows their own vote).
+  const perVoter = {};
+  for (const [socketId, vote] of entries) {
+    const isCorrect = vote === outcome;
+    if (isCorrect) correct++;
+    perVoter[socketId] = isCorrect;
+  }
+  io.to(id).emit('predictionResult', {
+    outcome,
+    correct,
+    total: entries.length,
+    perVoter,
+  });
+  // Clear so the next turn's tally starts at zero. The next state
+  // broadcast naturally reflects predictionTally: { yes: 0, no: 0 }.
+  state.spectatorPredictions = {};
+}
+
+// Bucket free-form elimination reasons into stable categories for telemetry.
+// New reason strings drift over time (copy edits, i18n); the category set
+// stays fixed so dashboards don't break.
+function _categorizeReason(reason) {
+  if (typeof reason !== 'string') return 'unknown';
+  const r = reason.toLowerCase();
+  if (r.includes('quit')) return 'quit';
+  if (r.includes('disconnect')) return 'disconnect';
+  if (r.includes('timed out') || r.includes("time's up")) return 'timeout';
+  if (r.includes('too many invalid title')) return 'too_many_typos';
+  if (r.includes('hardcore')) return 'hardcore_actor_reuse';
+  if (r.includes('already used')) return 'movie_already_used';
+  if (r.includes('api error') || r.includes('timeout')) return 'tmdb_error';
+  if (r.includes('invalid movie connection')) return 'no_shared_cast';
+  return 'other';
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +194,11 @@ async function nextTurn(io, pubClient, id, state) {
   // Guard: all players ended up dead — checkWinCondition should have caught this,
   // but don't arm a new timer on a dead player if it somehow slips through.
   if (!state.players[state.currentTurnIndex].isAlive) return;
+
+  // H1: Reset the per-turn "title not found" retry budget. The counter is
+  // scoped to a single player's turn — once the turn advances (whether via
+  // a successful play or an elimination), the next player starts fresh.
+  state.currentTurnRetries = 0;
 
   resetTimer(state);
 
@@ -177,6 +275,11 @@ function scheduleGameReset(io, pubClient, id) {
     try {
       const liveState = await redisUtils.getLobby(pubClient, id);
       if (liveState && liveState.status === 'finished') {
+        // M4: capture the just-finished chain length so the public lobby
+        // browser can advertise it on the next listing. Done BEFORE the
+        // reset so we don't accidentally read 0 from the freshly-cleared
+        // chain. Persists across the reset (it's metadata, not game state).
+        liveState.lastChainLength = (liveState.chain || []).length;
         liveState.status = 'waiting';
         liveState.players = liveState.players.filter(p => p.connected);
         promoteSpectators(liveState);
@@ -196,6 +299,13 @@ function resetTimer(state) {
   if (state.gameMode === 'speed') {
     // Speed mode: flat 15s every turn, no reduction logic.
     state.turnDurationMs = 15000;
+  } else if (state.gameMode === 'daily') {
+    // H2: Daily Challenge is async-style casual play. A flat 60s timer
+    // gives the player time to think without the shrinking-pressure
+    // mechanic that would punish anyone who hesitates. The timer still
+    // exists (so a tab-out doesn't leave the daily run hanging forever)
+    // but the cadence is intentionally relaxed.
+    state.turnDurationMs = 60000;
   } else {
     // Classic/team/solo: every 2 successful turns the time limit shrinks by
     // 5 seconds, floored at 10s. timerMultiplier increments each turn.
@@ -240,6 +350,21 @@ async function checkTeamWin(io, pubClient, id, state) {
     isTeamWin: true
   };
   io.to(id).emit('notification', { msg: `Team ${teamLabel} wins!`, kind: 'win' });
+  // H6: Telemetry — fired exactly once per game-end. teamSize covers
+  // imbalanced 1v2 / 2v1 setups that could happen on disconnects.
+  telemetry.track(pubClient, 'game_won', {
+    mode: state.gameMode,
+    chainLength: (state.chain || []).length,
+    isTeamWin: true,
+    teamSize: winningPlayers.length,
+  });
+  // H5: Per-player win bump for each winning teammate. Same fire-and-
+  // forget pattern as recordGamePlayed — statsSystem swallows errors.
+  Promise.all(
+    winningPlayers
+      .filter(p => p.stableId)
+      .map(p => statsSystem.recordGameWon(pubClient, p.stableId, 'team', (state.chain || []).length))
+  ).catch(() => {});
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
   scheduleGameReset(io, pubClient, id);
@@ -254,16 +379,77 @@ async function checkSoloWin(io, pubClient, id, state) {
   state.turnExpiresAt = null;
 
   const solo = state.players[0];
-  if (solo) {
+  const isDaily = state.gameMode === 'daily';
+
+  // H2: Daily runs do NOT increment the global wins counter or feed the
+  // global leaderboard — they're a separate scoring track tracked by
+  // dailySystem (per-day attempt records + per-day leaderboard). Mixing
+  // the two would let a daily streak inflate the all-time leaderboard
+  // and dilute the original "win an MP game" meaning of a global win.
+  if (solo && !isDaily) {
     solo.wins = (solo.wins || 0) + 1;
     await recordPlayerWin(pubClient, solo);
   }
+
+  // H2: For daily mode, the displayed "chain length" excludes the seed
+  // (the seed was supplied, not earned), so the winner.chainLength shown
+  // on the result card matches what the daily leaderboard records.
+  const earnedLength = isDaily
+    ? Math.max(0, state.chain.length - 1)
+    : state.chain.length;
+
+  // M5: Solo runs get bonus points from streak milestones and objective
+  // hits — see commitPlay. Daily skips bonuses (those would skew the
+  // daily leaderboard which scores by chain length, not points).
+  const bonusPoints = (!isDaily && state.gameMode === 'solo') ? (state.bonusPoints | 0) : 0;
+  const finalScore = earnedLength + bonusPoints;
+
   state.winner = {
     name: solo ? solo.name : 'Solo Player',
-    chainLength: state.chain.length,
+    chainLength: earnedLength,
+    bonusPoints,
     isSolo: true,
-    score: state.chain.length
+    isDaily,
+    puzzleNumber: state.dailyPuzzleNumber || null,
+    date: state.dailyDate || null,
+    score: finalScore,
+    objectiveHit: !!state.objectiveHit,
   };
+
+  // H2: Persist the daily attempt as 'done' and update the per-day
+  // leaderboard ZSET. Done before saveLobby/broadcastState so the client's
+  // very next request for daily state sees the finalized record.
+  if (isDaily) {
+    // Lazy-require to avoid an import cycle: lobbySystem requires gameLogic
+    // (for nextTurn), and gameLogic now needs to call back into lobbySystem
+    // for the daily-finalize hook. Top-level require here would create a
+    // circular dependency that resolves to {} on Node's first eval pass.
+    const lobbySystem = require('./systems/lobbySystem');
+    await lobbySystem.finalizeDailyOnGameEnd(pubClient, state);
+  }
+
+  // H6: Telemetry — solo "wins" are really survival completions; the
+  // chainLength field is the player's score and the most useful number to
+  // aggregate (avg/p50/p95 chain length tells us if Solo is too easy/hard).
+  telemetry.track(pubClient, 'game_won', {
+    mode: isDaily ? 'daily' : 'solo',
+    chainLength: earnedLength,
+    isSolo: true,
+    isDaily,
+  });
+  // H5: Per-player stats bump. Daily and solo both count toward
+  // gamesPlayed (already incremented at startGame) but only solo counts
+  // toward `wins` — daily uses its own scoring track per the H2 design
+  // decision in checkSoloWin above (see the `!isDaily` guard). For both,
+  // longestChain reflects the run's chain length.
+  if (solo && solo.stableId) {
+    statsSystem.recordGameWon(
+      pubClient,
+      solo.stableId,
+      isDaily ? 'daily' : 'solo',
+      earnedLength
+    ).catch(() => {});
+  }
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
   scheduleGameReset(io, pubClient, id);
@@ -282,6 +468,23 @@ async function checkClassicWin(io, pubClient, id, state) {
     await recordPlayerWin(pubClient, winner);
     state.winner = { name: winner.name, score: winner.score, id: winner.id };
     io.to(id).emit('notification', { msg: `${winner.name} wins!`, kind: 'win' });
+    // H6: Telemetry — classic & speed share this code path; carry through
+    // the actual mode so dashboards can distinguish them.
+    telemetry.track(pubClient, 'game_won', {
+      mode: state.gameMode || 'classic',
+      chainLength: (state.chain || []).length,
+      playerCount: state.players.length,
+      finalScore: winner.score,
+    });
+    // H5: Per-player stats bump for the winner.
+    if (winner.stableId) {
+      statsSystem.recordGameWon(
+        pubClient,
+        winner.stableId,
+        state.gameMode || 'classic',
+        (state.chain || []).length
+      ).catch(() => {});
+    }
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
     scheduleGameReset(io, pubClient, id);
@@ -300,7 +503,11 @@ async function checkClassicWin(io, pubClient, id, state) {
 
 async function checkWinCondition(io, pubClient, id, state) {
   if (state.gameMode === 'team')    return checkTeamWin(io, pubClient, id, state);
-  if (state.gameMode === 'solo')    return checkSoloWin(io, pubClient, id, state);
+  // H2: daily routes through the solo win path — both are single-player
+  // "did the player still survive?" checks. The solo handler special-
+  // cases gameMode === 'daily' to skip the global wins increment and to
+  // call into dailySystem.finalizeDailyAttempt.
+  if (state.gameMode === 'solo' || state.gameMode === 'daily') return checkSoloWin(io, pubClient, id, state);
   /* classic / speed */             return checkClassicWin(io, pubClient, id, state);
 }
 
@@ -337,7 +544,50 @@ async function startGame(io, pubClient, id, state) {
   state.usedMovies = [];
   state.timerMultiplier = 0;
   state.previousSharedActors = [];
+  // H1: Initialize the per-turn typo-retry counter. Without this, an old
+  // state object loaded from before this field existed would carry whatever
+  // stale value its serialized form had, biasing the very first turn.
+  state.currentTurnRetries = 0;
   state.players.forEach(p => { p.isAlive = true; p.score = 0; });
+
+  // M5: Solo-mode-only enrichment — pick an objective for the run and
+  // load the player's personal-best chain length so the UI can show it
+  // ("Beat your best of 12!"). Other modes don't get either field, which
+  // the client checks for before rendering. Daily skips this on purpose:
+  // it has its own implicit objective (the daily seed) and its own
+  // scoring track via dailySystem, so adding another objective layer
+  // would muddle the screen.
+  if (mode === 'solo') {
+    const obj = soloObjectivesSystem.pickObjective();
+    state.objective = soloObjectivesSystem.clientShape(obj);
+    state.objectiveHit = false;
+    state.bonusPoints = 0;
+    state.currentStreak = 0;
+    // Personal-best lookup. Best-effort — getStats swallows its own errors
+    // and returns a zero-shaped record on failure, so a Redis blip can't
+    // crash the game-start path.
+    const solo = state.players[0];
+    if (solo && solo.stableId) {
+      try {
+        const stats = await statsSystem.getStats(pubClient, solo.stableId);
+        state.personalBestChain = (stats && stats.byMode && stats.byMode.solo)
+          ? (stats.byMode.solo.longestChain | 0)
+          : 0;
+      } catch {
+        state.personalBestChain = 0;
+      }
+    } else {
+      state.personalBestChain = 0;
+    }
+  } else {
+    // Defensive: clear the solo-only fields when starting a non-solo
+    // game (host could reuse the same lobby across modes via restart).
+    state.objective = null;
+    state.objectiveHit = false;
+    state.bonusPoints = 0;
+    state.currentStreak = 0;
+    state.personalBestChain = 0;
+  }
 
   // Classic and speed start at a random index; team and solo always start at 0
   state.currentTurnIndex = 0;
@@ -347,6 +597,28 @@ async function startGame(io, pubClient, id, state) {
   state.isValidating = false;
 
   resetTimer(state);
+
+  // H6: Telemetry — fired exactly once per game, at the start. Captures the
+  // mode mix and player count distribution so we can answer "what modes do
+  // people actually play?" and "what's the typical lobby size?" without
+  // having to instrument every call site.
+  telemetry.track(pubClient, 'game_started', {
+    mode,
+    playerCount: state.players.length,
+    hardcoreMode: !!state.hardcoreMode,
+    allowTvShows: !!state.allowTvShows,
+  });
+
+  // H5: Per-player gamesPlayed bump. Fire-and-forget — wrapped in
+  // Promise.all so they overlap with each other but the broadcast below
+  // still happens promptly. statsSystem swallows its own errors so a
+  // failed write here can't crash the game-start path.
+  Promise.all(
+    state.players
+      .filter(p => p.stableId)
+      .map(p => statsSystem.recordGamePlayed(pubClient, p.stableId, mode))
+  ).catch(() => {});
+
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
 }
@@ -355,27 +627,69 @@ async function startGame(io, pubClient, id, state) {
 // CHAIN VALIDATION (pure — no I/O, exported for testing)
 // ---------------------------------------------------------------------------
 
+// H4: Each cast entry can be either a legacy bare string ("Tom Hanks") or
+// a current {id, name} object. Normalize both shapes into {id, name} so the
+// comparison logic below can prefer id-equality (correct across name
+// collisions and punctuation drift) and fall back to case-insensitive name
+// match only when one side is missing an id.
+//
+// Why support both shapes: in-flight rooms loaded from Redis at deploy time
+// may still have legacy string casts on chain entries, while a fresh
+// candidate fetched after deploy carries object casts. Without normalization
+// the very next play in such a room would crash on `.id` access.
+function _normalizeActor(a) {
+  return typeof a === 'string' ? { id: null, name: a } : a;
+}
+
+// True iff a and b refer to the same person. Prefer id-equality (precise);
+// fall back to lowercase name match only when at least one side has no id.
+function _sameActor(a, b) {
+  if (a.id != null && b.id != null) return a.id === b.id;
+  if (!a.name || !b.name) return false;
+  return a.name.toLowerCase() === b.name.toLowerCase();
+}
+
 function validateConnection(lastNodeCast, candidateCast, hardcoreMode, previousSharedActors) {
-  const sharedActors = candidateCast.filter(actor =>
-    lastNodeCast.some(lastActor => lastActor.toLowerCase() === actor.toLowerCase())
-  );
+  const last = (lastNodeCast || []).map(_normalizeActor);
+  const cand = (candidateCast || []).map(_normalizeActor);
+  const prev = (previousSharedActors || []).map(_normalizeActor);
+
+  const sharedActors = cand.filter(a => last.some(l => _sameActor(l, a)));
 
   if (sharedActors.length === 0) {
     return { valid: false, reason: "Invalid movie connection." };
   }
 
-  if (hardcoreMode && previousSharedActors.length > 0) {
-    // Hardcore mode: the connecting actor must be different from last turn's connector
-    const newSharedActors = sharedActors.filter(actor =>
-      !previousSharedActors.some(pActor => pActor.toLowerCase() === actor.toLowerCase())
-    );
+  if (hardcoreMode && prev.length > 0) {
+    // M1: Hardcore mode is CUMULATIVE — `previousSharedActors` carries every
+    // connector used in this chain so far (commitPlay maintains this), so
+    // the filter below excludes anyone who has ever connected. Pre-M1 the
+    // exclusion was just last turn's connector, which let players ping-pong
+    // the same pair of actors and made "Hardcore" a misnomer.
+    const newSharedActors = sharedActors.filter(a => !prev.some(p => _sameActor(p, a)));
     if (newSharedActors.length === 0) {
-      return { valid: false, reason: "Hardcore Mode: You cannot reuse the exact same connecting actor from the previous turn!" };
+      return { valid: false, reason: "Hardcore Mode: That actor has already connected somewhere in this chain — pick a different one." };
     }
-    return { valid: true, matchedActors: newSharedActors };
+    // Return BOTH shapes so callers don't have to choose:
+    //   matchedActors        — bare name strings, what the client renders
+    //                          (chain.matchedActors[0] feeds the share-card
+    //                          text and the connection label in the chain UI).
+    //   matchedActorObjects  — {id, name} entries, what the server stores in
+    //                          room.previousSharedActors so the NEXT turn's
+    //                          hardcore check can compare by id (precise across
+    //                          name collisions and punctuation drift).
+    return {
+      valid: true,
+      matchedActors: newSharedActors.map(a => a.name),
+      matchedActorObjects: newSharedActors,
+    };
   }
 
-  return { valid: true, matchedActors: sharedActors };
+  return {
+    valid: true,
+    matchedActors: sharedActors.map(a => a.name),
+    matchedActorObjects: sharedActors,
+  };
 }
 
 module.exports = {
@@ -389,4 +703,9 @@ module.exports = {
   validateConnection,
   clearTurnTimeout,
   promoteSpectators,
+  // L3: Exposed for matchSystem.commitPlay's success path. Internal
+  // detail otherwise — kept underscore-prefixed in the implementation
+  // to flag "module-internal helper" while the public name is the
+  // unprefixed alias for cross-module callers.
+  settlePredictions: _settlePredictions,
 };
