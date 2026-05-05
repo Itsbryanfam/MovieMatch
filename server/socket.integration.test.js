@@ -68,7 +68,7 @@ describe('Socket.io Integration', () => {
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
     redisUtils.acquireSubmitLock.mockResolvedValue(true);
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
-    redisUtils.recordWin.mockResolvedValue(undefined);
+    // recordWin mock removed — function was deleted in favor of recordPlayerWinAtomic.
     redisUtils.getLeaderboard.mockResolvedValue([]);
     // Reset pubClient mocks — including the new set() that joinLobby uses for NX create.
     mockPubClient.exists.mockResolvedValue(0);

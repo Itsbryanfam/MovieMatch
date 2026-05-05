@@ -1,5 +1,7 @@
 const gameLogic = require('./gameLogic');
-const { acquireSubmitLock, releaseSubmitLock, recordWin, getLeaderboard } = jest.requireActual('./redisUtils');
+// recordWin was removed (superseded by recordPlayerWinAtomic) — only its
+// surviving siblings are imported here.
+const { acquireSubmitLock, releaseSubmitLock, getLeaderboard } = jest.requireActual('./redisUtils');
 const { clampString } = require('./socketHandlers');
 const redisUtils = require('./redisUtils');
 
@@ -11,7 +13,6 @@ jest.mock('./redisUtils');
 // implementations; resetAllMocks does not.
 beforeEach(() => {
   redisUtils.incrementPlayerWins.mockResolvedValue(undefined);
-  redisUtils.recordWin.mockResolvedValue(undefined);
   redisUtils.recordPlayerWinAtomic.mockResolvedValue(undefined);
   redisUtils.saveLobby.mockResolvedValue(undefined);
 });
@@ -313,15 +314,9 @@ describe('promoteSpectators', () => {
 });
 
 describe('leaderboard functions', () => {
-  test('recordWin increments sorted set and stores player name', async () => {
-    const mockClient = {
-      zIncrBy: jest.fn().mockResolvedValue(3),
-      set: jest.fn().mockResolvedValue('OK'),
-    };
-    await recordWin(mockClient, 'p_abc', 'Alice');
-    expect(mockClient.zIncrBy).toHaveBeenCalledWith('leaderboard', 1, 'p_abc');
-    expect(mockClient.set).toHaveBeenCalledWith('playerName:p_abc', 'Alice', { EX: 2592000 });
-  });
+  // Note: a previous `recordWin` test was removed when that function was
+  // deleted in favor of `recordPlayerWinAtomic` (covered elsewhere). The
+  // atomic version is the only production-callable leaderboard write path.
 
   test('getLeaderboard returns top players with names', async () => {
     const mockClient = {

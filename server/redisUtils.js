@@ -225,16 +225,11 @@ async function releaseSubmitLock(pubClient, lobbyId, token) {
   });
 }
 
-async function recordWin(pubClient, stableId, name) {
-  await pubClient.zIncrBy('leaderboard', 1, stableId);
-  await pubClient.set(`playerName:${stableId}`, name, { EX: 2592000 }); // 30 days
-}
-
 // Atomic combined win-record: per-player count + leaderboard + name, all in
-// one multi() so they can't drift on partial failure. Replaces the previous
-// pattern of calling incrementPlayerWins and recordWin via Promise.all, which
-// could leave the lobby win count and leaderboard ZSET out of sync if either
-// individual write failed.
+// one multi() so they can't drift on partial failure. Replaces an earlier
+// non-atomic pattern (separate incrementPlayerWins + a now-removed recordWin
+// helper called via Promise.all) that could leave the lobby win count and
+// leaderboard ZSET out of sync if either individual write failed.
 async function recordPlayerWinAtomic(pubClient, stableId, name) {
   const ttlSec = 30 * 24 * 60 * 60; // 30 days — matches existing TTLs
   await pubClient.multi()
@@ -291,7 +286,6 @@ module.exports = {
   getOrFetchCredits,
   acquireSubmitLock,
   releaseSubmitLock,
-  recordWin,
   recordPlayerWinAtomic,
   getLeaderboard
 };

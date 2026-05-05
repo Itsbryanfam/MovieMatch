@@ -326,6 +326,26 @@ export function initSocket() {
       // visible jitter and pointless work.
       const turnChanged = state.currentTurnIndex !== prevState?.currentTurnIndex
         || state.status !== prevState?.status;
+
+      // L1: Clear the "X is typing…" indicator when the turn moves on or the
+      // active player has disconnected. The peerTyping handler has a 3s
+      // auto-clear, but if the active player vanishes mid-typing no event
+      // arrives to fire it, so the indicator lingers and falsely suggests
+      // they're still active. Backstop here using the freshly-received state:
+      // either trigger covers a case the auto-clear misses.
+      const activePlayer = state.players?.[state.currentTurnIndex];
+      if (turnChanged || (activePlayer && activePlayer.connected === false)) {
+        const typingEl = document.getElementById('peer-typing-indicator');
+        if (typingEl) typingEl.classList.remove('visible');
+        // typingClearTimeout is a closure variable declared further down in
+        // initSocket(); accessing it here is safe because the handler body
+        // doesn't execute until after initSocket() has fully run top-to-bottom.
+        if (typingClearTimeout) {
+          clearTimeout(typingClearTimeout);
+          typingClearTimeout = null;
+        }
+      }
+
       if (turnChanged) {
         clearTurnTimer();
         // 250ms cadence (4× per second) lets the bar animate smoothly using
@@ -418,7 +438,13 @@ export function initSocket() {
         // leaderboard came back, even if it's empty.
         let elapsed = 0;
         const pollMs = 100;
-        const maxMs = 2000;
+        // M1: 5s cap (was 2s) covers slow mobile/3G round-trips where the
+        // leaderboard response can exceed 2s, which previously caused the
+        // modal to render with an empty leaderboard. The poll exits the
+        // moment the response arrives (see `lb && lb.date === date` below),
+        // so faster connections still feel instant; the only cost is that
+        // a totally unresponsive server delays the empty-fallback by 3s.
+        const maxMs = 5000;
         const tryRender = () => {
           const lb = socket._lastDailyLeaderboard;
           if (lb && lb.date === date) {
