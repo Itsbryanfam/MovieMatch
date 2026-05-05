@@ -207,6 +207,24 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       socket.emit('dailyLeaderboard', { date: safeDate, puzzleNumber, leaderboard });
     });
 
+    // -----------------------------------------------------------------------
+    // PERSONAL STATS (H5) — request the caller's own lifetime stats.
+    // Auth model: stableId IS the auth — it's a 16-byte random value the
+    // client generated on first visit and persisted to localStorage. Only
+    // the owner has it, and we don't gate access by socket.id (which would
+    // miss the use case of viewing stats from the hero screen pre-lobby).
+    // The ratelimit is shared with dailyLeaderboard since both are simple
+    // reads gated by the same kind of player intent.
+    // -----------------------------------------------------------------------
+
+    on('requestMyStats', async (stableId) => {
+      if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
+      if (typeof stableId !== 'string' || stableId.length === 0 || stableId.length > 64) return;
+      const statsSystem = require('./systems/statsSystem');
+      const stats = await statsSystem.getStats(pubClient, stableId);
+      socket.emit('myStats', stats);
+    });
+
     on('requestPublicLobbies', async () => {
       await lobbySystem.requestPublicLobbies(ctx, socket);
     });

@@ -9,6 +9,7 @@
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
 const telemetry = require('../telemetry');
+const statsSystem = require('./statsSystem');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
@@ -267,6 +268,19 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
         usedAutocomplete: !!tmdbId,
         mediaType: result.match.mediaType,
       });
+
+      // H5: Per-player play count + favoriteConnector tracking. We pass
+      // the matched actor names from the validation result so the stats
+      // hash gets the connector for THIS turn — daily/solo first-move
+      // plays have an empty matchedActors array (no connector to learn
+      // from), which the stats helper already tolerates.
+      if (player.stableId) {
+        statsSystem.recordPlay(
+          pubClient,
+          player.stableId,
+          result.matchedActors || []
+        ).catch(() => {});
+      }
 
       room.isValidating = false;
       await gameLogic.nextTurn(io, pubClient, lobbyId, room);

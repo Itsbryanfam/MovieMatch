@@ -1,5 +1,6 @@
 const redisUtils = require('./redisUtils');
 const telemetry = require('./telemetry');
+const statsSystem = require('./systems/statsSystem');
 const logger = require('pino')();
 
 // In-memory map for active turn timeouts.
@@ -286,6 +287,13 @@ async function checkTeamWin(io, pubClient, id, state) {
     isTeamWin: true,
     teamSize: winningPlayers.length,
   });
+  // H5: Per-player win bump for each winning teammate. Same fire-and-
+  // forget pattern as recordGamePlayed — statsSystem swallows errors.
+  Promise.all(
+    winningPlayers
+      .filter(p => p.stableId)
+      .map(p => statsSystem.recordGameWon(pubClient, p.stableId, 'team', (state.chain || []).length))
+  ).catch(() => {});
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
   scheduleGameReset(io, pubClient, id);
@@ -350,6 +358,19 @@ async function checkSoloWin(io, pubClient, id, state) {
     isSolo: true,
     isDaily,
   });
+  // H5: Per-player stats bump. Daily and solo both count toward
+  // gamesPlayed (already incremented at startGame) but only solo counts
+  // toward `wins` — daily uses its own scoring track per the H2 design
+  // decision in checkSoloWin above (see the `!isDaily` guard). For both,
+  // longestChain reflects the run's chain length.
+  if (solo && solo.stableId) {
+    statsSystem.recordGameWon(
+      pubClient,
+      solo.stableId,
+      isDaily ? 'daily' : 'solo',
+      earnedLength
+    ).catch(() => {});
+  }
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
   scheduleGameReset(io, pubClient, id);
@@ -376,6 +397,15 @@ async function checkClassicWin(io, pubClient, id, state) {
       playerCount: state.players.length,
       finalScore: winner.score,
     });
+    // H5: Per-player stats bump for the winner.
+    if (winner.stableId) {
+      statsSystem.recordGameWon(
+        pubClient,
+        winner.stableId,
+        state.gameMode || 'classic',
+        (state.chain || []).length
+      ).catch(() => {});
+    }
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
     scheduleGameReset(io, pubClient, id);
@@ -460,6 +490,16 @@ async function startGame(io, pubClient, id, state) {
     hardcoreMode: !!state.hardcoreMode,
     allowTvShows: !!state.allowTvShows,
   });
+
+  // H5: Per-player gamesPlayed bump. Fire-and-forget — wrapped in
+  // Promise.all so they overlap with each other but the broadcast below
+  // still happens promptly. statsSystem swallows its own errors so a
+  // failed write here can't crash the game-start path.
+  Promise.all(
+    state.players
+      .filter(p => p.stableId)
+      .map(p => statsSystem.recordGamePlayed(pubClient, p.stableId, mode))
+  ).catch(() => {});
 
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);

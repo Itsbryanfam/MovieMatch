@@ -613,6 +613,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   leaderboardBtn?.addEventListener('click', loadLeaderboard);
 
+  // =========================================================================
+  // MY STATS BUTTON (H5)
+  // =========================================================================
+  // Opens the modal optimistically (so the player sees something immediately)
+  // and asks the server for their stats. The 'myStats' socket handler in
+  // socketClient.js calls renderMyStats() with the response.
+  const myStatsBtn = document.getElementById('my-stats-btn');
+  myStatsBtn?.addEventListener('click', () => {
+    const sock = getSocket();
+    if (!sock) {
+      showNotification("Stats aren't available right now — try again in a sec.");
+      return;
+    }
+    // Show the modal immediately with a loading state — the server response
+    // will repaint the body within a few hundred ms. Without this, a slow
+    // network would leave the user wondering whether the click registered.
+    const modal = document.getElementById('my-stats-modal');
+    const sub = document.getElementById('my-stats-subtitle');
+    const body = document.getElementById('my-stats-body');
+    if (modal) modal.classList.remove('hidden');
+    if (sub) sub.textContent = 'Loading…';
+    if (body) body.textContent = '';
+    sock.emit('requestMyStats', getStableId());
+  });
+
   document.body.addEventListener('click', (e) => {
     if (e.target.classList.contains('modal-overlay')) {
       e.target.classList.add('hidden');

@@ -2579,6 +2579,199 @@ input:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+/* =============================================
+   H5: MY STATS MODAL
+   =============================================
+   Hero grid: 4 stat cards (games, wins, longest chain, total plays).
+   Tablet/desktop: 4-up; phones: 2x2. Cards are flat numbers so the player's
+   eye lands on the count without prose getting in the way. */
+.stats-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 540px) {
+  .stats-hero-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.stats-hero-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+}
+.stats-hero-num {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.stats-hero-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.stats-winrate {
+  text-align: center;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.9rem;
+  color: var(--accent-primary, #6366f1);
+  font-weight: 600;
+}
+
+.stats-section-header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 1rem 0 0.5rem;
+}
+
+/* By-mode table — 4 columns (mode label + 3 numeric stats). The label
+   column flexes; numeric columns are tabular-nums so digits stay aligned. */
+.stats-mode-table {
+  display: grid;
+  grid-template-columns: 1.4fr repeat(3, 1fr);
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.stats-mode-th {
+  padding: 0.5rem 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-align: right;
+}
+.stats-mode-th:first-child { text-align: left; }
+.stats-mode-td {
+  padding: 0.5rem 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.9rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+}
+.stats-mode-td--label { text-align: left; font-weight: 600; }
+
+.stats-favorite {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.10), rgba(217, 119, 6, 0.04));
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+.stats-favorite-label { color: var(--text-muted); }
+.stats-favorite-count { color: var(--text-muted); margin-left: 0.25rem; }
+
+/* =============================================
+   M2: WIN CONFETTI
+   =============================================
+   ~40 absolutely-positioned pieces falling from the top of the viewport.
+   Per-piece variation comes from CSS custom properties set by JS so a
+   single keyframe definition covers all the colors / positions / rotations.
+   Pointer-events:none so confetti never blocks clicks on underlying UI. */
+.confetti-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1100;
+}
+.confetti-piece {
+  position: absolute;
+  top: -20px;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  /* --sway and --rotate are set per-piece via inline style. Defaults
+     here so a piece without them still falls cleanly rather than NaN-
+     translating into the void. */
+  --sway: 0px;
+  --rotate: 360deg;
+  animation: confetti-fall linear forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes confetti-fall {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translate3d(var(--sway), 110vh, 0) rotate(var(--rotate)); opacity: 0; }
+}
+
+/* Reduced motion respect — global media query already zeroes the
+   animation-duration, but we belt-and-suspenders by also disabling the
+   transform so the pieces don't briefly appear at the top before being
+   removed. */
+@media (prefers-reduced-motion: reduce) {
+  .confetti-container { display: none; }
+}
+
+/* =============================================
+   L2: ANIMATED CHAIN REPLAY (post-game)
+   =============================================
+   "Replay your chain" button + container that fills with chain entries
+   one at a time via JS-triggered appendChild. Each .replay-entry uses a
+   short fade-in keyframe so new entries appear gracefully rather than
+   popping into the DOM. The keyframe's duration is short enough that
+   reduced-motion users only see a brief opacity change. */
+.daily-replay-wrap {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.daily-replay-btn {
+  align-self: center;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.9rem;
+}
+.daily-replay-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.daily-replay-container {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.replay-entry {
+  /* Inherit the existing chain-item layout but tighten padding and add
+     the entry animation. */
+  padding: 0.5rem 0.75rem;
+  animation: replay-entry-in 320ms ease-out both;
+}
+@keyframes replay-entry-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.replay-connector {
+  font-size: 0.8rem;
+  color: var(--accent-primary, #6366f1);
+  font-weight: 600;
+  margin-top: 0.2rem;
+}
+.replay-skipped-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+  padding-bottom: 0.25rem;
+}
+
 /* ---- Elimination notification tint ---- */
 #notification-overlay.notification--elimination {
   background: rgba(50, 5, 5, 0.9);

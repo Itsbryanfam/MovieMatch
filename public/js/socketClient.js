@@ -13,14 +13,14 @@ import {
   showNotification, renderAutocompleteResults, closeMobileAc,
   openShareModal, showGameOverBanner, resetMobileTab,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
-  showGhostAttempt, showToast, renderDailyResult,
+  showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
   chatMessages
 } from './ui.js';
 
-import { prepareAudio, playSuccess, playFail, playTick, vibrate, escapeHtml, getStableId } from './utils.js';
+import { prepareAudio, playSuccess, playFail, playTick, playSfx, vibrate, escapeHtml, getStableId } from './utils.js';
 
 import {
   getSocket, setSocket, getCurrentLobbyId, getMyPlayerId, getGameState,
@@ -337,6 +337,11 @@ export function initSocket() {
         // recorded entry shows up. Render the modal as soon as we get it.
         const date = state.winner.date;
         socket.emit('requestDailyLeaderboard', date);
+        // L2: Capture the chain at the moment of finishing so the daily-
+        // result modal can replay it. Take a snapshot rather than holding
+        // a live reference because subsequent stateUpdates (e.g. the 7s
+        // game-reset transition to 'waiting') would clear it.
+        const finishedChain = Array.isArray(state.chain) ? state.chain.slice() : [];
         // The leaderboard response handler stores on socket._lastDailyLeaderboard;
         // poll briefly for it (server is local, expected within a few hundred ms).
         // Caps at ~2s so a slow network still surfaces the modal with whatever
@@ -354,6 +359,7 @@ export function initSocket() {
               date,
               chainLength: state.winner.chainLength || 0,
               leaderboard: lb.leaderboard || [],
+              chain: finishedChain, // L2: enables the "▶ Replay" button in the modal
             });
             return;
           }
@@ -365,6 +371,7 @@ export function initSocket() {
               date,
               chainLength: state.winner.chainLength || 0,
               leaderboard: [],
+              chain: finishedChain,
             });
             return;
           }
@@ -413,11 +420,15 @@ export function initSocket() {
       // Win takes precedence over any in-flight elimination flash from the
       // same losing turn — clean those up before the celebration plays.
       document.querySelectorAll('.elimination-flash').forEach(el => el.remove());
-      playSuccess();
-      setTimeout(playSuccess, 300);
-      setTimeout(playSuccess, 600);
+      // M2: Single melodic 3-note arpeggio replaces the old three-success-
+      // ding pattern. Sounds intentional rather than a stuck button.
+      playSfx('win');
       vibrate([60, 80, 60, 80, 60]); // celebration pattern on win
       showWinFlash();
+      // M2: Confetti burst. CSS-driven via showConfetti so it auto-cleans
+      // up after the animation; respects prefers-reduced-motion via the
+      // existing global media query (animation-duration→0 disables it).
+      showConfetti();
     }
     // kind === 'info' (or unknown): no effects, just the text overlay.
   });
@@ -471,6 +482,16 @@ export function initSocket() {
     // when the post-game flow fires below. Stored on a property of the
     // function so we don't have to expose another state-module field.
     socket._lastDailyLeaderboard = payload;
+  });
+
+  // -----------------------------------------------------------------------
+  // PERSONAL STATS (H5) — response to requestMyStats. Server returns a
+  // fully-shaped payload (zeros for unset fields) so the client can render
+  // unconditionally without null-checking every nested field.
+  // -----------------------------------------------------------------------
+
+  socket.on('myStats', (stats) => {
+    renderMyStats(stats);
   });
 
   // -----------------------------------------------------------------------

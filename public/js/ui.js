@@ -1,5 +1,5 @@
 // ====================== UI.JS ======================
-import { escapeHtml, playSuccess, playFail, playTick, prepareAudio } from './utils.js';
+import { escapeHtml, playSuccess, playFail, playTick, playSfx, prepareAudio } from './utils.js';
 import { getSocket, getCurrentLobbyId } from './state.js';
 
 export const MODE_DESCRIPTIONS = {
@@ -597,6 +597,56 @@ export function showWinFlash() {
   setTimeout(() => el.remove(), 2300);
 }
 
+// M2: Confetti burst on win. Pure DOM + CSS — no library, no canvas. ~40
+// pieces with randomized colors, horizontal start positions, fall durations,
+// and rotation rates. Each piece is positioned absolutely at the top, falls
+// to the bottom of the viewport, and self-removes when its animation ends.
+//
+// Performance: 40 elements with one CSS animation each is well under the
+// repaint budget on any device made in the last decade. Skips work entirely
+// when prefers-reduced-motion is set — the global CSS rule would zero out
+// the animation duration, but creating + removing 40 elements is still
+// pointless under reduced motion, so we bail at the JS layer.
+export function showConfetti() {
+  // Match the CSS reduced-motion gate at the JS level so we don't even
+  // create the elements when motion is suppressed.
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const colors = ['#fbbf24', '#f43f5e', '#34d399', '#60a5fa', '#a78bfa', '#fb923c'];
+  const container = document.createElement('div');
+  container.className = 'confetti-container';
+  document.body.appendChild(container);
+
+  const PIECE_COUNT = 40;
+  for (let i = 0; i < PIECE_COUNT; i++) {
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    // Randomize color, horizontal position, fall duration, sway, rotation.
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const left = Math.random() * 100;            // 0–100% of viewport width
+    const duration = 1.8 + Math.random() * 1.4;  // 1.8–3.2s fall
+    const delay = Math.random() * 0.4;           // 0–400ms stagger
+    const sway = (Math.random() - 0.5) * 80;     // ±40px horizontal drift
+    const rotate = Math.random() * 720 - 360;    // ±1 full revolution
+    piece.style.background = color;
+    piece.style.left = left + 'vw';
+    piece.style.animationDuration = duration + 's';
+    piece.style.animationDelay = delay + 's';
+    // Pass per-piece values to the CSS keyframes via custom properties so
+    // a single keyframe definition can cover all variations (otherwise
+    // we'd need to inject inline keyframes per piece, which is heavier).
+    piece.style.setProperty('--sway', sway + 'px');
+    piece.style.setProperty('--rotate', rotate + 'deg');
+    container.appendChild(piece);
+  }
+
+  // Auto-remove the container after the longest piece finishes (max 3.2s
+  // duration + 0.4s delay = 3.6s) plus a small grace window. Keeps the DOM
+  // clean and prevents stacking confetti containers if a player wins
+  // multiple back-to-back games.
+  setTimeout(() => container.remove(), 4000);
+}
+
 // ---------------------------------------------------------------------------
 // GHOST ATTEMPT — transient card showing a player's failed submission so
 // other players can see what was tried. Auto-clears after 8s, replaced if
@@ -971,6 +1021,266 @@ export function selectChainEntries(chain) {
 }
 
 // =========================================================================
+// ANIMATED CHAIN REPLAY (L2)
+// =========================================================================
+// Re-renders a chain one entry at a time into `container`, with a sound
+// beat on each new entry. Self-contained — doesn't depend on the global
+// gameState or live render path. Reused by the daily-result modal "▶
+// Replay" button (and a candidate for the post-game share modal in a
+// future iteration).
+//
+// Long chains are capped at MAX_REPLAY_ENTRIES so a 30-link daily run
+// doesn't take 21 seconds to replay; entries beyond the cap are dropped
+// from the visible animation but a "+N more" footer flags the omission.
+
+const MAX_REPLAY_ENTRIES = 14;
+const REPLAY_STEP_MS = 600;
+
+export function playChainReplay(container, chain, options = {}) {
+  if (!container || !Array.isArray(chain) || chain.length === 0) return;
+  // Reduced motion: short-circuit to a static render. Animating one beat
+  // per entry over several seconds is exactly the kind of long decorative
+  // sequence reduced-motion users want suppressed.
+  const reduced = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const stepMs = options.stepMs || REPLAY_STEP_MS;
+  const maxEntries = options.maxEntries || MAX_REPLAY_ENTRIES;
+  const onComplete = typeof options.onComplete === 'function' ? options.onComplete : null;
+
+  // Take the most recent N entries — players care more about the moves
+  // they just made than the ones at the start of a long chain.
+  const tail = chain.slice(-maxEntries);
+  const skipped = chain.length - tail.length;
+
+  container.textContent = '';
+
+  if (skipped > 0) {
+    const note = document.createElement('div');
+    note.className = 'replay-skipped-note';
+    note.textContent = `+${skipped} earlier connection${skipped === 1 ? '' : 's'}…`;
+    container.appendChild(note);
+  }
+
+  // Reduced-motion: render everything immediately, no per-beat sound.
+  if (reduced) {
+    tail.forEach((item, i) => container.appendChild(_buildReplayEntry(item, i, tail)));
+    if (onComplete) onComplete();
+    return;
+  }
+
+  let i = 0;
+  const tick = () => {
+    if (i >= tail.length) {
+      if (onComplete) onComplete();
+      return;
+    }
+    container.appendChild(_buildReplayEntry(tail[i], i, tail));
+    // Each beat: short success ding. Skip on the very first entry so the
+    // replay starts visually before audio kicks in (less jarring).
+    if (i > 0) playSfx('success');
+    i++;
+    setTimeout(tick, stepMs);
+  };
+  // Tiny initial delay so the user has time to register the modal opening
+  // before the first entry pops in.
+  setTimeout(tick, 200);
+}
+
+// Build a single replay-entry DOM node. Uses the same shape as the live
+// chain renderer (poster + title + cast) but with a `.replay-entry` class
+// so CSS can give it a fade-in animation and a slightly tighter layout.
+function _buildReplayEntry(item, index, allItems) {
+  const div = document.createElement('div');
+  div.className = 'chain-item replay-entry';
+  if (index > 0) div.classList.add('shared-highlight');
+
+  // Poster
+  if (item.movie && item.movie.poster && item.movie.poster.startsWith('https://image.tmdb.org/')) {
+    const img = document.createElement('img');
+    img.src = item.movie.poster;
+    img.alt = 'Poster';
+    img.className = 'chain-poster';
+    div.appendChild(img);
+  } else {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'chain-poster placeholder';
+    div.appendChild(placeholder);
+  }
+
+  const content = document.createElement('div');
+  content.className = 'chain-content';
+
+  // Player or seed label
+  const playerNameDiv = document.createElement('div');
+  playerNameDiv.className = 'player-name';
+  playerNameDiv.textContent = item.playerName || 'Player';
+  content.appendChild(playerNameDiv);
+
+  // Title + year
+  const titleDiv = document.createElement('div');
+  titleDiv.className = 'movie-title';
+  titleDiv.appendChild(document.createTextNode((item.movie?.title || 'Unknown') + ' '));
+  const yearSpan = document.createElement('span');
+  yearSpan.className = 'year';
+  yearSpan.textContent = '(' + (item.movie?.year || '?') + ')';
+  titleDiv.appendChild(yearSpan);
+  content.appendChild(titleDiv);
+
+  // Connecting actor — for entries past index 0, surface the matched
+  // actor as a single line so the replay shows the connection logic
+  // beat by beat rather than the player having to scan two cast lists.
+  if (index > 0 && Array.isArray(item.matchedActors) && item.matchedActors.length > 0) {
+    const conn = document.createElement('div');
+    conn.className = 'replay-connector';
+    conn.textContent = '↔ via ' + item.matchedActors[0];
+    content.appendChild(conn);
+  }
+
+  div.appendChild(content);
+  return div;
+}
+
+// =========================================================================
+// MY STATS MODAL (H5)
+// =========================================================================
+// Renders the player's lifetime stats into the #my-stats-modal body.
+// Pure function of the stats payload — no DOM ownership beyond the body
+// element it's pointed at. All text is inserted via DOM APIs (textContent
+// / createElement) so a future stableId-tied display name with crafted
+// characters can't get HTML-injected into the page.
+
+const MODE_LABELS = {
+  classic: '⚔️ Classic',
+  team: '🤝 Team',
+  solo: '👤 Solo',
+  speed: '⚡ Speed',
+  daily: '🗓️ Daily',
+};
+
+export function renderMyStats(stats) {
+  const modal = document.getElementById('my-stats-modal');
+  const body = document.getElementById('my-stats-body');
+  const sub = document.getElementById('my-stats-subtitle');
+  if (!modal || !body || !sub) return;
+
+  body.textContent = '';
+  const isEmpty = !stats || stats.gamesPlayed === 0;
+  sub.textContent = isEmpty
+    ? 'Play a few games to start tracking your numbers.'
+    : 'Lifetime — last 90 days';
+
+  // Empty-state — no plays yet. Shorter, encouraging copy instead of a
+  // sea of zeroes.
+  if (isEmpty) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-hint';
+    empty.style.cssText = 'text-align:center; padding:2rem; color:var(--text-muted); font-style:italic;';
+    empty.textContent = "No stats yet — your first game will start your record.";
+    body.appendChild(empty);
+    modal.classList.remove('hidden');
+    return;
+  }
+
+  // Hero numbers row: gamesPlayed, wins, longestChain, totalPlays.
+  // Compact 4-up grid that collapses to 2x2 on phones via CSS.
+  const heroGrid = document.createElement('div');
+  heroGrid.className = 'stats-hero-grid';
+  const heroEntries = [
+    { label: 'Games', value: stats.gamesPlayed },
+    { label: 'Wins',  value: stats.wins },
+    { label: 'Longest chain', value: stats.longestChain },
+    { label: 'Plays', value: stats.totalPlays },
+  ];
+  heroEntries.forEach(e => {
+    const card = document.createElement('div');
+    card.className = 'stats-hero-card';
+    const num = document.createElement('div');
+    num.className = 'stats-hero-num';
+    num.textContent = String(e.value | 0);
+    const lbl = document.createElement('div');
+    lbl.className = 'stats-hero-label';
+    lbl.textContent = e.label;
+    card.appendChild(num);
+    card.appendChild(lbl);
+    heroGrid.appendChild(card);
+  });
+  body.appendChild(heroGrid);
+
+  // Win-rate readout (just below the hero grid). Shown only when the
+  // player has played at least one game so we don't render "NaN%".
+  if (stats.gamesPlayed > 0) {
+    const winrate = Math.round((stats.wins / stats.gamesPlayed) * 100);
+    const wr = document.createElement('div');
+    wr.className = 'stats-winrate';
+    wr.textContent = `Win rate: ${winrate}%`;
+    body.appendChild(wr);
+  }
+
+  // By-mode breakdown — only show modes the player has actually touched.
+  // Shows played / won / longest per mode. Modes are rendered in the
+  // canonical order (classic, team, solo, speed, daily) regardless of
+  // which the player has touched, so the layout is predictable.
+  const modesPlayed = Object.entries(stats.byMode || {})
+    .filter(([, v]) => (v.played | 0) > 0);
+  if (modesPlayed.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'stats-section-header';
+    header.textContent = 'By mode';
+    body.appendChild(header);
+
+    const table = document.createElement('div');
+    table.className = 'stats-mode-table';
+    // Column headers
+    ['Mode', 'Played', 'Won', 'Longest'].forEach(t => {
+      const h = document.createElement('div');
+      h.className = 'stats-mode-th';
+      h.textContent = t;
+      table.appendChild(h);
+    });
+    const order = ['classic', 'team', 'solo', 'speed', 'daily'];
+    order.forEach(mode => {
+      const v = stats.byMode[mode];
+      if (!v || (v.played | 0) === 0) return;
+      const cells = [
+        MODE_LABELS[mode] || mode,
+        String(v.played | 0),
+        String(v.won | 0),
+        String(v.longestChain | 0),
+      ];
+      cells.forEach((text, i) => {
+        const c = document.createElement('div');
+        c.className = 'stats-mode-td' + (i === 0 ? ' stats-mode-td--label' : '');
+        c.textContent = text;
+        table.appendChild(c);
+      });
+    });
+    body.appendChild(table);
+  }
+
+  // Favorite connector callout — only shown when we have one. Most fun
+  // single-line in the modal because it's specific to the player's history.
+  if (stats.favoriteConnector && stats.favoriteConnector.name) {
+    const fav = document.createElement('div');
+    fav.className = 'stats-favorite';
+    const tag = document.createElement('span');
+    tag.className = 'stats-favorite-label';
+    tag.textContent = '⭐ Most-used connector: ';
+    const name = document.createElement('strong');
+    name.textContent = stats.favoriteConnector.name;
+    const count = document.createElement('span');
+    count.className = 'stats-favorite-count';
+    count.textContent = ` (${stats.favoriteConnector.count | 0}×)`;
+    fav.appendChild(tag);
+    fav.appendChild(name);
+    fav.appendChild(count);
+    body.appendChild(fav);
+  }
+
+  modal.classList.remove('hidden');
+}
+
+// =========================================================================
 // DAILY CHALLENGE RESULT MODAL (H2)
 // =========================================================================
 // Single render path used by both the "you already played today" view and
@@ -1017,6 +1327,40 @@ export function renderDailyResult(data) {
   scoreCard.appendChild(scoreNum);
   scoreCard.appendChild(scoreLabel);
   bodyEl.appendChild(scoreCard);
+
+  // L2: Replay-chain panel + button. Only shown when we have the chain
+  // (post-game flow has it via the cached state; "already played today"
+  // path doesn't and skips this section). Button is rendered inside the
+  // body so it sits between the score and the leaderboard — players see
+  // their result first, can replay it, then see how they ranked.
+  if (Array.isArray(data.chain) && data.chain.length > 0) {
+    const replayWrap = document.createElement('div');
+    replayWrap.className = 'daily-replay-wrap';
+
+    const replayBtn = document.createElement('button');
+    replayBtn.type = 'button';
+    replayBtn.className = 'btn-secondary daily-replay-btn';
+    replayBtn.textContent = '▶ Replay your chain';
+
+    const replayContainer = document.createElement('div');
+    replayContainer.className = 'daily-replay-container';
+
+    replayBtn.addEventListener('click', () => {
+      // Disable while playing to prevent accidental restarts mid-replay.
+      replayBtn.disabled = true;
+      replayBtn.textContent = 'Replaying…';
+      playChainReplay(replayContainer, data.chain, {
+        onComplete: () => {
+          replayBtn.disabled = false;
+          replayBtn.textContent = '▶ Replay again';
+        },
+      });
+    });
+
+    replayWrap.appendChild(replayBtn);
+    replayWrap.appendChild(replayContainer);
+    bodyEl.appendChild(replayWrap);
+  }
 
   // Leaderboard. Empty array → "Be the first!" hint.
   const lbHeader = document.createElement('div');
