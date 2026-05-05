@@ -5,13 +5,23 @@
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-focus: rgba(255, 255, 255, 0.2);
   --text-main: #f8fafc;
-  --text-muted: #94a3b8;
+  /* Bumped from #94a3b8 -> #a8b2c4 for better readability at small sizes
+     (mode-chip names, hint text). Subtle but lifts contrast above WCAG AA
+     against the dark base. */
+  --text-muted: #a8b2c4;
   --text-inverse: #0f172a;
-  
+
   --accent-primary: #818cf8;
   --accent-primary-hover: #6366f1;
   --accent-glow: rgba(129, 140, 248, 0.15);
-  
+
+  /* Warm accent (Daily Challenge button, future warm-tinted UI). Tokenized
+     so the alternate-track CTA doesn't have hardcoded hex literals
+     scattered through the file. */
+  --accent-warm: #f59e0b;
+  --accent-warm-hover: #d97706;
+  --accent-warm-glow: rgba(245, 158, 11, 0.35);
+
   --status-success: #10b981;
   --status-warning: #f59e0b;
   --status-danger: #ef4444;
@@ -786,6 +796,11 @@ input:disabled {
 }
 .public-lobby-card:hover {
   border-color: rgba(255, 255, 255, 0.2);
+  /* Lobby cards are a destination players browse — they earn the same
+     hover personality as mode chips: subtle bg lift + shadow depth, not
+     just a 1px translate. */
+  background: var(--bg-elevated);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   transform: translateY(-1px);
 }
 .public-lobby-info {
@@ -1159,10 +1174,13 @@ input:disabled {
 
 /* M7: quit-game button. Subtle muted background by default — destructive
    actions shouldn't visually compete with primary affordances — but the
-   hover state turns warm so a deliberate click feels intentional. */
+   hover state turns warm so a deliberate click feels intentional.
+   Idle border tint signals "destructive" without being loud, so the
+   button doesn't read as accidentally-disabled at a glance. */
 .btn-icon.quit-btn {
   background: linear-gradient(135deg, #4b3a3a, #3a2828);
   color: #ffd9d2;
+  border: 1px solid rgba(248, 113, 113, 0.3);
 }
 .btn-icon.quit-btn:hover:not(:disabled) {
   background: linear-gradient(135deg, #b54a3b, #8a2b1f);
@@ -1218,6 +1236,11 @@ input:disabled {
 
 .autocomplete-item:hover {
   background: rgba(255, 255, 255, 0.1);
+  /* Inline border-accent on the focused suggestion — standard pattern that
+     telegraphs which item the click will land on. Padding compensates so
+     the row doesn't shift horizontally on hover. */
+  border-left: 3px solid var(--accent-primary);
+  padding-left: calc(0.6rem - 3px);
 }
 
 .autocomplete-item span.year {
@@ -2253,6 +2276,15 @@ input:disabled {
   font-weight: 600;
   font-size: 0.9rem;
   box-shadow: var(--shadow-sm);
+  /* Slide down on appear instead of snapping in — feels less alarming for
+     transient disconnects. The prefers-reduced-motion block at the bottom
+     of the file auto-suppresses this for users who opted out. */
+  animation: slideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
 }
 
 /* Layout helpers for lobby panels */
@@ -2528,13 +2560,14 @@ input:disabled {
    from the primary indigo "Play Now" — the player's eye should clearly
    parse "two different tracks" rather than "two paths to the same thing." */
 .hero-daily-btn {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  /* Warm accent flows through the design tokens added at :root. */
+  background: linear-gradient(135deg, var(--accent-warm), var(--accent-warm-hover));
   color: #fff;
   border: none;
 }
 .hero-daily-btn:hover {
-  background: linear-gradient(135deg, #d97706, #b45309);
-  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+  background: linear-gradient(135deg, var(--accent-warm-hover), #b45309);
+  box-shadow: 0 4px 14px var(--accent-warm-glow);
 }
 
 /* Result modal — score readout (big number, small label) */
@@ -3073,10 +3106,16 @@ input:disabled {
   border-radius: 999px;
   font-size: 0.85rem;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  /* Added transform to the transition so the voted-state scale-up animates
+     instead of snapping. Committing a vote should feel physical. */
+  transition: background 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
 }
 .spec-pred-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.10);
+}
+.spec-pred-btn:active {
+  /* Tap feedback before the voted state takes over. */
+  transform: scale(0.96);
 }
 .spec-pred-btn:disabled {
   opacity: 0.55;
@@ -3087,6 +3126,9 @@ input:disabled {
   background: rgba(99, 102, 241, 0.25);
   border-color: rgba(99, 102, 241, 0.5);
   color: #fff;
+  /* Slight scale-up so the committed vote reads as "selected" at a glance,
+     not just "tinted". The transition above animates the bump. */
+  transform: scale(1.04);
 }
 .spec-pred-tally {
   margin-left: auto;
