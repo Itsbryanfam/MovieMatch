@@ -35,12 +35,14 @@ function broadcastState(io, id, state) {
   io.to(id).emit('stateUpdate', clientState);
 }
 
-// Records a win for a single player in both Redis stores.
+// Records a win for a single player. Goes through redisUtils.recordPlayerWinAtomic
+// so the per-player count, leaderboard ZSET, and name lookup are all written in
+// one Redis transaction — they can't drift on partial failure the way the
+// previous Promise.all pattern could.
 async function recordPlayerWin(pubClient, player) {
-  await Promise.all([
-    redisUtils.incrementPlayerWins(pubClient, player.stableId || player.id),
-    redisUtils.recordWin(pubClient, player.stableId || player.id, player.name),
-  ]);
+  // stableId is the canonical identity; fall back to socket.id for older
+  // states/tests that didn't carry a stableId.
+  await redisUtils.recordPlayerWinAtomic(pubClient, player.stableId || player.id, player.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +51,10 @@ async function recordPlayerWin(pubClient, player) {
 
 async function eliminateTeam(io, pubClient, id, state, teamId, reason) {
   const teamLabel = teamId === 0 ? '🔴 Red' : '🔵 Blue';
-  io.to(id).emit('notification', `Team ${teamLabel} eliminated: ${reason}`);
+  // Structured payload: `kind` lets the client dispatch effects (sounds,
+  // shakes, vibration) without brittle substring matching on the human-
+  // readable `msg`. Future i18n won't break elimination effects.
+  io.to(id).emit('notification', { msg: `Team ${teamLabel} eliminated: ${reason}`, kind: 'elimination' });
   state.players.forEach(p => {
     if (p.teamId === teamId) p.isAlive = false;
   });
@@ -69,7 +74,7 @@ async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
   const player = state.players[state.currentTurnIndex];
   if (player) {
     player.isAlive = false;
-    io.to(id).emit('notification', `${player.name} eliminated: ${reason}`);
+    io.to(id).emit('notification', { msg: `${player.name} eliminated: ${reason}`, kind: 'elimination' });
   }
   await checkWinCondition(io, pubClient, id, state);
   if (state.status === 'playing') {
@@ -105,8 +110,20 @@ async function nextTurn(io, pubClient, id, state) {
   // so the server timeout only fires when the client is genuinely unreachable.
   const turnTimeMs = state.turnTime || 45000;
   const timeoutId = setTimeout(async () => {
+    // Take the submit lock before acting — without this, the watchdog races
+    // with submitMovie and forceNextTurn, which can double-eliminate or skip
+    // turns. If the lock is held, a submit is in flight and will advance the
+    // turn naturally; we should bail out and let it.
+    const lockToken = await redisUtils.acquireSubmitLock(pubClient, id);
+    if (!lockToken) {
+      activeTurnTimeouts.delete(id);
+      return;
+    }
     try {
       const liveRoom = await redisUtils.getLobby(pubClient, id);
+      // Re-check expiry on the FRESH state — another lock holder may have
+      // already advanced the turn, in which case turnExpiresAt is now in
+      // the future and we no-op.
       if (liveRoom && liveRoom.status === 'playing' &&
           liveRoom.turnExpiresAt && Date.now() > liveRoom.turnExpiresAt) {
         await eliminateCurrentPlayer(io, pubClient, id, liveRoom, "Turn timed out");
@@ -115,6 +132,7 @@ async function nextTurn(io, pubClient, id, state) {
       logger.error(err, 'Timeout handler error');
     } finally {
       activeTurnTimeouts.delete(id);
+      await redisUtils.releaseSubmitLock(pubClient, id, lockToken).catch(() => {});
     }
   }, turnTimeMs + 4000);
 
@@ -126,16 +144,31 @@ async function nextTurn(io, pubClient, id, state) {
 
 function promoteSpectators(state) {
   if (!state.spectators || state.spectators.length === 0) return;
+  // Disconnected spectators don't get promoted — they wouldn't be there to play.
   const connected = state.spectators.filter(s => s.connected);
+  // 8-player hard cap defined in joinLobby; same value used here.
   const slotsAvailable = 8 - state.players.length;
   const promoted = connected.slice(0, slotsAvailable);
+
   promoted.forEach(s => {
+    // Recompute team sizes inside the loop — the previous iteration may have
+    // just added to one team, so each promotion looks at the current state,
+    // not a snapshot from before the loop. The old `state.players.length % 2`
+    // pattern ignored team imbalance entirely (e.g. on restart after a 4-vs-1
+    // game it would land new players on team 0 first, worsening the gap).
+    const t0 = state.players.filter(p => p.teamId === 0).length;
+    const t1 = state.players.filter(p => p.teamId === 1).length;
     state.players.push({
       id: s.id, name: s.name, isHost: false, isAlive: true,
       connected: true, score: 0, wins: s.wins || 0,
-      teamId: state.players.length % 2, stableId: s.stableId
+      // Assign to the smaller team. Ties go to team 0 (consistent with the
+      // initial join order in joinLobby, which also favors team 0 first).
+      teamId: t0 <= t1 ? 0 : 1,
+      stableId: s.stableId
     });
   });
+
+  // Anything beyond slotsAvailable stays in spectators — they'll get a shot next round.
   state.spectators = connected.slice(slotsAvailable);
 }
 
@@ -161,14 +194,19 @@ function scheduleGameReset(io, pubClient, id) {
 
 function resetTimer(state) {
   if (state.gameMode === 'speed') {
-    state.turnExpiresAt = Date.now() + 15000;
-    return;
+    // Speed mode: flat 15s every turn, no reduction logic.
+    state.turnDurationMs = 15000;
+  } else {
+    // Classic/team/solo: every 2 successful turns the time limit shrinks by
+    // 5 seconds, floored at 10s. timerMultiplier increments each turn.
+    const reduction = Math.floor(state.timerMultiplier / 2) * 5;
+    state.turnDurationMs = Math.max(10, 60 - reduction) * 1000;
   }
-  // timerMultiplier increments each turn; every 2 turns the time limit shrinks
-  // by 5 seconds, down to a floor of 10 seconds.
-  const reduction = Math.floor(state.timerMultiplier / 2) * 5;
-  const timeRemaining = Math.max(10, 60 - reduction);
-  state.turnExpiresAt = Date.now() + (timeRemaining * 1000);
+  // Persist BOTH fields so the client can render the timer bar correctly:
+  // turnDurationMs is the bar's denominator, turnExpiresAt drives the countdown.
+  // Without turnDurationMs, the client would have to assume 60s — which is
+  // wrong in speed mode and after hardcore-shrink in classic.
+  state.turnExpiresAt = Date.now() + state.turnDurationMs;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +239,7 @@ async function checkTeamWin(io, pubClient, id, state) {
     score: winningPlayers.reduce((sum, p) => sum + p.score, 0),
     isTeamWin: true
   };
-  io.to(id).emit('notification', `Team ${teamLabel} wins!`);
+  io.to(id).emit('notification', { msg: `Team ${teamLabel} wins!`, kind: 'win' });
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
   scheduleGameReset(io, pubClient, id);
@@ -243,7 +281,7 @@ async function checkClassicWin(io, pubClient, id, state) {
     winner.wins = (winner.wins || 0) + 1;
     await recordPlayerWin(pubClient, winner);
     state.winner = { name: winner.name, score: winner.score, id: winner.id };
-    io.to(id).emit('notification', `${winner.name} wins!`);
+    io.to(id).emit('notification', { msg: `${winner.name} wins!`, kind: 'win' });
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
     scheduleGameReset(io, pubClient, id);

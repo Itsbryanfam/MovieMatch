@@ -45,6 +45,20 @@ function clampString(value, maxLen) {
   return value.slice(0, maxLen);
 }
 
+// safeOn wraps every async handler in a try/catch so an unhandled rejection
+// in any one handler can't crash the process. Replaces an earlier socket.on
+// monkey-patch — by being explicit at each call site, no future contributor
+// can accidentally bypass the safety net by registering before the patch ran.
+function safeOn(socket, event, handler, logger) {
+  socket.on(event, async (...args) => {
+    try {
+      await handler(...args);
+    } catch (err) {
+      logger.error(err, `Socket handler error in '${event}'`);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // MAIN SETUP
 // ---------------------------------------------------------------------------
@@ -85,24 +99,18 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     const cached = posterCache.getPosters();
     if (cached.length > 0) socket.emit('posters', cached);
 
-    // Global error boundary — wraps every handler registered below so an
-    // unhandled rejection in any async handler doesn't crash the process.
-    const _origOn = socket.on.bind(socket);
-    socket.on = function(event, handler) {
-      return _origOn(event, async (...args) => {
-        try {
-          await handler(...args);
-        } catch (err) {
-          logger.error(err, `Socket handler error in '${event}'`);
-        }
-      });
-    };
+    // Every handler below registers via safeOn instead of socket.on directly.
+    // safeOn wraps the handler in a try/catch so an unhandled rejection can't
+    // crash the process. This replaces an earlier monkey-patch on socket.on,
+    // which only protected handlers registered AFTER the patch — a footgun
+    // for any future contributor adding handlers above the patch line.
+    const on = (event, handler) => safeOn(socket, event, handler, logger);
 
     // -----------------------------------------------------------------------
     // POSTERS
     // -----------------------------------------------------------------------
 
-    socket.on('requestPosters', () => {
+    on('requestPosters', () => {
       const cached = posterCache.getPosters();
       if (cached.length > 0) socket.emit('posters', cached);
     });
@@ -111,7 +119,7 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // LOBBY SYSTEM — join, leave, settings, lifecycle
     // -----------------------------------------------------------------------
 
-    socket.on('joinLobby', async ({ name, lobbyId, stableId }) => {
+    on('joinLobby', async ({ name, lobbyId, stableId }) => {
       if (await rateLimit(socket.id, 'joinLobby', RATE_LIMITS.joinLobby.limit, RATE_LIMITS.joinLobby.windowMs)) return;
       name = clampString(name, 24);
       if (!name || !name.trim()) return socket.emit('error', 'Name cannot be empty.');
@@ -121,43 +129,43 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       await lobbySystem.joinLobby(ctx, socket, { name, lobbyId, stableId });
     });
 
-    socket.on('rejoinLobby', async (data) => {
+    on('rejoinLobby', async (data) => {
       await lobbySystem.rejoinLobby(ctx, socket, data);
     });
 
-    socket.on('setGameMode', async (data) => {
+    on('setGameMode', async (data) => {
       await lobbySystem.setGameMode(ctx, socket, data);
     });
 
-    socket.on('assignTeam', async (data) => {
+    on('assignTeam', async (data) => {
       await lobbySystem.assignTeam(ctx, socket, data);
     });
 
-    socket.on('togglePublic', async (data) => {
+    on('togglePublic', async (data) => {
       await lobbySystem.toggleSetting(ctx, socket, data, 'isPublic');
     });
 
-    socket.on('toggleHardcore', async (data) => {
+    on('toggleHardcore', async (data) => {
       await lobbySystem.toggleSetting(ctx, socket, data, 'hardcoreMode');
     });
 
-    socket.on('toggleTvShows', async (data) => {
+    on('toggleTvShows', async (data) => {
       await lobbySystem.toggleSetting(ctx, socket, data, 'allowTvShows');
     });
 
-    socket.on('startLobby', async (lobbyId) => {
+    on('startLobby', async (lobbyId) => {
       await lobbySystem.startLobby(ctx, socket, lobbyId);
     });
 
-    socket.on('restartLobby', async (lobbyId) => {
+    on('restartLobby', async (lobbyId) => {
       await lobbySystem.restartLobby(ctx, socket, lobbyId);
     });
 
-    socket.on('requestPublicLobbies', async () => {
+    on('requestPublicLobbies', async () => {
       await lobbySystem.requestPublicLobbies(ctx, socket);
     });
 
-    socket.on('kickPlayer', async (data) => {
+    on('kickPlayer', async (data) => {
       if (await rateLimit(socket.id, 'kickPlayer', RATE_LIMITS.kickPlayer.limit, RATE_LIMITS.kickPlayer.windowMs)) return;
       await lobbySystem.kickPlayer(ctx, socket, data);
     });
@@ -166,19 +174,23 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // MATCH SYSTEM — autocomplete, movie submission, turn forcing
     // -----------------------------------------------------------------------
 
-    socket.on('autocompleteSearch', async ({ query, lobbyId }) => {
+    on('autocompleteSearch', async ({ query, lobbyId }) => {
       if (typeof query !== 'string' || query.length === 0 || query.length > 100) return;
       if (await rateLimit(socket.id, 'autocomplete', RATE_LIMITS.autocomplete.limit, RATE_LIMITS.autocomplete.windowMs)) return;
       await matchSystem.autocompleteSearch(ctx, socket, { query, lobbyId });
     });
 
-    socket.on('submitMovie', async (data) => {
+    on('submitMovie', async (data) => {
+      // Defensive: if data is missing or movie is unexpectedly long, drop the call.
+      // The error boundary would catch any crash here, but checking explicitly
+      // avoids a noisy log entry for malformed input.
+      if (!data) return;
       if (typeof data.movie === 'string' && data.movie.length > 200) return;
       if (await rateLimit(socket.id, 'submitMovie', RATE_LIMITS.submitMovie.limit, RATE_LIMITS.submitMovie.windowMs)) return;
       await matchSystem.submitMovie(ctx, socket, data);
     });
 
-    socket.on('forceNextTurn', async (lobbyId) => {
+    on('forceNextTurn', async (lobbyId) => {
       if (await rateLimit(socket.id, 'forceNextTurn', RATE_LIMITS.forceNextTurn.limit, RATE_LIMITS.forceNextTurn.windowMs)) return;
       await matchSystem.forceNextTurn(ctx, socket, lobbyId);
     });
@@ -187,7 +199,7 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // SOCIAL — chat and reactions
     // -----------------------------------------------------------------------
 
-    socket.on('sendChat', async ({ lobbyId, msg }) => {
+    on('sendChat', async ({ lobbyId, msg }) => {
       msg = clampString(msg, 240);
       if (!msg || !msg.trim()) return;
       if (await rateLimit(socket.id, 'chat', RATE_LIMITS.chat.limit, RATE_LIMITS.chat.windowMs)) return;
@@ -199,7 +211,7 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       io.to(lobbyId).emit('receiveChat', { playerName: sender.name, msg, isSpectator });
     });
 
-    socket.on('sendReaction', async ({ lobbyId, emoji }) => {
+    on('sendReaction', async ({ lobbyId, emoji }) => {
       if (typeof emoji !== 'string' || emoji.length > 8) return;
       if (await rateLimit(socket.id, 'reaction', RATE_LIMITS.reaction.limit, RATE_LIMITS.reaction.windowMs)) return;
       const room = await redisUtils.getLobby(pubClient, lobbyId);
@@ -212,9 +224,9 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // DISCONNECT / LEAVE
     // -----------------------------------------------------------------------
 
-    socket.on('disconnect', () => lobbySystem.handleDisconnect(ctx, socket.id));
+    on('disconnect', () => lobbySystem.handleDisconnect(ctx, socket.id));
 
-    socket.on('leaveLobby', async () => {
+    on('leaveLobby', async () => {
       const lobbyId = await redisUtils.getSocketLobby(pubClient, socket.id);
       if (lobbyId) socket.leave(lobbyId);
       await lobbySystem.handleDisconnect(ctx, socket.id);

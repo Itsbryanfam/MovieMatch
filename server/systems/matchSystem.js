@@ -84,8 +84,12 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
   const preCheck = room.players.find(p => p.id === socket.id);
   if (!preCheck || !preCheck.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
 
-  const lockAcquired = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
-  if (!lockAcquired) return;
+  // acquireSubmitLock now returns a unique token on success (or null if held).
+  // The token is required by releaseSubmitLock so the Lua compare-and-delete
+  // can refuse to release a lock that has expired and been re-acquired by
+  // someone else.
+  const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+  if (!lockToken) return;
 
   try {
     // Re-read after acquiring lock — disconnects may have mutated state during acquisition
@@ -155,7 +159,11 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
       await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "API Error or Timeout!");
     }
   } finally {
-    await redisUtils.releaseSubmitLock(pubClient, lobbyId).catch(() => {});
+    // Pass the token so the Lua release script can verify ownership before
+    // deleting. .catch swallows release errors — failing to release is
+    // recoverable (the 30s TTL cleans it up); we don't want a Redis blip on
+    // cleanup to mask the original error from the try block.
+    await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
   }
 }
 
@@ -230,6 +238,10 @@ async function enrichWithCredits(candidates, pubClient, headers, logger) {
   }));
 }
 
+// Pure validation — no side effects on `room`. The caller (commitPlay) is
+// responsible for writing previousSharedActors after deciding to commit.
+// Keeping this side-effect-free means the function can be re-run safely on
+// retry paths without leaving stale state behind on a later failure.
 function validateChainConnection(room, candidateMovies) {
   let failReason = "Invalid movie connection.";
   const lastNode = room.chain.length > 0 ? room.chain[room.chain.length - 1] : null;
@@ -252,7 +264,7 @@ function validateChainConnection(room, candidateMovies) {
     );
 
     if (result.valid) {
-      room.previousSharedActors = result.matchedActors;
+      // Return matchedActors to the caller; commitPlay writes it onto the room.
       return { match: candidate, matchedActors: result.matchedActors };
     }
 
@@ -263,6 +275,10 @@ function validateChainConnection(room, candidateMovies) {
 }
 
 function commitPlay(room, socketId, player, validMatch, matchedActors) {
+  // Write previousSharedActors here — only after we've committed to the play.
+  // Validation no longer mutates the room (#13), so this is the canonical site.
+  room.previousSharedActors = matchedActors;
+
   // Trim cast for display (keep top 30 + any matched actors)
   const displayCast = validMatch.cast.slice(0, 30);
   matchedActors.forEach(actor => {
@@ -307,15 +323,30 @@ function commitPlay(room, socketId, player, validMatch, matchedActors) {
 async function forceNextTurn(ctx, socket, lobbyId) {
   const { io, pubClient } = ctx;
 
-  let room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (!room || room.status !== 'playing' || room.isValidating) return;
-  if (!room.players.find(p => p.id === socket.id)) return;
-  if (!room.turnExpiresAt) return;
+  // Take the same lock submitMovie uses. If a submit is in flight, this
+  // returns null and we skip — that submit will advance the turn naturally.
+  // Without the lock, multiple players seeing an expired timer simultaneously
+  // could each call eliminateCurrentPlayer, double-eliminating or skipping turns.
+  const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+  if (!lockToken) return;
 
-  // Only act if the timer has genuinely expired; the server-side hard timeout
-  // in nextTurn already handles elimination when the timer runs out naturally.
-  if (Date.now() >= room.turnExpiresAt) {
-    await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Time's up!");
+  try {
+    // Re-read room state INSIDE the lock — the previous holder may have
+    // already eliminated the current player and armed a new timer, so
+    // any state we read before the lock was held is stale.
+    const room = await redisUtils.getLobby(pubClient, lobbyId);
+    if (!room || room.status !== 'playing' || room.isValidating) return;
+    // Only participants in the room may force-advance the turn.
+    if (!room.players.find(p => p.id === socket.id)) return;
+    if (!room.turnExpiresAt) return;
+
+    // Re-check expiry against the FRESH state — if the previous lock holder
+    // advanced the turn, turnExpiresAt is now in the future and we no-op.
+    if (Date.now() >= room.turnExpiresAt) {
+      await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Time's up!");
+    }
+  } finally {
+    await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
   }
 }
 

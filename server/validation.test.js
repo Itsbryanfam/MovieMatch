@@ -4,9 +4,13 @@ const redisUtils = require('./redisUtils');
 // Mock fetch for TMDB calls
 global.fetch = jest.fn();
 
+// getOrFetchCredits now uses a stampede lock (NX SET on a `:fetching` companion
+// key) and releases it via DEL in the finally block, so the mock needs both
+// SET (for the lock and the cache write) and DEL (for the lock release).
 const mockRedis = {
   get: jest.fn().mockResolvedValue(null),
-  set: jest.fn().mockResolvedValue('OK')
+  set: jest.fn().mockResolvedValue('OK'),
+  del: jest.fn().mockResolvedValue(1),
 };
 
 describe('MovieMatch Validation Engine', () => {

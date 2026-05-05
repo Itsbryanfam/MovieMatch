@@ -518,8 +518,13 @@ export function clearGhostAttempt() {
 export function renderAutocompleteResults(results) {
   if (!results || results.length === 0) {
     if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">No results found.</div>';
-    if (mobileAcDropdown) mobileAcDropdown.innerHTML = '<div class="empty-hint">No results found.</div>';
-    mobileAcDropdown.classList.add('open');
+    // Group all mobileAcDropdown access behind a single existence check —
+    // both innerHTML and classList must be guarded together since either can
+    // throw if the element isn't in the DOM (older HTML, viewport pruning, etc.).
+    if (mobileAcDropdown) {
+      mobileAcDropdown.innerHTML = '<div class="empty-hint">No results found.</div>';
+      mobileAcDropdown.classList.add('open');
+    }
     return;
   }
 
@@ -597,10 +602,14 @@ export function renderAutocompleteResults(results) {
     if (mobileAcDropdown) mobileAcDropdown.appendChild(createAcNode());
   });
 
-  mobileAcDropdown.classList.add('open');
+  // Same guard on the success path — even with results, the element may not exist.
+  if (mobileAcDropdown) mobileAcDropdown.classList.add('open');
 }
 
 export function closeMobileAc() {
+  // Guard so calling this from a context that never had the dropdown (e.g. desktop
+  // tests) is a safe no-op instead of a TypeError on .classList / .innerHTML.
+  if (!mobileAcDropdown) return;
   mobileAcDropdown.classList.remove('open');
   mobileAcDropdown.innerHTML = '';
 }

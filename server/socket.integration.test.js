@@ -20,9 +20,12 @@ function waitFor(socket, event, timeout = 2000) {
 describe('Socket.io Integration', () => {
   let httpServer, io, port;
 
-  // Mock pubClient — must handle rate limiter (multi/incr/expire) and lobby ID generation (exists)
+  // Mock pubClient — must handle rate limiter (multi/incr/expire), lobby ID
+  // generation (exists), and joinLobby's NX-create (set). The set call returns
+  // 'OK' so the create-or-noop path treats this caller as the winning creator.
   const mockPubClient = {
     exists: jest.fn().mockResolvedValue(0),
+    set: jest.fn().mockResolvedValue('OK'),
     multi: jest.fn(() => ({
       incr: jest.fn().mockReturnThis(),
       expire: jest.fn().mockReturnThis(),
@@ -67,8 +70,9 @@ describe('Socket.io Integration', () => {
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     redisUtils.recordWin.mockResolvedValue(undefined);
     redisUtils.getLeaderboard.mockResolvedValue([]);
-    // Reset pubClient mocks
+    // Reset pubClient mocks — including the new set() that joinLobby uses for NX create.
     mockPubClient.exists.mockResolvedValue(0);
+    mockPubClient.set.mockResolvedValue('OK');
     mockPubClient.multi.mockReturnValue({
       incr: jest.fn().mockReturnThis(),
       expire: jest.fn().mockReturnThis(),
@@ -116,7 +120,10 @@ describe('Socket.io Integration', () => {
   });
 
   test('joinLobby with specific lobby code joins that lobby', async () => {
-    // Mock: lobby exists and is waiting
+    // Existing lobby: NX-create must return null so the production code falls
+    // through to getLobby and joins the canonical existing state (rather than
+    // overwriting it with a fresh empty room).
+    mockPubClient.set.mockResolvedValueOnce(null);
     redisUtils.getLobby.mockResolvedValue({
       id: 'TEST01', status: 'waiting',
       players: [{ id: 'host1', name: 'Host', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 'p_host' }],
@@ -153,6 +160,10 @@ describe('Socket.io Integration', () => {
       allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
       isValidating: false, gameMode: 'classic'
     };
+    // SET NX returns null when the key already exists — that's the "lobby
+    // already exists" signal. Production code then falls through to getLobby
+    // to fetch the canonical state (the full lobby below).
+    mockPubClient.set.mockResolvedValueOnce(null);
     redisUtils.getLobby.mockResolvedValue(fullLobby);
 
     await connect();
@@ -164,6 +175,9 @@ describe('Socket.io Integration', () => {
   });
 
   test('joinLobby as spectator when lobby is already playing', async () => {
+    // Lobby is already playing — NX-create must signal "key exists" (null) so
+    // the production code falls through to the existing-room path.
+    mockPubClient.set.mockResolvedValueOnce(null);
     redisUtils.getLobby.mockResolvedValue({
       id: 'PLAY01', status: 'playing',
       players: [{ id: 'p1', name: 'A', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1' }],
@@ -191,7 +205,10 @@ describe('Socket.io Integration', () => {
 
     await connect();
 
-    client.emit('rejoinLobby', { lobbyId: 'GONE01', playerId: 'old-socket-id' });
+    // stableId now required by the auth check — supply one even on the
+    // missing-lobby path so we exercise the "no lobby" branch, not the
+    // "missing identity" guard.
+    client.emit('rejoinLobby', { lobbyId: 'GONE01', playerId: 'old-socket-id', stableId: 's_caller' });
 
     const msg = await waitFor(client, 'rejoinFailed');
     expect(msg).toContain('no longer exists');
@@ -208,7 +225,9 @@ describe('Socket.io Integration', () => {
 
     await connect();
 
-    client.emit('rejoinLobby', { lobbyId: 'EXIST1', playerId: 'wrong-id' });
+    // Caller's stableId doesn't match any player in the room — both lookup
+    // paths in rejoinLobby fail, so the server replies "not found".
+    client.emit('rejoinLobby', { lobbyId: 'EXIST1', playerId: 'wrong-id', stableId: 's_caller' });
 
     const msg = await waitFor(client, 'rejoinFailed');
     expect(msg).toContain('not found');
@@ -216,9 +235,10 @@ describe('Socket.io Integration', () => {
 
   test('rejoinLobby succeeds and updates player socket ID', async () => {
     const oldPlayerId = 'old-socket-id';
+    const stableId = 's_return';
     const room = {
       id: 'REJN01', status: 'playing',
-      players: [{ id: oldPlayerId, name: 'Returner', isHost: true, isAlive: true, connected: false, score: 50, wins: 1, teamId: 0, stableId: 's_return' }],
+      players: [{ id: oldPlayerId, name: 'Returner', isHost: true, isAlive: true, connected: false, score: 50, wins: 1, teamId: 0, stableId }],
       chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
       allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
       isValidating: false, gameMode: 'classic'
@@ -227,7 +247,9 @@ describe('Socket.io Integration', () => {
 
     await connect();
 
-    client.emit('rejoinLobby', { lobbyId: 'REJN01', playerId: oldPlayerId });
+    // Pass stableId — required by the auth check in rejoinLobby. Without it
+    // the call would be rejected with "Missing identity" instead of succeeding.
+    client.emit('rejoinLobby', { lobbyId: 'REJN01', playerId: oldPlayerId, stableId });
 
     const data = await waitFor(client, 'rejoinSuccess');
     expect(data.lobbyId).toBe('REJN01');
@@ -238,6 +260,55 @@ describe('Socket.io Integration', () => {
     expect(redisUtils.deleteSocketLobby).toHaveBeenCalledWith(mockPubClient, oldPlayerId);
     // Verify the new socket mapping was created
     expect(redisUtils.setSocketLobby).toHaveBeenCalledWith(mockPubClient, client.id, 'REJN01');
+  });
+
+  // Negative test: an attacker who has guessed/observed another player's
+  // socket id should NOT be able to take over their slot. Pre-fix, this
+  // call would have hijacked the victim's slot silently.
+  test('rejoinLobby fails when stableId does not match the player', async () => {
+    const room = {
+      id: 'HIJK01', status: 'playing',
+      players: [{
+        id: 'victim-socket', stableId: 'p_victim', name: 'Victim',
+        // Disconnected so the second-lookup path (by stableId) is also reachable;
+        // this confirms the fix blocks BOTH paths, not just the by-socket-id one.
+        isHost: true, isAlive: true, connected: false,
+        score: 0, wins: 0, teamId: 0
+      }],
+      chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0,
+      turnExpiresAt: null, isValidating: false, gameMode: 'classic'
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    await connect();
+    client.emit('rejoinLobby', {
+      lobbyId: 'HIJK01',
+      playerId: 'victim-socket',     // victim's socket id (broadcast to all clients)
+      stableId: 'p_attacker',        // attacker's own stableId — not the victim's
+    });
+
+    // Server must refuse: neither lookup path should match.
+    const msg = await waitFor(client, 'rejoinFailed');
+    expect(msg).toContain('not found');
+  });
+
+  // Negative test: omitting stableId should be rejected with "Missing identity"
+  // before any room/player lookup happens.
+  test('rejoinLobby fails when stableId is missing', async () => {
+    redisUtils.getLobby.mockResolvedValue({
+      id: 'NOID01', status: 'playing',
+      players: [{ id: 'someone', name: 'X', isHost: true, isAlive: true, connected: false, score: 0, wins: 0, teamId: 0, stableId: 's_x' }],
+      chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
+      isValidating: false, gameMode: 'classic'
+    });
+
+    await connect();
+    client.emit('rejoinLobby', { lobbyId: 'NOID01', playerId: 'someone' });
+
+    const msg = await waitFor(client, 'rejoinFailed');
+    expect(msg).toContain('Missing identity');
   });
 
   // ========================

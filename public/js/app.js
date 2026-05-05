@@ -54,10 +54,16 @@ document.addEventListener('DOMContentLoaded', () => {
   if (muteBtn) {
     muteBtn.textContent = isMuted() ? '🔇' : '🔊';
     muteBtn.classList.toggle('muted', isMuted());
+    // aria-pressed communicates the toggle state to screen readers. Keeping
+    // the aria-label static ("Toggle sound") makes the announcement consistent —
+    // "Toggle sound, pressed" vs "Toggle sound, not pressed" — instead of
+    // changing the button's name on each click.
+    muteBtn.setAttribute('aria-pressed', String(isMuted()));
     muteBtn.addEventListener('click', () => {
       const nowMuted = toggleMute();
       muteBtn.textContent = nowMuted ? '🔇' : '🔊';
       muteBtn.classList.toggle('muted', nowMuted);
+      muteBtn.setAttribute('aria-pressed', String(nowMuted));
     });
   }
 

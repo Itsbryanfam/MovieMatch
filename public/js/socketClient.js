@@ -229,50 +229,66 @@ export function initSocket() {
       resetMobileTab();
       renderGame(state, getMyPlayerId(), getIsSpectator());
 
-      clearTurnTimer();
-      const interval = setInterval(() => {
-        const timerBar = document.getElementById('timer-bar');
-        const timeText = document.getElementById('time-text');
-        const gs = getGameState();
-        if (!gs || !gs.turnExpiresAt || gs.status !== 'playing') {
-          clearInterval(interval);
-          setTurnInterval(null);
-          if (timerBar) timerBar.classList.remove('timer-critical');
-          return;
-        }
+      // Only rebuild the timer interval when the turn actually changes.
+      // stateUpdate fires on chat messages, reactions, and player joins too —
+      // previously each event tore down and rebuilt the interval, causing
+      // visible jitter and pointless work.
+      const turnChanged = state.currentTurnIndex !== prevState?.currentTurnIndex
+        || state.status !== prevState?.status;
+      if (turnChanged) {
+        clearTurnTimer();
+        // 250ms cadence (4× per second) lets the bar animate smoothly using
+        // the fractional ms reading — much smoother than the old 1s tick.
+        const interval = setInterval(() => {
+          const timerBar = document.getElementById('timer-bar');
+          const timeText = document.getElementById('time-text');
+          const gs = getGameState();
+          if (!gs || !gs.turnExpiresAt || gs.status !== 'playing') {
+            clearInterval(interval);
+            setTurnInterval(null);
+            if (timerBar) timerBar.classList.remove('timer-critical');
+            return;
+          }
 
-        const ms = gs.turnExpiresAt - Date.now();
-        let tr = Math.max(0, Math.ceil(ms / 1000));
+          const ms = gs.turnExpiresAt - Date.now();
+          let tr = Math.max(0, Math.ceil(ms / 1000));
 
-        if (timeText) timeText.innerText = tr + 's';
-        const percentage = (tr / 60) * 100;
-        if (timerBar) {
-          timerBar.style.width = Math.max(0, Math.min(percentage, 100)) + '%';
+          if (timeText) timeText.innerText = tr + 's';
+          // Default to 60s for older states without turnDurationMs (backward
+          // compat with rooms saved before the server fix). New states always
+          // include the field, so the bar is correct in every mode.
+          const totalMs = gs.turnDurationMs || 60000;
+          // Use raw ms (not the rounded second `tr`) so the bar shrinks
+          // smoothly within each second instead of stepping in 1% chunks.
+          const percentage = Math.max(0, Math.min(100, (ms / totalMs) * 100));
+          if (timerBar) {
+            timerBar.style.width = percentage + '%';
 
-          if (tr <= 10) {
-            timerBar.style.backgroundColor = 'var(--timer-red)';
-            timerBar.classList.add('timer-critical');
-            if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
-              playTick();
-              setLastTickSound(Math.floor(Date.now() / 1000));
-            }
-          } else {
-            timerBar.classList.remove('timer-critical');
-            if (tr <= 30) {
-              timerBar.style.backgroundColor = 'var(--timer-yellow)';
+            if (tr <= 10) {
+              timerBar.style.backgroundColor = 'var(--timer-red)';
+              timerBar.classList.add('timer-critical');
+              if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
+                playTick();
+                setLastTickSound(Math.floor(Date.now() / 1000));
+              }
             } else {
-              timerBar.style.backgroundColor = 'var(--timer-green)';
+              timerBar.classList.remove('timer-critical');
+              if (tr <= 30) {
+                timerBar.style.backgroundColor = 'var(--timer-yellow)';
+              } else {
+                timerBar.style.backgroundColor = 'var(--timer-green)';
+              }
             }
           }
-        }
 
-        if (tr === 0) {
-          socket.emit('forceNextTurn', getCurrentLobbyId());
-          clearInterval(interval);
-          setTurnInterval(null);
-        }
-      }, 1000);
-      setTurnInterval(interval);
+          if (tr === 0) {
+            socket.emit('forceNextTurn', getCurrentLobbyId());
+            clearInterval(interval);
+            setTurnInterval(null);
+          }
+        }, 250);
+        setTurnInterval(interval);
+      }
 
     } else if (state.status === 'waiting') {
       clearTurnTimer();
@@ -295,9 +311,24 @@ export function initSocket() {
   // NOTIFICATIONS
   // -----------------------------------------------------------------------
 
-  socket.on('notification', (msg) => {
+  socket.on('notification', (payload) => {
+    // Server may send either a plain string (legacy) or a {msg, kind} object.
+    // Normalize so the rest of the handler can dispatch on kind without
+    // worrying about the wire format. The kind-based dispatch replaces the
+    // old `msg.includes(...)` substring matching, which was fragile to copy
+    // changes and would break on i18n.
+    const msg = typeof payload === 'string' ? payload : payload?.msg ?? '';
+    let kind = typeof payload === 'object' && payload?.kind ? payload.kind : null;
+    // Backward-compat fallback: infer kind from the text if the server didn't
+    // tag it. Lets a freshly-deployed client still work against an older server.
+    if (!kind) {
+      if (msg.includes('eliminated')) kind = 'elimination';
+      else if (msg.includes('wins')) kind = 'win';
+    }
+
     if (!selfElimActive) showNotification(msg);
-    if (msg.includes('eliminated')) {
+
+    if (kind === 'elimination') {
       playFail();
       vibrate([200, 100, 200]); // attention-grabbing pattern on elimination
       showEliminationFlash();
@@ -310,7 +341,9 @@ export function initSocket() {
         board.classList.add('shake');
         setTimeout(() => board.classList.remove('shake'), 750);
       }
-    } else if (msg.includes('wins')) {
+    } else if (kind === 'win') {
+      // Win takes precedence over any in-flight elimination flash from the
+      // same losing turn — clean those up before the celebration plays.
       document.querySelectorAll('.elimination-flash').forEach(el => el.remove());
       playSuccess();
       setTimeout(playSuccess, 300);
@@ -318,6 +351,7 @@ export function initSocket() {
       vibrate([60, 80, 60, 80, 60]); // celebration pattern on win
       showWinFlash();
     }
+    // kind === 'info' (or unknown): no effects, just the text overlay.
   });
 
   // -----------------------------------------------------------------------

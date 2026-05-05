@@ -41,3 +41,12 @@ if (!navigator.clipboard) {
     configurable: true,
   });
 }
+
+// jsdom doesn't implement Element.scrollIntoView. ui.js calls it inside the
+// player-sidebar render to keep the active turn's row visible. Without the
+// stub, any test that triggers a render of the game screen (e.g. the timer-bar
+// regression test) throws "scrollIntoView is not a function" inside a
+// setTimeout callback and crashes the test runner instead of failing cleanly.
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function () {};
+}

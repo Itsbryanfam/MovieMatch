@@ -214,4 +214,37 @@ describe('socketClient handlers — screen transitions', () => {
 
     expect(document.title).toBe('MovieMatch');
   });
+
+  // ------------------------------------------------------------------------
+  // Timer bar — must use turnDurationMs as the denominator, not a hardcoded 60s.
+  // Regression test for the speed-mode bug where the bar started at 25% width
+  // because (15s / 60s) * 100 = 25, instead of (15s / 15s) * 100 = 100.
+  // ------------------------------------------------------------------------
+
+  test('timer bar starts full in speed mode (15s turn)', () => {
+    jest.useFakeTimers();
+    try {
+      // Trigger a fresh playing-state update with speed-mode duration. With the
+      // old hardcoded 60s denominator this would render at 25% width on the
+      // first tick; with turnDurationMs threaded through, it should be ~100%.
+      fakeSocket.trigger('stateUpdate', makePlayingState({
+        gameMode: 'speed',
+        turnDurationMs: 15000,
+        currentTurnIndex: 0,
+        chain: [makeChainItem()],
+      }));
+
+      // Advance fake timers past the 250ms interval cadence so the bar updates
+      // at least once. We can't assert before this — the interval hasn't fired.
+      jest.advanceTimersByTime(300);
+
+      const bar = document.getElementById('timer-bar');
+      // Width is set as a percentage string like "98.6%". Parse it.
+      const width = parseFloat(bar.style.width);
+      // Allow a small slack for the elapsed test time; should be very close to 100.
+      expect(width).toBeGreaterThan(90);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
