@@ -3380,3 +3380,32 @@ a:focus-visible,
   .mobile-tab { padding: 0.25rem 0.4rem; min-height: 44px; font-size: 0.75rem; }
   #game-screen { padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* =============================================
+   STICKY-HOVER GUARD FOR TOUCH DEVICES
+   =============================================
+   On touch devices, :hover fires on first tap and persists until the next
+   interaction — buttons appear "stuck" in the lifted/glowing state after
+   the user releases. The CSS-pure fix is to wrap every :hover rule in
+   @media (hover: hover), but that's a sprawling 21-rule diff. Instead we
+   neutralize the visual side-effects (transform, box-shadow, background,
+   border-color) on (hover: none) only. :active states still fire on tap,
+   so press feedback is preserved. Desktop hover behavior is untouched. */
+@media (hover: none) {
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .mode-chip:hover:not(:disabled),
+  .public-lobby-card:hover,
+  .chain-item:hover,
+  .reaction-btn:hover,
+  .autocomplete-item:hover,
+  .spec-pred-btn:hover:not(:disabled),
+  .self-elim-close:hover,
+  .btn-icon.quit-btn:hover:not(:disabled),
+  .hero-daily-btn:hover {
+    transform: none;
+    box-shadow: inherit;
+    background: inherit;
+    border-color: inherit;
+  }
+}
