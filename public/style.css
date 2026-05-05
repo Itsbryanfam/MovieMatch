@@ -850,7 +850,13 @@ input:disabled {
 /* GAME LAYOUT */
 .layout-grid {
   display: grid;
-  grid-template-columns: 260px 1fr 260px;
+  /* Cap the center column at 1100px so the chain feed and input stay
+     ergonomic on ultrawide displays (3440px+). On 1920px the math is
+     220 + 1100 + 220 + gaps = ~1580px, leaving the rest of the screen
+     centered around the layout via justify-content. Sidebars use
+     minmax so they hold a comfortable width without sprawling. */
+  grid-template-columns: minmax(220px, 18vw) minmax(0, 1100px) minmax(220px, 18vw);
+  justify-content: center;
   gap: 1.5rem;
   flex: 1;
   min-height: 0;
@@ -1456,7 +1462,10 @@ input:disabled {
   border-radius: var(--radius-2xl);
   padding: 2.5rem;
   width: 100%;
-  max-width: 520px;
+  /* Slightly wider cap than the original 520px gives modals more breathing
+     room on desktop without breaking mobile (90vw clamp keeps it from
+     overflowing on small screens). */
+  max-width: min(640px, 90vw);
   position: relative;
   box-shadow: var(--shadow-xl);
   animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
