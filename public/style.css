@@ -2833,6 +2833,18 @@ input:disabled {
   color: var(--text-muted);
 }
 
+/* L1 follow-up: native <select> dropdown options on Windows render with the
+   OS's default white background, ignoring the <select>'s own color rule.
+   Without this, the inline color:#fff on #theme-select makes the open list
+   read as white-on-white. Setting `option` background + color directly is
+   the most-supported way to style the dropdown panel — Chrome, Firefox,
+   and Edge respect it; Safari is partial but degrades to system colors
+   (still readable). */
+#theme-select option {
+  background: var(--bg-elevated, #18181b);
+  color: #fff;
+}
+
 /* =============================================
    M5: SOLO HUD + OBJECTIVE BAR
    =============================================
