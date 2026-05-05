@@ -53,6 +53,8 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
   // once per lobby (NX-create wins); the rest are mutated as the lobby
   // lives. Initialized to safe defaults so older serialized state from
   // before this deploy reads as 0/null without crashing.
+  // L1: theme defaults to 'any' (no filter). When set to a real theme,
+  // matchSystem filters candidates before validation.
   const initialRoom = {
     id, status: 'waiting', players: [], spectators: [], currentTurnIndex: 0, chain: [],
     usedMovies: [], hardcoreMode: false, previousSharedActors: [],
@@ -61,6 +63,7 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
     createdAt: Date.now(),
     chatCount: 0,
     lastChainLength: null,
+    theme: 'any',
   };
 
   // Atomic create-or-noop: SET NX returns 'OK' if we created the key,
@@ -205,6 +208,22 @@ async function setGameMode(ctx, socket, { lobbyId, mode }) {
   if (!room || room.status !== 'waiting') return;
   if (!room.players.find(p => p.id === socket.id)?.isHost) return;
   room.gameMode = mode;
+  await redisUtils.saveLobby(pubClient, lobbyId, room);
+  gameLogic.broadcastState(io, lobbyId, room);
+}
+
+// L1: Host-only setter for the lobby theme. Validated against the
+// themesSystem whitelist so a malicious client can't set an arbitrary
+// string (which would degrade safely via matchesTheme's fallback, but
+// would also clutter the room state with junk).
+async function setTheme(ctx, socket, { lobbyId, theme }) {
+  const { io, pubClient } = ctx;
+  const themesSystem = require('./themesSystem');
+  if (!themesSystem.isValidTheme(theme)) return;
+  const room = await redisUtils.getLobby(pubClient, lobbyId);
+  if (!room || room.status !== 'waiting') return;
+  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
+  room.theme = theme;
   await redisUtils.saveLobby(pubClient, lobbyId, room);
   gameLogic.broadcastState(io, lobbyId, room);
 }
@@ -676,6 +695,7 @@ module.exports = {
   rejoinLobby,
   kickPlayer,
   setGameMode,
+  setTheme,
   assignTeam,
   toggleSetting,
   startLobby,

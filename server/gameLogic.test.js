@@ -131,6 +131,52 @@ describe('gameLogic — nextTurn timer arming and cleanup', () => {
     gameLogic.clearTurnTimeout('LOBBY1');
   });
 
+  // ---------------------------------------------------------------------------
+  // L3 — spectator predictions: settle + clear
+  // ---------------------------------------------------------------------------
+
+  test('settlePredictions emits a result event and clears the predictions map', () => {
+    // Three spectators voted: one yes, two no. Outcome = 'yes' (the
+    // player got it). One of the three (the yes-voter) was correct.
+    const state = {
+      spectatorPredictions: {
+        sock_a: 'yes',
+        sock_b: 'no',
+        sock_c: 'no',
+      },
+    };
+    gameLogic.settlePredictions(mockIo, 'LOBBY1', state, 'yes');
+
+    // Single broadcast with the per-voter correctness map + tally.
+    expect(mockIo.emit).toHaveBeenCalledWith(
+      'predictionResult',
+      expect.objectContaining({
+        outcome: 'yes',
+        correct: 1,
+        total: 3,
+        perVoter: { sock_a: true, sock_b: false, sock_c: false },
+      })
+    );
+    // Map cleared on the room so the next turn starts at zero. Without
+    // this, votes would carry across turns and pollute the next tally.
+    expect(state.spectatorPredictions).toEqual({});
+  });
+
+  test('settlePredictions no-ops (no broadcast) when no spectator voted', () => {
+    // Quiet room — don't add chatter to a turn that nobody bet on.
+    const state = { spectatorPredictions: {} };
+    gameLogic.settlePredictions(mockIo, 'LOBBY1', state, 'yes');
+    expect(mockIo.emit).not.toHaveBeenCalled();
+  });
+
+  test('settlePredictions tolerates a missing spectatorPredictions field', () => {
+    // Older serialized lobbies (created before L3) won't have the field.
+    // Must not crash the resolution path — just skip the settle.
+    const state = {};
+    expect(() => gameLogic.settlePredictions(mockIo, 'LOBBY1', state, 'no')).not.toThrow();
+    expect(mockIo.emit).not.toHaveBeenCalled();
+  });
+
   test('nextTurn re-arming for the same lobby clears the previous timer', async () => {
     const state = {
       gameMode: 'classic',

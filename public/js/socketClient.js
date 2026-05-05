@@ -195,6 +195,26 @@ export function initSocket() {
   });
 
   // -----------------------------------------------------------------------
+  // THEMES LIST (L1) — server sends this once per connection. Cached on
+  // window.__mmThemes so renderLobby can populate the picker without a
+  // round-trip when the player enters the lobby screen. Window-global
+  // (vs a state.js field) keeps this concern off the hot path; themes
+  // are a static, rarely-touched taxonomy.
+  // -----------------------------------------------------------------------
+
+  socket.on('themesList', (themes) => {
+    if (Array.isArray(themes)) {
+      window.__mmThemes = themes;
+      // Repopulate the picker if the lobby screen is already rendered
+      // (e.g. on socket reconnect after a brief drop). renderLobby reads
+      // from window.__mmThemes so a fresh render naturally picks up the
+      // updated list — but if no fresh render fires, dispatch a custom
+      // event the picker code listens for.
+      window.dispatchEvent(new CustomEvent('mm:themes-updated'));
+    }
+  });
+
+  // -----------------------------------------------------------------------
   // BACKGROUND POSTERS
   // -----------------------------------------------------------------------
 
@@ -553,6 +573,30 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   let typingClearTimeout = null;
+  // -----------------------------------------------------------------------
+  // PREDICTION RESULT (L3) — fired by the server when a turn resolves
+  // (success or failure). Carries per-voter correctness so the spectator
+  // sees a personal "you called it!" / "wrong call" toast, plus the
+  // overall correct/total tally everyone hears about ("3 of 5 called it").
+  // Players who didn't vote get the tally line only.
+  // -----------------------------------------------------------------------
+
+  socket.on('predictionResult', ({ outcome, correct, total, perVoter }) => {
+    if (!total) return; // no votes this turn — nothing to surface
+    const myVoteCorrect = perVoter && perVoter[socket.id];
+    const overall = `${correct} of ${total} called it`;
+    if (myVoteCorrect === true) {
+      showToast(`✅ You called it! (${overall})`);
+      playSfx('success');
+    } else if (myVoteCorrect === false) {
+      showToast(`❌ Wrong call (${overall})`);
+      playSfx('fail');
+    } else {
+      // Player or non-voting spectator — just the room-level summary.
+      showToast(`🔮 ${overall}`);
+    }
+  });
+
   socket.on('peerTyping', ({ playerName }) => {
     const el = document.getElementById('peer-typing-indicator');
     if (!el) return;

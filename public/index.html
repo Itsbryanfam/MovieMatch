@@ -245,6 +245,13 @@
         </div>
 
         <div class="lobby-settings" id="lobby-settings" style="display:none;">
+          <!-- L1: Theme picker. Host-only — disabled for guests via JS in
+               renderLobby. The select is built dynamically from the server's
+               theme list to stay in sync with the source of truth. -->
+          <label class="setting-toggle">
+            <span>Theme <small style="opacity:0.7;">(Filter the candidate pool)</small></span>
+            <select id="theme-select" disabled style="margin-left:auto; padding:0.3rem 0.5rem; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.12); border-radius:6px; font-size:0.85rem;"></select>
+          </label>
           <label class="setting-toggle">
             <input type="checkbox" id="hardcore-toggle" disabled>
             <span>Hardcore Mode <small style="opacity:0.7;">(No actor reuse anywhere in chain)</small></span>
@@ -333,6 +340,12 @@
                      ui.js renderTurnControls). Click triggers a confirm()
                      dialog so an accidental tap can't end the run. -->
                 <button id="quit-game-btn" class="btn-icon quit-btn hidden" aria-label="Quit game" title="Quit game">🏳️</button>
+                <!-- L1: active theme badge. Hidden by default; renderTurn-
+                     Controls toggles .visible when the lobby's theme is
+                     anything other than 'any'. Sits in the input header
+                     so the constraint is in the player's eye while they
+                     type. -->
+                <span id="active-theme-badge" class="active-theme-badge"></span>
               </div>
             </div>
             
@@ -355,6 +368,17 @@
             <div id="mobile-ac-dropdown" class="mobile-ac-dropdown"></div>
           </div>
           
+          <!-- L3: Spectator prediction bar. Hidden by default; renderTurn-
+               Controls toggles .visible only for spectators in playing-state
+               games. Two vote buttons (👍/👎) plus a running tally that
+               updates from each stateUpdate's predictionTally. -->
+          <div id="spectator-prediction-bar" class="spectator-prediction-bar">
+            <span class="spec-pred-label">Will they get it?</span>
+            <button id="spec-pred-yes" class="spec-pred-btn">👍 Yes</button>
+            <button id="spec-pred-no" class="spec-pred-btn">👎 No</button>
+            <span class="spec-pred-tally" id="spec-pred-tally"></span>
+          </div>
+
           <div class="reaction-bar" id="reaction-bar">
              <button class="reaction-btn">🔥</button>
              <button class="reaction-btn">😂</button>
@@ -448,6 +472,13 @@
             <p>If you can't name a valid connection in time, you're eliminated. The last player alive wins the round!</p>
           </div>
         </div>
+      </div>
+
+      <!-- M6: "Replay tutorial" affordance for returning players who want
+           the guided walkthrough again, since the gate flag suppresses
+           it on subsequent visits otherwise. -->
+      <div style="display:flex; justify-content:center; margin-top:1rem;">
+        <button id="replay-tutorial-btn" class="btn-secondary" style="padding:0.5rem 1.2rem;">▶ Replay tutorial</button>
       </div>
 
       <h3 class="modal-section-title">🎮 Game Modes</h3>

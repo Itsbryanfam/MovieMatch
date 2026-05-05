@@ -49,6 +49,11 @@ const RATE_LIMITS = {
   // burst with comfortable headroom while still rejecting any kind of
   // event-flood pattern.
   typing: { limit: 8, windowMs: 5000 },
+  // L3: Spectator predictions — one vote per turn, but a spectator might
+  // change their mind once before settling. Capping at 3 in 30s lets the
+  // intent ("vote yes, then change to no, then back") through while still
+  // rejecting any kind of automated tally manipulation.
+  spectatorPredict: { limit: 3, windowMs: 30000 },
 };
 
 // ---------------------------------------------------------------------------
@@ -114,6 +119,17 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     const cached = posterCache.getPosters();
     if (cached.length > 0) socket.emit('posters', cached);
 
+    // L1: Send the theme list once per connection so the lobby's theme
+    // picker can populate without a round-trip when the player enters
+    // the lobby screen. ~600 bytes, sent once. Same pattern as posters.
+    try {
+      const themesSystem = require('./systems/themesSystem');
+      socket.emit('themesList', themesSystem.listThemes());
+    } catch {
+      // No themes available is degenerate — client falls back to a
+      // single "Any" entry it hardcodes.
+    }
+
     // Every handler below registers via safeOn instead of socket.on directly.
     // safeOn wraps the handler in a try/catch so an unhandled rejection can't
     // crash the process. This replaces an earlier monkey-patch on socket.on,
@@ -150,6 +166,12 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
     on('setGameMode', async (data) => {
       await lobbySystem.setGameMode(ctx, socket, data);
+    });
+
+    on('setTheme', async (data) => {
+      // L1: Host-only setter; lobbySystem validates the theme id against
+      // the whitelist so a buggy/malicious client can't write garbage.
+      await lobbySystem.setTheme(ctx, socket, data);
     });
 
     on('assignTeam', async (data) => {
@@ -296,6 +318,36 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (!room) return;
       if (!getParticipantInRoom(room, socket.id)) return;
       io.to(lobbyId).emit('receiveReaction', { emoji, playerId: socket.id });
+    });
+
+    // -----------------------------------------------------------------------
+    // SPECTATOR PREDICTIONS (L3) — spectators vote will-they-get-it on
+    // each turn. Vote totals broadcast via the standard stateUpdate (so
+    // every spectator sees the running tally without an extra round-trip)
+    // and the play-resolution path emits a one-shot `predictionResult`
+    // with accuracy data after each turn settles.
+    // -----------------------------------------------------------------------
+
+    on('spectatorPredict', async ({ lobbyId, prediction }) => {
+      if (await rateLimit(socket.id, 'spectatorPredict', RATE_LIMITS.spectatorPredict.limit, RATE_LIMITS.spectatorPredict.windowMs)) return;
+      if (prediction !== 'yes' && prediction !== 'no') return;
+      const room = await redisUtils.getLobby(pubClient, lobbyId);
+      if (!room || room.status !== 'playing') return;
+      // Spectator-only — players can't vote on their own table since they
+      // know what they're going to play. Limits the spectator-prediction
+      // game to actual observers and keeps the tally meaningful.
+      const isPlayer = room.players.some(p => p.id === socket.id);
+      const isSpectator = !isPlayer && (room.spectators || []).some(s => s.id === socket.id);
+      if (!isSpectator) return;
+      // Allow vote-changing within the rate limit — overwrite the prior
+      // vote rather than reject. Spectators reading the tally evolve their
+      // confidence through the turn and shouldn't be locked to a first guess.
+      if (!room.spectatorPredictions || typeof room.spectatorPredictions !== 'object') {
+        room.spectatorPredictions = {};
+      }
+      room.spectatorPredictions[socket.id] = prediction;
+      await redisUtils.saveLobby(pubClient, lobbyId, room);
+      gameLogic.broadcastState(io, lobbyId, room);
     });
 
     // -----------------------------------------------------------------------

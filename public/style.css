@@ -2893,6 +2893,174 @@ input:disabled {
   color: rgba(255, 255, 255, 0.7);
 }
 
+/* =============================================
+   M6: TUTORIAL OVERLAY
+   =============================================
+   Sits above everything else (z-index higher than other modals so a
+   tutorial-while-confused-modal-open scenario stays readable). Reuses
+   the existing .modal-overlay backdrop + transition, then layers a
+   tutorial-specific card with a step indicator, growing chain area,
+   and explanation panel. */
+.tutorial-overlay {
+  z-index: 1200;
+}
+.tutorial-card {
+  max-width: 600px;
+  width: calc(100% - 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.tutorial-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.tutorial-skip-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 0.25rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tutorial-skip-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.tutorial-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.tutorial-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.tutorial-dot.active {
+  background: var(--accent-primary, #6366f1);
+  transform: scale(1.3);
+}
+.tutorial-dot.done {
+  background: rgba(99, 102, 241, 0.5);
+}
+.tutorial-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 35vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+.tutorial-chain-item {
+  /* Reuse the live chain-item layout but add a fade-in animation per
+     entry so each step "lands" rather than popping in. */
+  animation: tutorial-entry-in 320ms ease-out both;
+}
+@keyframes tutorial-entry-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.tutorial-explain {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(99, 102, 241, 0.10);
+  border: 1px solid rgba(99, 102, 241, 0.24);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  min-height: 3.5em; /* Prevents layout shift between short and long explanations */
+}
+.tutorial-advance-btn {
+  align-self: center;
+  padding: 0.6rem 1.4rem;
+}
+
+/* =============================================
+   L1: ACTIVE THEME BADGE
+   =============================================
+   Shown in the in-game input header alongside the mute / invite / quit
+   buttons. Compact pill so it doesn't crowd the existing icon set.
+   Display:none → inline-flex transition keeps the row layout clean
+   when no theme is set. */
+.active-theme-badge {
+  display: none;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.18);
+  color: #e9d5ff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.active-theme-badge.visible {
+  display: inline-flex;
+}
+
+/* =============================================
+   L3: SPECTATOR PREDICTION BAR
+   =============================================
+   Sits below the input area, above the reaction bar. Hidden by default;
+   only shown to spectators while the game is in playing state.
+   .voted-yes / .voted-no give the chosen button a tinted background so
+   the spectator's commitment is visible at a glance. */
+.spectator-prediction-bar {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.85rem;
+}
+.spectator-prediction-bar.visible {
+  display: flex;
+  flex-wrap: wrap;
+}
+.spec-pred-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.spec-pred-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.spec-pred-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.10);
+}
+.spec-pred-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.spectator-prediction-bar.voted-yes #spec-pred-yes,
+.spectator-prediction-bar.voted-no #spec-pred-no {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #fff;
+}
+.spec-pred-tally {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Elimination notification tint ---- */
 #notification-overlay.notification--elimination {
   background: rgba(50, 5, 5, 0.9);

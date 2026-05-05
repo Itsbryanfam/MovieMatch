@@ -148,6 +148,31 @@ export function renderLobby(gameState, myPlayerId) {
   });
 
   lobbySettings.style.display = 'flex';
+
+  // L1: Theme picker. Populated from the server-supplied themes list
+  // (cached on window.__mmThemes by socketClient on connect). Disabled
+  // for non-hosts so guests can see what theme is active but can't
+  // change it. Only rebuilt if the option set differs (re-rendering
+  // every state update would steal the user's mid-selection focus).
+  const themeSel = document.getElementById('theme-select');
+  if (themeSel) {
+    const themes = Array.isArray(window.__mmThemes) ? window.__mmThemes : [{ id: 'any', label: '🎬 Any (no theme)' }];
+    const expectedIds = themes.map(t => t.id).join('|');
+    if (themeSel.dataset.themeIds !== expectedIds) {
+      themeSel.textContent = '';
+      themes.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.label;
+        if (t.description) opt.title = t.description;
+        themeSel.appendChild(opt);
+      });
+      themeSel.dataset.themeIds = expectedIds;
+    }
+    themeSel.value = gameState.theme || 'any';
+    themeSel.disabled = !amIHost;
+  }
+
   hardcoreToggle.checked = gameState.hardcoreMode || false;
   hardcoreToggle.disabled = !amIHost;
   tvShowsToggle.checked = gameState.allowTvShows || false;
@@ -382,6 +407,56 @@ function renderChainItems(gameState, myPlayerId) {
   chainDisplay.scrollTop = chainDisplay.scrollHeight;
 }
 
+// L3: Show + populate the spectator prediction bar. Tracks the active
+// turn index on the bar element so we can re-enable the vote buttons
+// when the turn changes (a fresh turn = fresh vote opportunity).
+function _renderSpectatorPredictionBar(gameState) {
+  const bar = document.getElementById('spectator-prediction-bar');
+  if (!bar) return;
+  bar.classList.add('visible');
+  const tallyEl = document.getElementById('spec-pred-tally');
+  const yesBtn = document.getElementById('spec-pred-yes');
+  const noBtn = document.getElementById('spec-pred-no');
+  const tally = gameState.predictionTally || { yes: 0, no: 0 };
+  if (tallyEl) tallyEl.textContent = `${tally.yes} 👍 • ${tally.no} 👎`;
+  // Re-enable the buttons on a turn change. We stamp the current turn
+  // index on the bar so a stateUpdate within the same turn (chat,
+  // typing, etc.) doesn't accidentally re-enable a vote that's already
+  // been cast.
+  const turnKey = String(gameState.currentTurnIndex) + '|' + (gameState.chain || []).length;
+  if (bar.dataset.turnKey !== turnKey) {
+    bar.dataset.turnKey = turnKey;
+    if (yesBtn) yesBtn.disabled = false;
+    if (noBtn) noBtn.disabled = false;
+    bar.classList.remove('voted-yes', 'voted-no');
+  }
+}
+
+function _hideSpectatorPredictionBar() {
+  const bar = document.getElementById('spectator-prediction-bar');
+  if (bar) bar.classList.remove('visible');
+}
+
+// L1: Render or hide the active-theme badge in the input header. Pulls
+// the theme label from window.__mmThemes (cached at socket connect) so
+// it shows the same friendly label as the lobby picker. Falls back to
+// the raw theme id if the cache is missing — degrades to "still
+// readable" rather than a broken-looking blank pill.
+function _renderActiveThemeBadge(themeId) {
+  const slot = document.getElementById('active-theme-badge');
+  if (!slot) return;
+  if (!themeId || themeId === 'any') {
+    slot.classList.remove('visible');
+    slot.textContent = '';
+    return;
+  }
+  const themes = Array.isArray(window.__mmThemes) ? window.__mmThemes : [];
+  const found = themes.find(t => t.id === themeId);
+  slot.textContent = found ? found.label : themeId;
+  if (found && found.description) slot.title = found.description;
+  slot.classList.add('visible');
+}
+
 // Updates the input area, turn indicator, and hint text based on whose turn it is.
 function renderTurnControls(gameState, myPlayerId, isSpectator, mode) {
   const activePlayer = gameState.players[gameState.currentTurnIndex];
@@ -424,6 +499,13 @@ function renderTurnControls(gameState, myPlayerId, isSpectator, mode) {
       turnIndicator.appendChild(bonusSpan);
     }
 
+    // L1: In-game theme reminder. Render BEFORE the solo bar so it's the
+    // first thing the player reads after the timer. Hidden when the
+    // theme is 'any' or unset. The server drops off-theme submissions,
+    // so making the constraint visible avoids "why was this rejected?"
+    // confusion mid-chain.
+    _renderActiveThemeBadge(gameState.theme);
+
     // M5: Objective + personal-best bar. Visible only in solo mode and
     // only when there's something to show (objective + or PB > 0). The
     // .objective-hit class flips to a "complete" green look once the
@@ -451,6 +533,9 @@ function renderTurnControls(gameState, myPlayerId, isSpectator, mode) {
     // after Solo doesn't see stale objective text.
     const bar = document.getElementById('solo-objective-bar');
     if (bar) bar.classList.remove('visible');
+    // L1: still surface the theme reminder in non-solo modes — themes
+    // apply to all modes (classic, team, speed, daily) too.
+    _renderActiveThemeBadge(gameState.theme);
   }
 
   if (isSpectator && gameState.status !== 'finished') {
@@ -459,8 +544,17 @@ function renderTurnControls(gameState, myPlayerId, isSpectator, mode) {
     if (submitBtn) submitBtn.disabled = true;
     turnIndicator.textContent = '👁 Spectating';
     hintText.textContent = "You'll join when this game ends.";
+    // L3: Show the prediction bar for spectators while the game is live.
+    // The vote-button click handler in app.js emits spectatorPredict; the
+    // tally below comes from each stateUpdate's predictionTally. Buttons
+    // re-enable each turn (the server clears predictions on resolution).
+    _renderSpectatorPredictionBar(gameState);
     return;
   }
+  // Non-spectator path — make sure the bar is hidden so a player who was
+  // promoted from spectator doesn't see a stale vote bar after their
+  // promotion.
+  _hideSpectatorPredictionBar();
 
   if (gameState.status === 'playing') {
     const isMyTurn = activePlayer && activePlayer.id === myPlayerId;

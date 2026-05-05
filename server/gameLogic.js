@@ -22,11 +22,25 @@ function clearTurnTimeout(id) {
 }
 
 function broadcastState(io, id, state) {
+  // L3: Roll the spectator-predictions map up into a tally before
+  // broadcasting. The raw map keys are socket ids — broadcasting them
+  // would let an observer correlate which spectator voted which way,
+  // which is needless surveillance. The tally is the only thing the
+  // client UI needs, and it's a tiny derived value.
+  const rawPreds = state.spectatorPredictions || {};
+  let tallyYes = 0, tallyNo = 0;
+  for (const v of Object.values(rawPreds)) {
+    if (v === 'yes') tallyYes++;
+    else if (v === 'no') tallyNo++;
+  }
   const clientState = {
     ...state,
     players: state.players.map(({ stableId, ...rest }) => rest),
     spectators: undefined,
     spectatorCount: (state.spectators || []).filter(s => s.connected).length,
+    // Strip the raw predictions map; ship just the tally.
+    spectatorPredictions: undefined,
+    predictionTally: { yes: tallyYes, no: tallyNo },
     chain: state.chain.map(item => ({
       playerId: item.playerId,
       playerName: item.playerName,
@@ -76,6 +90,13 @@ async function eliminateTeam(io, pubClient, id, state, teamId, reason) {
 }
 
 async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
+  // L3: If spectators voted on this turn, settle their predictions
+  // BEFORE the elimination notification fires. Outcome here is "no" —
+  // the player did NOT get it. We compute correctness for each vote
+  // and broadcast a one-shot result that the client uses for its
+  // "you called it!" / "wrong call" toast.
+  _settlePredictions(io, id, state, /* outcome */ 'no');
+
   if (state.gameMode === 'team') {
     const player = state.players[state.currentTurnIndex];
     const teamId = player ? player.teamId : 0;
@@ -99,6 +120,42 @@ async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
   if (state.status === 'playing') {
     await nextTurn(io, pubClient, id, state);
   }
+}
+
+// L3: Settle the spectator-prediction tally for the just-resolved turn.
+// `outcome` is 'yes' (the player got it) or 'no' (they didn't). Emits a
+// one-shot `predictionResult` to everyone in the room with per-vote
+// accuracy + the totals so the client can show "X of Y called it."
+// Clears the predictions map so the next turn starts fresh — without
+// this, votes would carry across turns and pollute the next tally.
+function _settlePredictions(io, id, state, outcome) {
+  const preds = state.spectatorPredictions || {};
+  const entries = Object.entries(preds);
+  if (entries.length === 0) {
+    // No spectator votes this turn — nothing to settle. Skip the broadcast
+    // so we don't add chatter to a quiet room.
+    return;
+  }
+  let correct = 0;
+  // Each spectator's vote correctness — sent as a map keyed by socketId so
+  // each spectator can look up THEIR own outcome client-side and ignore
+  // everyone else's. The map is small (one entry per voting spectator)
+  // and not sensitive (a spectator already knows their own vote).
+  const perVoter = {};
+  for (const [socketId, vote] of entries) {
+    const isCorrect = vote === outcome;
+    if (isCorrect) correct++;
+    perVoter[socketId] = isCorrect;
+  }
+  io.to(id).emit('predictionResult', {
+    outcome,
+    correct,
+    total: entries.length,
+    perVoter,
+  });
+  // Clear so the next turn's tally starts at zero. The next state
+  // broadcast naturally reflects predictionTally: { yes: 0, no: 0 }.
+  state.spectatorPredictions = {};
 }
 
 // Bucket free-form elimination reasons into stable categories for telemetry.
@@ -646,4 +703,9 @@ module.exports = {
   validateConnection,
   clearTurnTimeout,
   promoteSpectators,
+  // L3: Exposed for matchSystem.commitPlay's success path. Internal
+  // detail otherwise — kept underscore-prefixed in the implementation
+  // to flag "module-internal helper" while the public name is the
+  // unprefixed alias for cross-module callers.
+  settlePredictions: _settlePredictions,
 };

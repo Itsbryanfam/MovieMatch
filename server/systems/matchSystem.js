@@ -11,6 +11,7 @@ const gameLogic = require('../gameLogic');
 const telemetry = require('../telemetry');
 const statsSystem = require('./statsSystem');
 const soloObjectivesSystem = require('./soloObjectivesSystem');
+const themesSystem = require('./themesSystem');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
@@ -83,6 +84,14 @@ async function autocompleteSearch(ctx, socket, { query, lobbyId }) {
 
   const searchData = await searchRes.json();
   let results = (searchData.results || []).filter(r => r.media_type !== 'person');
+
+  // L1: Theme filter — drop suggestions that don't match the lobby's
+  // theme so the autocomplete only shows playable picks. Without this,
+  // a player in a Horror-themed lobby would see The Avengers as a
+  // suggestion and get rejected on submit, which feels like a bug.
+  if (room.theme && room.theme !== 'any') {
+    results = results.filter(r => themesSystem.matchesTheme(room.theme, r));
+  }
 
   results = results.slice(0, 5).map(r => ({
     id: r.id,
@@ -283,6 +292,14 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
         ).catch(() => {});
       }
 
+      // L3: Settle spectator predictions for this turn — outcome is 'yes'
+      // (the player got it). Done before nextTurn (which resets the timer
+      // and broadcasts) so the predictionResult lands first and the next
+      // tally starts clean. The settle helper clears the predictions map
+      // on the room object so the upcoming broadcast reflects an empty
+      // tally for the next active player.
+      gameLogic.settlePredictions(io, lobbyId, room, 'yes');
+
       room.isValidating = false;
       await gameLogic.nextTurn(io, pubClient, lobbyId, room);
 
@@ -335,6 +352,15 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
     );
     const searchData = await searchRes.json();
     let results = (searchData.results || []).filter(r => r.media_type !== 'person');
+
+    // L1: Apply theme filter BEFORE the levenshtein sort — otherwise we
+    // could end up picking the closest-string-match result that doesn't
+    // fit the theme and still letting it through downstream. Filtering
+    // first means the candidates we hand to validation are already
+    // theme-compliant.
+    if (room.theme && room.theme !== 'any') {
+      results = results.filter(r => themesSystem.matchesTheme(room.theme, r));
+    }
 
     results.sort((a, b) => {
       const titleA = (a.media_type === 'tv' ? a.name : a.title || a.name || '').toLowerCase();

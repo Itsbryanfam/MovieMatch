@@ -31,6 +31,7 @@ import {
 import { initSocket, leaveLobby } from './socketClient.js';
 import { getSocket, getCurrentLobbyId, getGameState } from './state.js';
 import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute, prefersReducedMotion } from './utils.js';
+import { shouldShowTutorial, runTutorial } from './tutorial.js';
 
 // ============================================================================
 // INITIALIZATION
@@ -133,6 +134,21 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     if (socket) socket.emit('requestPosters');
   }, 300);
+
+  // M6: First-time tutorial. Fires once per browser (gated on the
+  // mm_completedTutorial localStorage flag). Runs entirely client-side
+  // — no server round-trips, so a fresh visit + tutorial completion
+  // doesn't add any boot latency for returning players. Wrapped in a
+  // brief setTimeout so the hero screen has a chance to paint first;
+  // the tutorial overlay then layers on top.
+  if (shouldShowTutorial()) {
+    setTimeout(() => {
+      // .catch is defensive — runTutorial returns a Promise that resolves
+      // on dismiss, never rejects. If a future change makes it throw, we
+      // still want the rest of the app to function.
+      runTutorial().catch(() => {});
+    }, 600);
+  }
 
   // =========================================================================
   // NAVIGATION
@@ -471,6 +487,35 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.emit('startLobby', getCurrentLobbyId());
   });
 
+  // L1: Theme picker change emits setTheme. Server validates the theme
+  // id against the whitelist so an injected option value can't bypass
+  // the picker — if it does, the server simply drops the change.
+  document.getElementById('theme-select')?.addEventListener('change', (e) => {
+    socket.emit('setTheme', { lobbyId: getCurrentLobbyId(), theme: e.target.value });
+  });
+
+  // L3: Spectator prediction vote buttons. Disabled after click so the
+  // spectator can't double-vote within the same turn (the server's rate
+  // limit is the real ceiling, but disabling locally avoids the visual
+  // flicker of a click that's silently dropped). The buttons re-enable
+  // on the next turn via renderTurnControls's turnKey check.
+  function emitPrediction(prediction) {
+    const lobbyId = getCurrentLobbyId();
+    if (!lobbyId) return;
+    socket.emit('spectatorPredict', { lobbyId, prediction });
+    const bar = document.getElementById('spectator-prediction-bar');
+    if (bar) {
+      bar.classList.toggle('voted-yes', prediction === 'yes');
+      bar.classList.toggle('voted-no', prediction === 'no');
+    }
+    const yesBtn = document.getElementById('spec-pred-yes');
+    const noBtn = document.getElementById('spec-pred-no');
+    if (yesBtn) yesBtn.disabled = true;
+    if (noBtn) noBtn.disabled = true;
+  }
+  document.getElementById('spec-pred-yes')?.addEventListener('click', () => emitPrediction('yes'));
+  document.getElementById('spec-pred-no')?.addEventListener('click', () => emitPrediction('no'));
+
   hardcoreToggle?.addEventListener('change', (e) => {
     socket.emit('toggleHardcore', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
   });
@@ -582,6 +627,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   howToPlayBtn?.addEventListener('click', () => howToPlayModal?.classList.remove('hidden'));
   creditsBtn?.addEventListener('click', () => creditsModal?.classList.remove('hidden'));
+
+  // M6: Returning players can replay the tutorial from the How-to-Play
+  // modal. We close the modal first (avoid stacked overlays competing
+  // for focus) then clear the gate flag so runTutorial doesn't no-op,
+  // then run it. The runTutorial promise resolves on dismiss; nothing
+  // chains off it here.
+  document.getElementById('replay-tutorial-btn')?.addEventListener('click', () => {
+    if (howToPlayModal) howToPlayModal.classList.add('hidden');
+    try { localStorage.removeItem('mm_completedTutorial'); } catch {}
+    runTutorial().catch(() => {});
+  });
 
   async function loadLeaderboard() {
     leaderboardModal.classList.remove('hidden');
