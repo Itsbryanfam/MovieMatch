@@ -13,7 +13,7 @@ import {
   showNotification, renderAutocompleteResults, closeMobileAc,
   openShareModal, showGameOverBanner, resetMobileTab,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
-  showGhostAttempt, showToast,
+  showGhostAttempt, showToast, renderDailyResult,
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
@@ -24,7 +24,7 @@ import { prepareAudio, playSuccess, playFail, playTick, vibrate, escapeHtml, get
 
 import {
   getSocket, setSocket, getCurrentLobbyId, getMyPlayerId, getGameState,
-  getIsSpectator, getTurnInterval, getLastTickSound,
+  getIsSpectator, getIsDaily, getTurnInterval, getLastTickSound,
   setTurnInterval, setLastTickSound, clearTurnTimer,
   onJoined, onStateUpdate, onRejoined, resetSession
 } from './state.js';
@@ -83,7 +83,12 @@ export function initSocket() {
       if (waitingRoomEl) waitingRoomEl.classList.remove('hidden');
       if (lobbyScreenEl) lobbyScreenEl.classList.add('active');
     }
-    if (lobbyCodeDisplay) lobbyCodeDisplay.innerText = getCurrentLobbyId();
+    // H2: For daily lobbies, the lobby ID is an internal `DAILY-xxx-...`
+    // string not meant to be shared. Show a friendlier label instead so
+    // the in-game header doesn't expose plumbing.
+    if (lobbyCodeDisplay) {
+      lobbyCodeDisplay.innerText = getIsDaily() ? '🗓️ Daily Challenge' : getCurrentLobbyId();
+    }
   });
 
   socket.on('error', (msg) => showNotification(msg));
@@ -320,6 +325,53 @@ export function initSocket() {
       clearTurnTimer();
       document.title = 'MovieMatch';
       renderGame(state, getMyPlayerId(), getIsSpectator());
+
+      // H2: Daily Challenge end-of-game modal. Only fires once per
+      // finished transition to avoid duplicate opens when stateUpdate
+      // re-fires for unrelated reasons (chat messages, reactions).
+      // We piggyback on prevState.status to detect the playing→finished
+      // edge — same pattern as the win-flash handler above.
+      const justFinished = prevState?.status === 'playing' && state.status === 'finished';
+      if (justFinished && getIsDaily() && state.winner?.isDaily) {
+        // Ask the server for the latest leaderboard so the player's freshly
+        // recorded entry shows up. Render the modal as soon as we get it.
+        const date = state.winner.date;
+        socket.emit('requestDailyLeaderboard', date);
+        // The leaderboard response handler stores on socket._lastDailyLeaderboard;
+        // poll briefly for it (server is local, expected within a few hundred ms).
+        // Caps at ~2s so a slow network still surfaces the modal with whatever
+        // leaderboard came back, even if it's empty.
+        let elapsed = 0;
+        const pollMs = 100;
+        const maxMs = 2000;
+        const tryRender = () => {
+          const lb = socket._lastDailyLeaderboard;
+          if (lb && lb.date === date) {
+            socket._lastDailyLeaderboard = null;
+            renderDailyResult({
+              alreadyPlayed: false,
+              puzzleNumber: state.winner.puzzleNumber,
+              date,
+              chainLength: state.winner.chainLength || 0,
+              leaderboard: lb.leaderboard || [],
+            });
+            return;
+          }
+          elapsed += pollMs;
+          if (elapsed >= maxMs) {
+            renderDailyResult({
+              alreadyPlayed: false,
+              puzzleNumber: state.winner.puzzleNumber,
+              date,
+              chainLength: state.winner.chainLength || 0,
+              leaderboard: [],
+            });
+            return;
+          }
+          setTimeout(tryRender, pollMs);
+        };
+        setTimeout(tryRender, pollMs);
+      }
     }
   });
 
@@ -391,6 +443,34 @@ export function initSocket() {
 
   socket.on('youWereEliminated', (payload) => {
     pendingEliminationDetails = payload;
+  });
+
+  // -----------------------------------------------------------------------
+  // DAILY CHALLENGE (H2)
+  // -----------------------------------------------------------------------
+  // dailyAlreadyPlayed — sent when the player tried to start today's daily
+  // but their attempt for this UTC day already exists. The client just
+  // shows the result modal pre-populated with their previous score and
+  // the leaderboard; no lobby is created.
+
+  socket.on('dailyAlreadyPlayed', (payload) => {
+    renderDailyResult({
+      alreadyPlayed: true,
+      puzzleNumber: payload.puzzleNumber,
+      date: payload.date,
+      chainLength: payload.attempt?.chainLength || 0,
+      leaderboard: payload.leaderboard || [],
+    });
+  });
+
+  // dailyLeaderboard — response to requestDailyLeaderboard (used when the
+  // result modal needs a refresh, e.g. after the player just finished and
+  // we want the latest standings to reflect their entry).
+  socket.on('dailyLeaderboard', (payload) => {
+    // Keep the most recent leaderboard so renderDailyResult can pull it
+    // when the post-game flow fires below. Stored on a property of the
+    // function so we don't have to expose another state-module field.
+    socket._lastDailyLeaderboard = payload;
   });
 
   // -----------------------------------------------------------------------
@@ -559,6 +639,12 @@ export function initSocket() {
       if (lobbyScreen) lobbyScreen.classList.add('active');
       if (waitingRoom) waitingRoom.classList.remove('hidden');
       renderLobby(data.state, getMyPlayerId());
+    }
+    // H2: Same lobby-code-display override as the 'joined' handler \u2014 after
+    // refresh during a Daily run, show the friendly label rather than the
+    // internal DAILY-...-... lobby ID.
+    if (lobbyCodeDisplay) {
+      lobbyCodeDisplay.innerText = getIsDaily() ? '\ud83d\uddd3\ufe0f Daily Challenge' : data.lobbyId;
     }
     showNotification('\u2705 Reconnected to game!');
   });

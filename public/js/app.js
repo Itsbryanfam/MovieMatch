@@ -20,7 +20,7 @@ import {
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
   tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
   showPrivateBtn, backToJoinBtn, backToJoinBtn2, refreshLobbiesBtn,
-  heroPlayBtn, heroCodeBtn, howToPlayBtn, creditsBtn, howToPlayModal,
+  heroPlayBtn, heroCodeBtn, heroDailyBtn, howToPlayBtn, creditsBtn, howToPlayModal,
   creditsModal, closeHowToPlay, closeCredits, leaderboardBtn,
   leaderboardModal, closeLeaderboard, leaderboardList, submitBtn,
   movieInput, autocompleteContainer, chatInput, modeChips, joinRedBtn,
@@ -79,6 +79,34 @@ document.addEventListener('DOMContentLoaded', () => {
     navigator.clipboard.writeText(url)
       .then(() => showToast('Invite link copied! 🔗'))
       .catch(() => showToast('Room code: ' + code));
+  });
+
+  // =========================================================================
+  // DAILY CHALLENGE BUTTON (H2)
+  // =========================================================================
+  // Single-click entry point. Server checks attempt-NX; if the player has
+  // already played today, server emits dailyAlreadyPlayed and the result
+  // modal opens with their prior score + leaderboard. Otherwise it creates
+  // an ephemeral daily lobby with the seed pre-populated as chain[0] and
+  // the player joins via the standard 'joined' event flow.
+  heroDailyBtn?.addEventListener('click', () => {
+    const name = playerNameInput ? playerNameInput.value.trim() : '';
+    if (!name) {
+      showNotification('Enter a name first to track your Daily score!');
+      // Scroll the name input into view + focus it so the player can fix
+      // the gap immediately. Skipped on mobile to avoid summoning the
+      // keyboard before the player has time to read the message.
+      if (window.innerWidth > 767) playerNameInput?.focus();
+      return;
+    }
+    // Persist the name (same pattern as the existing join flow) so a
+    // refresh after a daily run still shows the player's name on their
+    // future daily attempts and on the daily leaderboard.
+    localStorage.setItem('mm_playerName', name);
+    getSocket().emit('startDailyChallenge', {
+      name,
+      stableId: getStableId(),
+    });
   });
 
   // =========================================================================

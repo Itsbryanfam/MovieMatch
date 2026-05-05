@@ -38,6 +38,12 @@ const RATE_LIMITS = {
   // player's run, so two events in a 5s window is plenty (covers a stuck-key
   // double-fire while still rejecting any kind of automated abuse pattern).
   quitGame:     { limit: 2,  windowMs: 5000  },
+  // H2: Daily Challenge entry point. Same pattern — generous enough for
+  // double-clicks, tight enough that a misbehaving client can't pound the
+  // TMDB seed-fetch path. The atomic NX claim inside dailySystem is the
+  // real correctness guard; this is just throttling.
+  dailyChallenge: { limit: 5, windowMs: 30000 },
+  dailyLeaderboard: { limit: 10, windowMs: 10000 },
 };
 
 // ---------------------------------------------------------------------------
@@ -171,6 +177,34 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // mark the quitter dead based on whose turn it is.
       if (await rateLimit(socket.id, 'quitGame', RATE_LIMITS.quitGame.limit, RATE_LIMITS.quitGame.windowMs)) return;
       await lobbySystem.quitGame(ctx, socket, lobbyId);
+    });
+
+    // -----------------------------------------------------------------------
+    // DAILY CHALLENGE (H2) — single-player, async, one attempt per UTC day
+    // -----------------------------------------------------------------------
+
+    on('startDailyChallenge', async ({ name, stableId }) => {
+      if (await rateLimit(socket.id, 'dailyChallenge', RATE_LIMITS.dailyChallenge.limit, RATE_LIMITS.dailyChallenge.windowMs)) return;
+      // Defensive name sanitization same as joinLobby — keeps the daily
+      // attempt record's display name within bounds. stableId validation
+      // is done inside startDailyChallenge (it's the auth signal for the
+      // attempt-NX claim).
+      const cleanName = clampString(name, 24);
+      await lobbySystem.startDailyChallenge(ctx, socket, { name: cleanName, stableId });
+    });
+
+    on('requestDailyLeaderboard', async (date) => {
+      if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
+      // Lazy require to keep the existing top-of-file imports stable; this
+      // module is only used by this one handler so a top-level require would
+      // be slightly out of place.
+      const dailySystem = require('./systems/dailySystem');
+      const safeDate = (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))
+        ? date
+        : dailySystem.getTodayDate();
+      const leaderboard = await dailySystem.getDailyLeaderboard(pubClient, safeDate, 20);
+      const puzzleNumber = dailySystem.getPuzzleNumber(safeDate);
+      socket.emit('dailyLeaderboard', { date: safeDate, puzzleNumber, leaderboard });
     });
 
     on('requestPublicLobbies', async () => {

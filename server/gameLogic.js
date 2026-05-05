@@ -227,6 +227,13 @@ function resetTimer(state) {
   if (state.gameMode === 'speed') {
     // Speed mode: flat 15s every turn, no reduction logic.
     state.turnDurationMs = 15000;
+  } else if (state.gameMode === 'daily') {
+    // H2: Daily Challenge is async-style casual play. A flat 60s timer
+    // gives the player time to think without the shrinking-pressure
+    // mechanic that would punish anyone who hesitates. The timer still
+    // exists (so a tab-out doesn't leave the daily run hanging forever)
+    // but the cadence is intentionally relaxed.
+    state.turnDurationMs = 60000;
   } else {
     // Classic/team/solo: every 2 successful turns the time limit shrinks by
     // 5 seconds, floored at 10s. timerMultiplier increments each turn.
@@ -293,23 +300,55 @@ async function checkSoloWin(io, pubClient, id, state) {
   state.turnExpiresAt = null;
 
   const solo = state.players[0];
-  if (solo) {
+  const isDaily = state.gameMode === 'daily';
+
+  // H2: Daily runs do NOT increment the global wins counter or feed the
+  // global leaderboard — they're a separate scoring track tracked by
+  // dailySystem (per-day attempt records + per-day leaderboard). Mixing
+  // the two would let a daily streak inflate the all-time leaderboard
+  // and dilute the original "win an MP game" meaning of a global win.
+  if (solo && !isDaily) {
     solo.wins = (solo.wins || 0) + 1;
     await recordPlayerWin(pubClient, solo);
   }
+
+  // H2: For daily mode, the displayed "chain length" excludes the seed
+  // (the seed was supplied, not earned), so the winner.chainLength shown
+  // on the result card matches what the daily leaderboard records.
+  const earnedLength = isDaily
+    ? Math.max(0, state.chain.length - 1)
+    : state.chain.length;
+
   state.winner = {
     name: solo ? solo.name : 'Solo Player',
-    chainLength: state.chain.length,
+    chainLength: earnedLength,
     isSolo: true,
-    score: state.chain.length
+    isDaily,
+    puzzleNumber: state.dailyPuzzleNumber || null,
+    date: state.dailyDate || null,
+    score: earnedLength,
   };
+
+  // H2: Persist the daily attempt as 'done' and update the per-day
+  // leaderboard ZSET. Done before saveLobby/broadcastState so the client's
+  // very next request for daily state sees the finalized record.
+  if (isDaily) {
+    // Lazy-require to avoid an import cycle: lobbySystem requires gameLogic
+    // (for nextTurn), and gameLogic now needs to call back into lobbySystem
+    // for the daily-finalize hook. Top-level require here would create a
+    // circular dependency that resolves to {} on Node's first eval pass.
+    const lobbySystem = require('./systems/lobbySystem');
+    await lobbySystem.finalizeDailyOnGameEnd(pubClient, state);
+  }
+
   // H6: Telemetry — solo "wins" are really survival completions; the
   // chainLength field is the player's score and the most useful number to
   // aggregate (avg/p50/p95 chain length tells us if Solo is too easy/hard).
   telemetry.track(pubClient, 'game_won', {
-    mode: 'solo',
-    chainLength: state.chain.length,
+    mode: isDaily ? 'daily' : 'solo',
+    chainLength: earnedLength,
     isSolo: true,
+    isDaily,
   });
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
@@ -355,7 +394,11 @@ async function checkClassicWin(io, pubClient, id, state) {
 
 async function checkWinCondition(io, pubClient, id, state) {
   if (state.gameMode === 'team')    return checkTeamWin(io, pubClient, id, state);
-  if (state.gameMode === 'solo')    return checkSoloWin(io, pubClient, id, state);
+  // H2: daily routes through the solo win path — both are single-player
+  // "did the player still survive?" checks. The solo handler special-
+  // cases gameMode === 'daily' to skip the global wins increment and to
+  // call into dailySystem.finalizeDailyAttempt.
+  if (state.gameMode === 'solo' || state.gameMode === 'daily') return checkSoloWin(io, pubClient, id, state);
   /* classic / speed */             return checkClassicWin(io, pubClient, id, state);
 }
 

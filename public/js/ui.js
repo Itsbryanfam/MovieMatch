@@ -15,7 +15,7 @@ export let playerNameInput, lobbyIdInput, joinBtn, startBtn, lobbyPlayersList;
 export let lobbyCodeDisplay, lobbySettings, hardcoreToggle, tvShowsToggle, publicRoomToggle;
 export let joinPanel, privatePanel, publicPanel, showPublicBtn, showPrivateBtn;
 export let backToJoinBtn, backToJoinBtn2, refreshLobbiesBtn, publicLobbiesList;
-export let heroPlayBtn, heroCodeBtn, howToPlayModal, creditsModal;
+export let heroPlayBtn, heroCodeBtn, heroDailyBtn, howToPlayModal, creditsModal;
 export let howToPlayBtn, creditsBtn, closeHowToPlay, closeCredits;
 export let gamePlayersList, chainDisplay, movieInput, submitBtn, inputArea;
 export let turnIndicator, hintText, autocompleteContainer, mobileAcDropdown;
@@ -53,6 +53,7 @@ export function initUIElements() {
   publicLobbiesList = document.getElementById('public-lobbies-list');
   heroPlayBtn = document.getElementById('hero-play-btn');
   heroCodeBtn = document.getElementById('hero-code-btn');
+  heroDailyBtn = document.getElementById('hero-daily-btn');
   howToPlayModal = document.getElementById('how-to-play-modal');
   creditsModal = document.getElementById('credits-modal');
   howToPlayBtn = document.getElementById('how-to-play-btn');
@@ -967,6 +968,120 @@ export function selectChainEntries(chain) {
     const entries = [first, ...middle, last];
     const skipped = chain.length - entries.length;
     return { entries, skipped };
+}
+
+// =========================================================================
+// DAILY CHALLENGE RESULT MODAL (H2)
+// =========================================================================
+// Single render path used by both the "you already played today" view and
+// the post-game result view. The two cases differ only in the title/copy
+// and whether the share button is wired — handled inline below via flags
+// on the `data` argument.
+
+export function renderDailyResult(data) {
+  // Defensive: bail silently if the modal markup isn't present (e.g. during
+  // tests where index.html isn't loaded). Production always has it.
+  const modal = document.getElementById('daily-result-modal');
+  if (!modal) return;
+
+  const titleEl = document.getElementById('daily-result-title');
+  const subEl = document.getElementById('daily-result-subtitle');
+  const bodyEl = document.getElementById('daily-result-body');
+  const shareBtn = document.getElementById('daily-result-share-btn');
+  if (!titleEl || !subEl || !bodyEl || !shareBtn) return;
+
+  const isAlreadyPlayed = !!data.alreadyPlayed;
+  const puzzleNumber = data.puzzleNumber || 1;
+  const date = data.date || '';
+  const chainLength = Math.max(0, data.chainLength | 0);
+
+  titleEl.textContent = `🗓️ Daily Challenge #${puzzleNumber}`;
+  subEl.textContent = isAlreadyPlayed
+    ? `You already played today — come back tomorrow for a new puzzle.`
+    : `${chainLength === 0 ? 'No moves connected' : `Chain of ${chainLength}`}${date ? ' — ' + date : ''}`;
+
+  // Build body: score readout + leaderboard table. Use DOM APIs (not
+  // innerHTML interpolation) so a future leaderboard entry with crafted
+  // characters can't get HTML-injected.
+  bodyEl.textContent = '';
+
+  // Big score badge.
+  const scoreCard = document.createElement('div');
+  scoreCard.className = 'daily-score-card';
+  const scoreNum = document.createElement('div');
+  scoreNum.className = 'daily-score-num';
+  scoreNum.textContent = String(chainLength);
+  const scoreLabel = document.createElement('div');
+  scoreLabel.className = 'daily-score-label';
+  scoreLabel.textContent = chainLength === 1 ? 'connection' : 'connections';
+  scoreCard.appendChild(scoreNum);
+  scoreCard.appendChild(scoreLabel);
+  bodyEl.appendChild(scoreCard);
+
+  // Leaderboard. Empty array → "Be the first!" hint.
+  const lbHeader = document.createElement('div');
+  lbHeader.className = 'daily-lb-header';
+  lbHeader.textContent = "Today's leaderboard";
+  bodyEl.appendChild(lbHeader);
+
+  const lbList = document.createElement('div');
+  lbList.className = 'daily-lb-list';
+  const leaderboard = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+  if (leaderboard.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-hint';
+    empty.style.cssText = 'text-align:center; padding:1rem; color:var(--text-muted);';
+    empty.textContent = 'No results yet. Yours could be the first!';
+    lbList.appendChild(empty);
+  } else {
+    leaderboard.forEach((entry, i) => {
+      const row = document.createElement('div');
+      row.className = 'daily-lb-row';
+      const rank = document.createElement('span');
+      rank.className = 'daily-lb-rank';
+      rank.textContent = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i + 1);
+      const name = document.createElement('span');
+      name.className = 'daily-lb-name';
+      name.textContent = entry.name || 'Anonymous';
+      const len = document.createElement('span');
+      len.className = 'daily-lb-len';
+      len.textContent = String(entry.chainLength | 0);
+      row.appendChild(rank);
+      row.appendChild(name);
+      row.appendChild(len);
+      lbList.appendChild(row);
+    });
+  }
+  bodyEl.appendChild(lbList);
+
+  // Wire the share button to copy a Wordle-style text result. Replace any
+  // prior listener (cloneNode trick) so reopening the modal doesn't
+  // accumulate handlers across multiple opens.
+  const newShareBtn = shareBtn.cloneNode(true);
+  shareBtn.parentNode.replaceChild(newShareBtn, shareBtn);
+  newShareBtn.addEventListener('click', () => {
+    const text = `🎬 MovieMatch Daily #${puzzleNumber}\nChain: ${chainLength}\nhttps://moviematch.it.com`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => showToast('Result copied to clipboard! 📋'),
+        () => showToast('Couldn\'t copy — try again')
+      );
+    } else {
+      showToast('Clipboard not available');
+    }
+  });
+
+  // Ensure the close-button + Done button both close the modal cleanly.
+  // The MutationObserver focus-trap wiring (L6 from Week 1) handles focus
+  // restoration when the modal is hidden.
+  const closeBtn = document.getElementById('daily-result-close-btn');
+  if (closeBtn) {
+    const fresh = closeBtn.cloneNode(true);
+    closeBtn.parentNode.replaceChild(fresh, closeBtn);
+    fresh.addEventListener('click', () => modal.classList.add('hidden'));
+  }
+
+  modal.classList.remove('hidden');
 }
 
 export function showToast(msg) {

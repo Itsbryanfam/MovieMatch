@@ -89,10 +89,22 @@
             <span class="hero-feature-pill">⚡ Speed</span>
             <span class="hero-feature-pill">📺 TV Shows</span>
             <span class="hero-feature-pill">🔥 Hardcore</span>
+            <!-- H2: Daily Challenge feature pill — kept in the existing
+                 row so it advertises alongside the other modes without
+                 demanding its own line. -->
+            <span class="hero-feature-pill">🗓️ Daily</span>
           </div>
           <div class="hero-cta-group">
             <button id="hero-play-btn" class="btn-primary hero-play-btn">
               &#9654;&nbsp; Play Now &mdash; It's Free
+            </button>
+            <!-- H2: Daily Challenge entry point. Placed between the two
+                 existing CTAs so it's prominent without displacing the
+                 primary "Play Now" call-to-action. Uses the secondary
+                 button style + a daily-specific accent class so it reads
+                 as "different track" rather than "alternative join path." -->
+            <button id="hero-daily-btn" class="btn-secondary hero-daily-btn">
+              &#128197;&nbsp; Today's Daily Challenge
             </button>
             <button id="hero-code-btn" class="btn-secondary hero-code-btn">
               &#128279;&nbsp; Have a room code? Jump in
@@ -474,6 +486,27 @@
       <h2 class="modal-title">🏆 Leaderboard</h2>
       <p class="modal-subtitle">Top players by wins</p>
       <div id="leaderboard-list" style="max-height:400px;overflow-y:auto;margin-top:1rem;"></div>
+    </div>
+  </div>
+
+  <!-- H2: Daily Challenge result modal. Shown in two cases:
+       (a) Player visits the Daily after already playing today (server emits
+           dailyAlreadyPlayed) — pre-populated with their existing score.
+       (b) Player finishes today's run (existing stateUpdate flips status
+           to 'finished' and gameMode === 'daily') — populated with their
+           result and the daily leaderboard.
+       Content is filled in entirely by JS at open time, so the markup is
+       just an empty card; the structure lives in ui.js renderDailyResult. -->
+  <div id="daily-result-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <button class="modal-close" id="close-daily-result">✕</button>
+      <h2 class="modal-title" id="daily-result-title">Daily Challenge</h2>
+      <p class="modal-subtitle" id="daily-result-subtitle"></p>
+      <div id="daily-result-body" style="max-height:60vh;overflow-y:auto;margin-top:1rem;"></div>
+      <div class="daily-result-actions" style="display:flex; gap:0.6rem; justify-content:center; margin-top:1rem;">
+        <button id="daily-result-share-btn" class="btn-primary" style="padding:0.55rem 1.2rem;">📋 Copy Result</button>
+        <button id="daily-result-close-btn" class="btn-secondary" style="padding:0.55rem 1.2rem;">Done</button>
+      </div>
     </div>
   </div>
 

@@ -28,6 +28,10 @@ jest.mock('../public/js/state.js', () => {
     lobbyId: 'TEST01',
     playerId: 'host_id',
     isSpectator: false,
+    // H2: Track daily-mode flag in the mock so the new daily-finished
+    // branch in socketClient can read it without throwing. Default false
+    // matches the existing tests (none of them are daily flows).
+    isDaily: false,
     gameState: null,
     turnInterval: null,
     lastTickSound: 0,
@@ -35,12 +39,14 @@ jest.mock('../public/js/state.js', () => {
   return {
     __setSocket: (s) => { internals.socket = s; },
     __setMyPlayerId: (id) => { internals.playerId = id; },
+    __setIsDaily: (v) => { internals.isDaily = v; },
     getSocket: () => internals.socket,
     setSocket: (s) => { internals.socket = s; },
     getCurrentLobbyId: () => internals.lobbyId,
     getMyPlayerId: () => internals.playerId,
     getGameState: () => internals.gameState,
     getIsSpectator: () => internals.isSpectator,
+    getIsDaily: () => internals.isDaily,
     getTurnInterval: () => internals.turnInterval,
     getLastTickSound: () => internals.lastTickSound,
     setTurnInterval: (v) => { internals.turnInterval = v; },
@@ -53,6 +59,7 @@ jest.mock('../public/js/state.js', () => {
       internals.lobbyId = data.lobbyId;
       internals.playerId = data.playerId;
       internals.isSpectator = data.isSpectator || false;
+      internals.isDaily = !!data.isDaily;
     }),
     onStateUpdate: jest.fn((s) => { internals.gameState = s; return null; }),
     onRejoined: jest.fn((data) => {
@@ -65,6 +72,7 @@ jest.mock('../public/js/state.js', () => {
       internals.playerId = null;
       internals.gameState = null;
       internals.isSpectator = false;
+      internals.isDaily = false;
     }),
   };
 });

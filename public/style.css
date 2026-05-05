@@ -2499,6 +2499,86 @@ input:disabled {
 
 .self-elim-close:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4); }
 
+/* =============================================
+   H2: DAILY CHALLENGE — hero button + result modal
+   =============================================
+   Hero button uses a warm amber accent so it reads as a distinct option
+   from the primary indigo "Play Now" — the player's eye should clearly
+   parse "two different tracks" rather than "two paths to the same thing." */
+.hero-daily-btn {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  border: none;
+}
+.hero-daily-btn:hover {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+}
+
+/* Result modal — score readout (big number, small label) */
+.daily-score-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 0.5rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(217, 119, 6, 0.06));
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+.daily-score-num {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #fbbf24;
+  line-height: 1;
+}
+.daily-score-label {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+/* Result modal — leaderboard */
+.daily-lb-header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 1rem 0 0.5rem;
+  text-align: center;
+}
+.daily-lb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.daily-lb-row {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.95rem;
+}
+.daily-lb-rank {
+  flex: 0 0 2.5rem;
+  text-align: center;
+  font-weight: 600;
+}
+.daily-lb-name {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0 0.5rem;
+}
+.daily-lb-len {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Elimination notification tint ---- */
 #notification-overlay.notification--elimination {
   background: rgba(50, 5, 5, 0.9);

@@ -10,6 +10,11 @@ const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
 const posterCache = require('../posterCache');
 const telemetry = require('../telemetry');
+const dailySystem = require('./dailySystem');
+
+const TMDB_API_BASE = 'https://api.themoviedb.org/3';
+const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
+const TMDB_FETCH_TIMEOUT_MS = 5000;
 
 // Unambiguous charset for lobby codes (Crockford base32 — no 0/O, 1/I/L)
 const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -257,6 +262,180 @@ async function startLobby(ctx, socket, lobbyId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// DAILY CHALLENGE (H2)
+// ---------------------------------------------------------------------------
+// Creates an ephemeral single-player lobby pre-populated with today's seed
+// movie as chain[0], then routes the player into the standard playing flow.
+// The lobby ID is deterministic per (player, date) so two parallel clicks
+// from the same player produce the same lobby (the second hit short-
+// circuits via the existing rejoin path) — and players who refresh mid-
+// run land back on their lobby via sessionStorage like in regular play.
+
+async function startDailyChallenge(ctx, socket, { name, stableId }) {
+  const { io, pubClient, TMDB_HEADERS } = ctx;
+
+  if (typeof stableId !== 'string' || stableId.length === 0) {
+    return socket.emit('error', 'Daily Challenge requires a stable identity.');
+  }
+  const playerName = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 24) : 'Player';
+
+  const date = dailySystem.getTodayDate();
+  const puzzleNumber = dailySystem.getPuzzleNumber(date);
+
+  // Atomic claim — one attempt per stableId per UTC day. NX ensures two
+  // concurrent clicks (double-tap) can't both create a fresh attempt.
+  const claim = await dailySystem.claimDailyAttempt(pubClient, stableId, playerName, date);
+  if (!claim) {
+    return socket.emit('error', 'Could not start Daily Challenge — please try again.');
+  }
+
+  // Already played today: just send the result + leaderboard so the client
+  // can show the "you already played, here's your score" view. We do NOT
+  // create a new lobby in this case — the previous run's chain is captured
+  // in the attempt record (chainLength only; the full chain is ephemeral
+  // on the lobby and gets cleaned up after the game ends).
+  if (!claim.created) {
+    const leaderboard = await dailySystem.getDailyLeaderboard(pubClient, date, 10);
+    return socket.emit('dailyAlreadyPlayed', {
+      date,
+      puzzleNumber,
+      attempt: claim.attempt,
+      leaderboard,
+    });
+  }
+
+  // Fresh attempt — bootstrap the lobby with the seed movie as chain[0].
+  // Fetch the seed's cast (cached for 7 days via getOrFetchCredits) AND
+  // the movie details (for poster + canonical title/year). Two TMDB calls
+  // total per player per day — most days hit cache after the first claim.
+  let seedMovie;
+  try {
+    const credits = await redisUtils.getOrFetchCredits(pubClient, claim.seed.id, claim.seed.mediaType, TMDB_HEADERS);
+    // We also want the poster path. The credits cache doesn't carry that,
+    // so a separate /movie/{id} call. AbortSignal timeout matches the rest
+    // of the codebase so a TMDB stall can't freeze the player on the
+    // hero screen indefinitely.
+    const detailsRes = await fetch(
+      `${TMDB_API_BASE}/${claim.seed.mediaType}/${claim.seed.id}?language=en-US`,
+      { headers: TMDB_HEADERS, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
+    );
+    const details = await detailsRes.json();
+    const posterPath = details.poster_path;
+    seedMovie = {
+      id: claim.seed.id,
+      title: details.title || details.name || claim.seed.title,
+      year: String(claim.seed.year || (details.release_date || '').split('-')[0] || ''),
+      poster: posterPath ? `${TMDB_POSTER_BASE}${posterPath}` : null,
+      cast: (credits.cast || []).map(a => typeof a === 'string' ? { id: null, name: a } : a),
+      mediaType: claim.seed.mediaType,
+    };
+  } catch {
+    // TMDB unreachable on the bootstrap call — bail rather than start a
+    // broken daily run. The attempt key was claimed via NX, so leave it as
+    // in_progress (it'll auto-expire) and let the player retry tomorrow or
+    // contact support. Note: NOT idempotent if TMDB recovers in the next
+    // few hours — they'd be locked out of today's puzzle.
+    return socket.emit('error', "Couldn't reach the movie database. Please try again later.");
+  }
+
+  // Lobby ID encodes the player + date so a refresh re-lands on the same
+  // run. Truncating the stableId keeps the ID short enough for sessionStorage
+  // and URL params if we ever expose it.
+  const lobbyId = `DAILY-${stableId.slice(0, 12)}-${date.replace(/-/g, '')}`.toUpperCase().slice(0, 32);
+
+  // Build the lobby. Single-player, daily mode, chain pre-populated with
+  // the seed movie (and seed marked as used so it can't be re-played).
+  // teamId 0 by convention — never matters in solo modes but the field is
+  // expected by various player iterations.
+  const room = {
+    id: lobbyId,
+    status: 'playing',
+    players: [{
+      id: socket.id,
+      name: playerName,
+      isHost: true,
+      isAlive: true,
+      connected: true,
+      score: 0,
+      wins: 0,
+      teamId: 0,
+      stableId,
+    }],
+    spectators: [],
+    chain: [{
+      // playerId 'daily_seed' is a sentinel — no real player owns the seed;
+      // the client renders it as "Today's puzzle" rather than someone's
+      // name. The existing chain renderer uses playerName for display.
+      playerId: 'daily_seed',
+      playerName: `🎬 Daily #${puzzleNumber}`,
+      movie: seedMovie,
+      matchedActors: [],
+    }],
+    usedMovies: [`${seedMovie.mediaType}:${seedMovie.id}`],
+    hardcoreMode: false,
+    previousSharedActors: [],
+    allowTvShows: false,
+    isPublic: false,
+    timerMultiplier: 0,
+    turnExpiresAt: null,
+    isValidating: false,
+    gameMode: 'daily',
+    currentTurnIndex: 0,
+    currentTurnRetries: 0,
+    // Daily-specific metadata so client and server can read puzzle context
+    // without recomputing dates everywhere.
+    dailyDate: date,
+    dailyPuzzleNumber: puzzleNumber,
+  };
+
+  // Set the timer for the player's first move (post-seed). Reuses the
+  // resetTimer helper, which special-cases gameMode='daily' to a flat 60s.
+  gameLogic.resetTimer(room);
+
+  await redisUtils.saveLobby(pubClient, lobbyId, room);
+  await redisUtils.setSocketLobby(pubClient, socket.id, lobbyId);
+  socket.join(lobbyId);
+
+  // 'joined' tells the client it's in a lobby and can transition screens.
+  // We add `isDaily: true` so the client knows to render daily-specific UI
+  // (no invite button, daily header instead of room code, etc.).
+  socket.emit('joined', { lobbyId, playerId: socket.id, isDaily: true });
+
+  // Push the initial state so the client renders the seed chain entry and
+  // turn indicator without a separate request.
+  gameLogic.broadcastState(io, lobbyId, room);
+
+  // H6: Telemetry — fired on each fresh claim, NOT on the already-played
+  // path. Lets us measure daily DAU and check-in rate over time.
+  telemetry.track(pubClient, 'daily_played', {
+    date,
+    puzzleNumber,
+    seedId: seedMovie.id,
+  });
+}
+
+// Called by gameLogic.checkSoloWin when a daily run ends, so the player's
+// final chain length is recorded on the leaderboard and the attempt is
+// flipped to 'done'. Lives here (not in gameLogic) to keep the daily-
+// specific Redis schema isolated from generic game logic.
+async function finalizeDailyOnGameEnd(pubClient, room) {
+  if (!room || room.gameMode !== 'daily' || !room.dailyDate) return;
+  const player = room.players && room.players[0];
+  if (!player || !player.stableId) return;
+  // chainLength excludes the seed entry — the seed was supplied, not
+  // earned, so a player who couldn't connect on move 1 scores 0, a
+  // player with one valid play scores 1, etc.
+  const earnedLength = Math.max(0, (room.chain || []).length - 1);
+  await dailySystem.finalizeDailyAttempt(
+    pubClient,
+    player.stableId,
+    player.name,
+    earnedLength,
+    room.dailyDate
+  );
+}
+
 async function restartLobby(ctx, socket, lobbyId) {
   const { io, pubClient } = ctx;
   const room = await redisUtils.getLobby(pubClient, lobbyId);
@@ -456,5 +635,7 @@ module.exports = {
   restartLobby,
   requestPublicLobbies,
   quitGame,
+  startDailyChallenge,
+  finalizeDailyOnGameEnd,
   handleDisconnect,
 };
