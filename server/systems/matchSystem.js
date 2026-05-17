@@ -413,7 +413,8 @@ async function _computeCouldHavePlayed(room, pubClient, headers) {
         headers,
         rng: () => 0,
         getOrFetchPersonCredits: redisUtils.getOrFetchPersonCredits,
-        dailySeed: [], // unused on a non-empty chain (always true at the H3 site)
+        // generateBotMove only reads dailySeed when chain.length===0; the H3 site always has chain.length>=1, so [] is never consulted.
+        dailySeed: [],
       });
       if (!move || move.tmdbId == null) return null;
       // Resolve id → title/year via the SAME direct-ID path submitBotMove
@@ -426,9 +427,28 @@ async function _computeCouldHavePlayed(room, pubClient, headers) {
       const year = (`${top.release_date || top.first_air_date || ''}`).split('-')[0] || '';
       return { title, year };
     })();
-    // Fail-closed time box: the loser of the race is null.
-    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), COULD_HAVE_PLAYED_TIMEOUT_MS));
-    return await Promise.race([work, timeout]);
+    // Capture the timer id so we can cancel it once the race settles, and
+    // .unref() it so a pending suggestion timer never by itself pins a Jest
+    // worker / Node process past shutdown — same discipline as
+    // scheduleBotMove's timer (botSystem.js).
+    const handle = { id: null };
+    const timeout = new Promise((resolve) => {
+      handle.id = setTimeout(() => resolve(null), COULD_HAVE_PLAYED_TIMEOUT_MS);
+      if (handle.id && typeof handle.id.unref === 'function') handle.id.unref();
+    });
+    // If the timeout wins the race, `work` may still reject LATER (slow TMDB
+    // that ultimately errors). Without this no-op catch that late rejection
+    // is unhandled and exits Node 18+. The race still observes the rejection
+    // on the fast-reject path, so the outer catch below stays the handler
+    // for that path.
+    work.catch(() => {});
+    try {
+      return await Promise.race([work, timeout]);
+    } finally {
+      // work won → cancel the pending timer (no leak, no stray fire);
+      // timeout won → harmless no-op on an already-fired timer.
+      clearTimeout(handle.id);
+    }
   } catch (e) {
     return null; // best-effort: a missing suggestion must never break elimination
   }

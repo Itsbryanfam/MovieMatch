@@ -277,6 +277,7 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
 
   afterEach(() => {
     gameLogic.clearTurnTimeout('TEST');
+    jest.restoreAllMocks(); // failure-safe: restore generateBotMove spy even if a test threw before its inline restore
   });
 
   test('emits youWereEliminated to the failing socket on invalid connection', async () => {
@@ -417,7 +418,6 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     // Existing H3 fields still intact (purely additive).
     expect(payload.yourGuess.title).toBe('Casino Royale');
     expect(payload.lastChainEntry.title).toBe('Inception');
-    botSystem.generateBotMove.mockRestore();
   });
 
   test('payload omits couldHavePlayed when the pathfinder returns null', async () => {
@@ -432,7 +432,6 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
     expect(payload.couldHavePlayed).toBeUndefined();
     expect(payload.yourGuess.title).toBe('Casino Royale'); // existing behavior unaffected
-    botSystem.generateBotMove.mockRestore();
   });
 
   test('payload omits couldHavePlayed when the pathfinder throws (fail-closed)', async () => {
@@ -448,7 +447,6 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     expect(elim).toBeDefined();                       // still emitted
     expect(elim[1].couldHavePlayed).toBeUndefined();  // just no suggestion
     expect(typeof elim[1].reason).toBe('string');     // existing assertions hold
-    botSystem.generateBotMove.mockRestore();
   });
 
   test('payload omits couldHavePlayed when the suggestion id will not resolve', async () => {
@@ -463,7 +461,26 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
 
     const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
     expect(payload.couldHavePlayed).toBeUndefined();
-    botSystem.generateBotMove.mockRestore();
+  });
+
+  test('payload omits couldHavePlayed when the computation exceeds the timeout', async () => {
+    jest.useFakeTimers();
+    const room = makeInceptionRoom();
+    redisUtils.getLobby.mockResolvedValue(room);
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
+    global.fetch = fetchByUrl();
+    // Never resolves → simulates TMDB slower than COULD_HAVE_PLAYED_TIMEOUT_MS (1200ms).
+    jest.spyOn(botSystem, 'generateBotMove').mockReturnValue(new Promise(() => {}));
+
+    const submitPromise = matchSystem.submitMovie(ctx, mockSocket,
+      { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
+    // Fire the 1200ms fail-closed timer (literal 1201 = COULD_HAVE_PLAYED_TIMEOUT_MS + 1).
+    await jest.advanceTimersByTimeAsync(1201);
+    await submitPromise;
+
+    const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
+    expect(payload.couldHavePlayed).toBeUndefined();
+    jest.useRealTimers();
   });
 });
 
