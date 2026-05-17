@@ -13,6 +13,10 @@ const telemetry = require('../telemetry');
 const dailySystem = require('./dailySystem');
 // Player hard-cap constant (single source of truth — see server/constants.js).
 const { MAX_PLAYERS_PER_LOBBY } = require('../constants');
+// Phase 5a: bot factory + in-process bot-timer cleanup (lobbySystem→botSystem
+// is a plain acyclic top-level require — botSystem only top-level-requires
+// fs/path — so no lazy-require / cycle concern here).
+const botSystem = require('./botSystem');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
@@ -319,6 +323,43 @@ async function kickPlayer(ctx, socket, { lobbyId, targetId }) {
     targetSocket.leave(lobbyId);
   }
   gameLogic.broadcastState(io, lobbyId, room);
+}
+
+// Phase 5a: host adds an AI opponent to a WAITING classic/speed lobby. RMW
+// under withLobbyLock (mirrors kickPlayer's finding-#4 reasoning — a stale
+// snapshot save must not resurrect/lose a bot). Gated to classic/speed: team
+// needs balanced bot assignment and solo/daily are single-player by design
+// (out of scope this phase).
+async function addBot(ctx, socket, { lobbyId, difficulty }) {
+  const { io, pubClient } = ctx;
+  let added = false;
+  let rejection = null;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') { rejection = 'Bots can only be added before the game starts.'; return false; }
+    if (!r.players.find(p => p.id === socket.id)?.isHost) { rejection = 'Only the host can add bots.'; return false; }
+    if (r.gameMode !== 'classic' && r.gameMode !== 'speed') { rejection = 'Bots are only available in Classic and Speed modes.'; return false; }
+    if (r.players.length >= MAX_PLAYERS_PER_LOBBY) { rejection = `Lobby is full (${MAX_PLAYERS_PER_LOBBY} player maximum).`; return false; }
+    r.players.push(botSystem.createBot(r.players, difficulty));
+    added = true;
+  });
+  if (rejection) return socket.emit('error', rejection);
+  if (added && room) gameLogic.broadcastState(io, lobbyId, room);
+}
+
+// Phase 5a: host removes a bot pre-game (the bot analogue of kickPlayer;
+// no socket side-effects since a bot has no socket).
+async function removeBot(ctx, socket, { lobbyId, targetId }) {
+  const { io, pubClient } = ctx;
+  let removed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    const target = r.players.find(p => p.id === targetId);
+    if (!target || !target.isBot) return false; // never remove a human via this path
+    r.players = r.players.filter(p => p.id !== targetId);
+    removed = true;
+  });
+  if (removed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
 // ---------------------------------------------------------------------------
@@ -679,7 +720,9 @@ async function handleDisconnect(ctx, socketId) {
     const lobbyId = await redisUtils.getSocketLobby(pubClient, socketId);
     if (!lobbyId) return;
 
-    const socket = io.sockets.sockets.get(socketId);
+    // Optional-chain guards against test environments / unexpected io shapes
+    // where io.sockets may be absent — production Socket.io always provides it.
+    const socket = io.sockets?.sockets?.get(socketId);
     if (socket) socket.leave(lobbyId);
 
     await redisUtils.deleteSocketLobby(pubClient, socketId);
@@ -724,16 +767,28 @@ async function handleDisconnect(ctx, socketId) {
 
     if (room.status === 'waiting') {
       room.players = room.players.filter(p => p.id !== socketId);
-      // Promote the next player in join order — no fairness logic needed here
-      // since the host role is just for settings/start permissions.
-      if (wasHost && room.players.length > 0) {
-        room.players[0].isHost = true;
+      // Phase 5a: a bot must NEVER become host (host = settings/start
+      // authority). Promote the first remaining HUMAN; if only bots remain,
+      // leave no host — the no-human cleanup below will tear the lobby down.
+      if (wasHost) {
+        const nextHuman = room.players.find(p => !p.isBot);
+        if (nextHuman) nextHuman.isHost = true;
       }
     }
 
     await redisUtils.saveLobby(pubClient, lobbyId, room);
 
-    if (room.players.length === 0) {
+    // Phase 5a: generalize "no players" to "no connected humans". A lobby
+    // whose only remaining members are bots can never be played to/by anyone
+    // and would otherwise ghost forever (bots never fire 'disconnect' and
+    // never empty room.players). Tear it down and clear BOTH in-process
+    // timers so a stale watchdog/bot-move can't fire against a dead lobby.
+    const connectedHumans = room.players.filter(p => !p.isBot && p.connected);
+    if (room.players.length === 0 || connectedHumans.length === 0) {
+      gameLogic.clearTurnTimeout(lobbyId);
+      // Clear the in-process bot-move timer too so a pending bot fire can't
+      // act against a torn-down lobby. Top-level botSystem ref (acyclic).
+      botSystem.clearBotTimeout(lobbyId);
       await redisUtils.deleteLobby(pubClient, lobbyId);
       return;
     }
@@ -799,6 +854,8 @@ module.exports = {
   joinLobby,
   rejoinLobby,
   kickPlayer,
+  addBot,
+  removeBot,
   setGameMode,
   setTheme,
   assignTeam,

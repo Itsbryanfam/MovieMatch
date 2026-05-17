@@ -303,6 +303,18 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       await lobbySystem.kickPlayer(ctx, socket, data);
     });
 
+    on('addBot', async (data) => {
+      // Phase 5a: pre-game host action — reuse the lobbyConfig bucket (the
+      // shared host-settings/lifecycle limiter) so add-spam is throttled.
+      if (await lobbyConfigLimited()) return;
+      await lobbySystem.addBot(ctx, socket, data || {});
+    });
+
+    on('removeBot', async (data) => {
+      if (await lobbyConfigLimited()) return;
+      await lobbySystem.removeBot(ctx, socket, data || {});
+    });
+
     // -----------------------------------------------------------------------
     // MATCH SYSTEM — autocomplete, movie submission, turn forcing
     // -----------------------------------------------------------------------
