@@ -103,12 +103,23 @@ app.use(limiter);
 
 app.use(express.static('public'));
 
+// M3: pubClient/subClient are constructed here (moved up from below the
+// telemetry routes) because the admin limiter now needs the Redis client at
+// mount time, and the mount MUST stay before the /api/admin route defs.
+// createClient is lazy — no connection happens until startApp() calls
+// .connect(), so relocating the construction is behavior-neutral.
+const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
+const subClient = pubClient.duplicate();
+
+pubClient.on('error', (err) => logger.error(err, 'Redis Pub Client Error'));
+subClient.on('error', (err) => logger.error(err, 'Redis Sub Client Error'));
+
 // Strict admin-only rate limiter (5 / 15min / IP), layered on top of the
 // global limiter. Path-prefixed so it covers every current and future
 // /api/admin/* route without restructuring the handlers. MUST be registered
 // before the admin route definitions — Express runs middleware in order.
-const adminLimiter = require('./server/adminLimiter');
-app.use('/api/admin', adminLimiter);
+const createAdminLimiter = require('./server/adminLimiter');
+app.use('/api/admin', createAdminLimiter(pubClient));
 
 app.post('/api/admin/flush-credits', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
@@ -235,12 +246,6 @@ app.get('/api/admin/stats', async (req, res) => {
     res.status(500).json({ error: 'Stats failed' });
   }
 });
-
-const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
-const subClient = pubClient.duplicate();
-
-pubClient.on('error', (err) => logger.error(err, 'Redis Pub Client Error'));
-subClient.on('error', (err) => logger.error(err, 'Redis Sub Client Error'));
 
 const TMDB_TOKEN = process.env.TMDB_READ_TOKEN;
 if (!TMDB_TOKEN) {
