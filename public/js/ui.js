@@ -316,6 +316,24 @@ function renderPlayerSidebar(gameState, mode) {
   }, 50);
 }
 
+// Audit #3: poster <img> error fallback. TMDB images can 404, be blocked
+// by strict networks, or simply fail to load — without this the browser
+// paints its native broken-image glyph + alt text inside the polished
+// card. The app already styles a `.placeholder` block for the
+// no-poster-URL case; on load failure we swap the dead <img> for that
+// same designed placeholder so the board never looks broken. posterClass
+// is the base class the placeholder shares with the image it replaces
+// (e.g. 'chain-poster' or 'mini-poster').
+function attachPosterFallback(img, posterClass) {
+  img.onerror = () => {
+    // Guard against re-entrancy: once swapped there's no <img> to error again.
+    if (!img.parentNode) return;
+    const placeholder = document.createElement('div');
+    placeholder.className = posterClass + ' placeholder';
+    img.replaceWith(placeholder);
+  };
+}
+
 // Appends only NEW chain items to the board (incremental — does not re-render existing ones).
 function renderChainItems(gameState, myPlayerId) {
   const currentDisplayedCount = chainDisplay.querySelectorAll('.chain-item').length;
@@ -360,6 +378,8 @@ function renderChainItems(gameState, myPlayerId) {
       img.src = item.movie.poster;
       img.alt = 'Poster';
       img.className = 'chain-poster';
+      // Swap to the designed placeholder if the poster fails to load.
+      attachPosterFallback(img, 'chain-poster');
       div.appendChild(img);
     } else {
       const placeholder = document.createElement('div');
@@ -902,6 +922,8 @@ export function renderAutocompleteResults(results) {
         img.src = movie.poster;
         img.alt = 'Poster';
         img.className = 'mini-poster';
+        // Swap to the designed placeholder if the poster fails to load.
+        attachPosterFallback(img, 'mini-poster');
         div.appendChild(img);
       } else {
         const placeholder = document.createElement('div');

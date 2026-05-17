@@ -136,7 +136,7 @@
           <div class="demo-label">Live example</div>
           <div class="chain-item demo-item demo-item-1">
             <div class="chain-poster demo-poster">
-              <img src="https://image.tmdb.org/t/p/w200/78lPtwv72eTNqFW9COBYI0dWDJa.jpg" alt="Iron Man" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;">
+              <img src="https://image.tmdb.org/t/p/w200/78lPtwv72eTNqFW9COBYI0dWDJa.jpg" alt="Iron Man" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;" onerror="this.remove()">
             </div>
             <div class="chain-content">
               <div class="player-name">Alex</div>
@@ -146,7 +146,7 @@
           </div>
           <div class="chain-item demo-item demo-item-2 shared-highlight">
             <div class="chain-poster demo-poster">
-              <img src="https://image.tmdb.org/t/p/w200/6WBeq4fCfn7AN0o21W9qNcRF2l9.jpg" alt="Iron Man 2" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;">
+              <img src="https://image.tmdb.org/t/p/w200/6WBeq4fCfn7AN0o21W9qNcRF2l9.jpg" alt="Iron Man 2" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;" onerror="this.remove()">
             </div>
             <div class="chain-content">
               <div class="player-name">Bryan</div>
@@ -156,7 +156,7 @@
           </div>
           <div class="chain-item demo-item demo-item-3 shared-highlight">
             <div class="chain-poster demo-poster">
-              <img src="https://image.tmdb.org/t/p/w200/2Epx7F9X7DrFptn4seqn4mzBVks.jpg" alt="The Jungle Book" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;">
+              <img src="https://image.tmdb.org/t/p/w200/2Epx7F9X7DrFptn4seqn4mzBVks.jpg" alt="The Jungle Book" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;" onerror="this.remove()">
             </div>
             <div class="chain-content">
               <div class="player-name">Alex</div>
@@ -392,10 +392,13 @@
           </div>
 
           <div class="reaction-bar" id="reaction-bar">
-             <button class="reaction-btn">🔥</button>
-             <button class="reaction-btn">😂</button>
-             <button class="reaction-btn">💀</button>
-             <button class="reaction-btn">👀</button>
+             <!-- Audit #6: emoji-only buttons announce as just the glyph
+                  (or nothing) to screen readers. aria-label + title give
+                  each reaction a real name; the emoji stays as the visual. -->
+             <button class="reaction-btn" aria-label="React with fire" title="Fire">🔥</button>
+             <button class="reaction-btn" aria-label="React with laughter" title="Laugh">😂</button>
+             <button class="reaction-btn" aria-label="React with skull" title="Skull">💀</button>
+             <button class="reaction-btn" aria-label="React with eyes" title="Eyes">👀</button>
           </div>
         </main>
         
@@ -434,7 +437,8 @@
   <!-- SHARE CARD MODAL -->
   <div id="share-modal" class="modal-overlay hidden">
     <div class="modal-card share-modal-card">
-      <button class="modal-close" id="close-share-modal">✕</button>
+      <!-- Audit #6: glyph-only close buttons need an accessible name. -->
+      <button class="modal-close" id="close-share-modal" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title">Share Your Chain 🎬</h2>
       <p class="modal-subtitle">Download or copy the image to share with friends.</p>
       <div class="share-canvas-wrapper">
@@ -450,7 +454,7 @@
   <!-- HOW TO PLAY MODAL -->
   <div id="how-to-play-modal" class="modal-overlay hidden">
     <div class="modal-card">
-      <button class="modal-close" id="close-how-to-play">✕</button>
+      <button class="modal-close" id="close-how-to-play" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title">How to Play</h2>
       <p class="modal-subtitle">Chain movies together using shared cast members.</p>
       <div class="how-to-steps">
@@ -512,7 +516,7 @@
   <!-- CREDITS MODAL -->
   <div id="credits-modal" class="modal-overlay hidden">
     <div class="modal-card credits-card">
-      <button class="modal-close" id="close-credits">✕</button>
+      <button class="modal-close" id="close-credits" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title">Credits</h2>
       <p class="modal-subtitle">Built with ❤️ and too many movies.</p>
       <div class="credits-avatar">BC</div>
@@ -543,7 +547,7 @@
 
   <div id="leaderboard-modal" class="modal-overlay hidden">
     <div class="modal-card">
-      <button class="modal-close" id="close-leaderboard">✕</button>
+      <button class="modal-close" id="close-leaderboard" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title">🏆 Leaderboard</h2>
       <p class="modal-subtitle">Top players by wins</p>
       <div id="leaderboard-list" style="max-height:400px;overflow-y:auto;margin-top:1rem;"></div>
@@ -556,7 +560,7 @@
        built in ui.js renderMyStats so this markup stays minimal. -->
   <div id="my-stats-modal" class="modal-overlay hidden">
     <div class="modal-card">
-      <button class="modal-close" id="close-my-stats">✕</button>
+      <button class="modal-close" id="close-my-stats" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title">📊 Your Stats</h2>
       <p class="modal-subtitle" id="my-stats-subtitle">Loading…</p>
       <div id="my-stats-body" style="max-height:60vh;overflow-y:auto;margin-top:1rem;"></div>
@@ -573,7 +577,7 @@
        just an empty card; the structure lives in ui.js renderDailyResult. -->
   <div id="daily-result-modal" class="modal-overlay hidden">
     <div class="modal-card">
-      <button class="modal-close" id="close-daily-result">✕</button>
+      <button class="modal-close" id="close-daily-result" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title" id="daily-result-title">Daily Challenge</h2>
       <p class="modal-subtitle" id="daily-result-subtitle"></p>
       <div id="daily-result-body" style="max-height:60vh;overflow-y:auto;margin-top:1rem;"></div>

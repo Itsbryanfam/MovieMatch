@@ -253,3 +253,18 @@ export function runTutorial() {
     setStep(0);
   });
 }
+
+// Audit #4: drive onboarding from the player's first explicit "Play Now"
+// intent instead of an unsolicited timed modal. First-time visitors get
+// the guided walkthrough and then continue into the lobby; returning
+// players (gate flag set) continue immediately with no interruption.
+// continueFn always runs exactly once, after any tutorial is dismissed,
+// so the caller can hang the screen transition off this. The .catch keeps
+// a (defensive) tutorial rejection from stranding the player on the hero.
+export function runTutorialThenContinue(continueFn) {
+  if (shouldShowTutorial()) {
+    return runTutorial().catch(() => {}).then(() => { continueFn(); });
+  }
+  continueFn();
+  return Promise.resolve();
+}

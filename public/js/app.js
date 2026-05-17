@@ -31,7 +31,7 @@ import {
 import { initSocket, leaveLobby } from './socketClient.js';
 import { getSocket, getCurrentLobbyId, getGameState } from './state.js';
 import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute, prefersReducedMotion } from './utils.js';
-import { shouldShowTutorial, runTutorial } from './tutorial.js';
+import { runTutorial, runTutorialThenContinue } from './tutorial.js';
 
 // ============================================================================
 // INITIALIZATION
@@ -135,20 +135,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (socket) socket.emit('requestPosters');
   }, 300);
 
-  // M6: First-time tutorial. Fires once per browser (gated on the
-  // mm_completedTutorial localStorage flag). Runs entirely client-side
-  // — no server round-trips, so a fresh visit + tutorial completion
-  // doesn't add any boot latency for returning players. Wrapped in a
-  // brief setTimeout so the hero screen has a chance to paint first;
-  // the tutorial overlay then layers on top.
-  if (shouldShowTutorial()) {
-    setTimeout(() => {
-      // .catch is defensive — runTutorial returns a Promise that resolves
-      // on dismiss, never rejects. If a future change makes it throw, we
-      // still want the rest of the app to function.
-      runTutorial().catch(() => {});
-    }, 600);
-  }
+  // M6 / audit #4: the first-run tutorial is NOT auto-popped here anymore.
+  // An unsolicited modal ~600ms after load took over before the visitor
+  // had oriented to the brand/CTA. It now fires from the player's first
+  // explicit "Play Now" intent — see the hero-play-btn handler below,
+  // which routes through runTutorialThenContinue (still gated on the
+  // mm_completedTutorial flag, still client-only).
 
   // =========================================================================
   // NAVIGATION
@@ -264,8 +256,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   heroPlayBtn?.addEventListener('click', () => {
-    heroScreen.classList.remove('active');
-    lobbyScreen.classList.add('active');
+    // Audit #4: first-time visitors see the guided walkthrough now (on
+    // their own Play-Now intent), THEN land in the lobby. Returning
+    // players skip straight through. The screen swap is the continueFn so
+    // it can't run until any tutorial is dismissed.
+    runTutorialThenContinue(() => {
+      heroScreen.classList.remove('active');
+      lobbyScreen.classList.add('active');
+    });
   });
 
   heroCodeBtn?.addEventListener('click', () => showJoinPrompt());

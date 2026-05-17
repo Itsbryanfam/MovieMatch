@@ -6,7 +6,7 @@
 [![Express](https://img.shields.io/badge/Express-5-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
-[![Tests](https://img.shields.io/badge/tests-177%20passing-brightgreen?style=flat-square)](/)
+[![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen?style=flat-square)](/)
 [![Release](https://img.shields.io/badge/release-v1.0.0-blue?style=flat-square)](https://github.com/Itsbryanfam/MovieMatch/releases)
 
 **Real-time multiplayer trivia game — chain movies and TV shows through shared cast members. Last player standing wins. Or play the Daily Challenge solo and chase the leaderboard.**
@@ -111,7 +111,7 @@ A **Daily Challenge** runs alongside the multiplayer modes — every player on a
 - In-memory poster cache with 30-minute background refresh
 - **Lightweight telemetry** — Redis sorted-set sink, 7 instrumented events, admin endpoint at `/api/admin/stats`
 - Versioned credits cache key (`credits:v2:`) for safe schema migrations
-- 177 tests across 18 suites covering game logic, socket integration, reconnection, identity/rejoin security, the per-lobby concurrency lock, turn-watchdog authority, validation, telemetry, daily system, stats, themes, solo objectives, leaderboard pruning, and client-side DOM rendering
+- 182 tests across 20 suites covering game logic, socket integration, reconnection, identity/rejoin security, the per-lobby concurrency lock, turn-watchdog authority, validation, telemetry, daily system, stats, themes, solo objectives, leaderboard pruning, client-side DOM rendering, poster-failure fallback, and the first-run tutorial trigger
 
 ---
 
@@ -169,7 +169,7 @@ ADMIN_SECRET=a_long_random_string_for_admin_endpoints
 
 ```bash
 npm start        # production
-npm test         # run test suite (153 tests across 15 suites)
+npm test         # run test suite (182 tests across 20 suites)
 ```
 
 Open [http://localhost:3000](http://localhost:3000).

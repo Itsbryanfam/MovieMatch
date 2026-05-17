@@ -814,10 +814,17 @@ input:disabled {
   font-size: 1rem;
   color: var(--text-main);
 }
+/* Audit #7: a busy lobby can stack host-skill + player-count +
+   last-chain + vibe + Hardcore/TV tags onto one non-wrapping row, which
+   cramped the metadata and pushed against the Join button. Allowing the
+   stat chips to wrap (with a tighter row/column gap and a hair smaller
+   type) lets them flow onto a second line cleanly instead of
+   over-packing — no metadata is removed, it just breathes. */
 .public-lobby-stats {
   display: flex;
-  gap: 0.75rem;
-  font-size: 0.8rem;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   align-items: center;
 }
@@ -1100,8 +1107,22 @@ input:disabled {
   display: none;
 }
 
-.input-area.disabled-area {
+/* Audit #2: during another player's turn the whole #input-area used to
+   drop to 0.4 opacity AND pointer-events:none — which also killed the
+   timer bar, the turn/status text, and the mute / invite / quit buttons
+   that a watching player most needs right then. Now only the text-entry
+   row and its hint are de-emphasized; the header row (status, time,
+   mute, invite, quit, theme badge) and the timer stay full-opacity and
+   clickable. The <input> and submit button are already disabled in JS
+   (renderTurnControls), so removing the blanket pointer-events:none does
+   not re-enable typing out of turn. */
+.input-area.disabled-area .input-row,
+.input-area.disabled-area #hint-text {
   opacity: 0.4;
+  transition: opacity 0.3s ease;
+}
+
+.input-area.disabled-area .input-row {
   pointer-events: none;
 }
 
@@ -1260,6 +1281,29 @@ input:disabled {
 
 .chat-half {
   border-top: 1px solid var(--border-subtle);
+}
+
+/* Audit #5: the desktop right rail split its height 50/50 between
+   "Search Suggestions" and "Lobby Chat". Suggestions are empty most of
+   the time (just a "Type to search..." hint), so half the prime rail
+   sat dead while Chat — the always-on surface — was cramped. Size the
+   suggestions half to its content and let Chat own the remaining rail;
+   the suggestions list still scrolls internally and is height-capped so
+   a long result set can't shove Chat back off-screen. Scoped to
+   .right-panel; mobile already hides the suggestions half entirely so
+   this is desktop/tablet only. (Relocating suggestions adjacent to the
+   input is a larger layout change deliberately left out of scope.) */
+.right-panel .sidebar-half:first-child {
+  flex: 0 1 auto;
+}
+
+.right-panel .chat-half {
+  flex: 1 1 auto;
+}
+
+.right-panel .autocomplete-panel-list {
+  flex: 0 1 auto;
+  max-height: 34vh;
 }
 
 .chat-messages {
@@ -1854,9 +1898,23 @@ input:disabled {
     height: 100dvh;
   }
 
+  /* Audit #1: the header was a single non-wrapping flex row (logo +
+     4 nav buttons). With body{overflow:hidden} any horizontal overflow
+     is CLIPPED, not scrollable — at <=390px the last nav button ran off
+     the edge. Allowing the header and its nav to wrap guarantees every
+     control stays on-screen; the logo holds the first row and the nav
+     centers onto a second row only when it can't fit beside it. */
   .app-header {
     margin-bottom: 0.75rem;
     flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.4rem 0.75rem;
+  }
+
+  .header-nav {
+    flex-wrap: wrap;
+    justify-content: center;
   }
 
   .logo {
