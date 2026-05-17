@@ -662,7 +662,7 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
     try {
       // movie arg is null — the bot always submits a concrete TMDB id, so
       // resolveCandidates takes its validated direct-ID branch (no fuzzy
-      // search, no typo budget). _validatedDirectLookup still whitelists it.
+      // search, no typo budget). _validatedDirectLookup still sanitizes it (positive-int id, movie/tv mediaType).
       const topCandidates = await resolveCandidates(room, null, tmdbId, mediaType, TMDB_HEADERS);
       if (topCandidates.length === 0) {
         // Couldn't resolve the bot's own pick (rare: TMDB blip). Treat like a
