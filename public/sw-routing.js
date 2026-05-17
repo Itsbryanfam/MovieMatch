@@ -8,8 +8,9 @@
     var method = input && input.method;
     var url = input && input.url;
     var origin = input && input.origin;
-    // Never cache mutations.
-    if (method && method !== 'GET') return 'bypass';
+    // Anything that isn't an explicit GET (incl. a missing method) is a
+    // mutation or unknown — never cache it.
+    if (method !== 'GET') return 'bypass';
     var u;
     try { u = new URL(url); } catch (e) { return 'bypass'; }
     // Never touch third-party traffic (TMDB images, Google Fonts, etc.).

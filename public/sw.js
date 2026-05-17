@@ -5,6 +5,8 @@
 // skipWaiting(): never hot-swap JS/CSS under a player mid-game.
 importScripts('/sw-routing.js');
 
+// Versioned cache name — bump the suffix to force the activate handler to
+// evict every prior cache (the only cache-invalidation lever this SW has).
 var CACHE = 'mm-cache-v1';
 
 self.addEventListener('install', function (e) {
@@ -34,10 +36,14 @@ self.addEventListener('fetch', function (e) {
   e.respondWith(
     fetch(e.request)
       .then(function (res) {
-        // Refresh the cached copy on every online success so the offline
-        // fallback is as fresh as the user's last online visit.
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(e.request, copy); }).catch(function () {});
+        // Only cache genuinely-good responses. fetch() resolves (does not
+        // reject) for 4xx/5xx; caching those under network-first would let a
+        // transient server error poison the OFFLINE fallback for that asset
+        // until the user is next online. res.ok (200–299) gates that out.
+        if (res.ok) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(e.request, copy); }).catch(function () {});
+        }
         return res;
       })
       .catch(function () {

@@ -7,6 +7,9 @@
 const { swDecision } = require('../public/sw-routing.js');
 
 const ORIGIN = 'https://moviematch.it.com';
+// NOTE: `mode` is passed to mirror the real sw.js call-site shape, but
+// routing is intentionally mode-agnostic (navigations AND static are both
+// network-first), so swDecision never reads it. Kept for call-site parity.
 
 describe('swDecision', () => {
   test('non-GET always bypasses', () => {
