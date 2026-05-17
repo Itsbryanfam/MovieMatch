@@ -1,4 +1,4 @@
-/* 06-states-anim.css — elimination/result/confetti/tutorial blocks, all @keyframes, timer/hover-state blocks. Part 6/6 of split style.css; load order is load-bearing (cascade) — do not reorder. */
+/* 06-states-anim.css — game-state animations (elimination, confetti, timer, win, ghost) + the majority of @keyframes (others are co-located with their components in 01–05); also feature overlay blocks that historically lived at end-of-file: Daily-Challenge button+result modal, public-lobby card enrichment, solo HUD/objective bar, spectator bar, tutorial overlay, ghost-attempt card; plus accessibility (reduced-motion) and sticky-hover guards. Part 6/6 of split style.css; load order is load-bearing (cascade) — do not reorder. */
 /* ============================================================
    ANIMATION OVERHAUL — elimination, timers, turns, win
    ============================================================ */
