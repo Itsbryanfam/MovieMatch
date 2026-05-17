@@ -54,10 +54,24 @@ export function renderLobby(gameState, myPlayerId) {
     const nameSpan = document.createElement('span');
     let label = p.name;
     if (p.id === myPlayerId) label += ' (You)';
+    // Phase 5a: bots are never host, so no crown for them — only humans get 👑.
     if (p.isHost) label += ' 👑';
     if (p.wins > 0) label += ` • ${p.wins} 🏆`;
     nameSpan.textContent = label;
     li.appendChild(nameSpan);
+
+    // Phase 5a: a bot is always visibly a bot — name + a BOT badge with
+    // its difficulty. No crown (bots are never host). Separate span so the
+    // additive .bot-badge CSS styles it without touching existing
+    // player-row rules (human rows render byte-identically — Phase 4
+    // additive discipline).
+    if (p.isBot) {
+      const badge = document.createElement('span');
+      badge.className = 'bot-badge';
+      const diff = (p.difficulty || 'normal');
+      badge.textContent = `BOT · ${diff.charAt(0).toUpperCase()}${diff.slice(1)}`;
+      li.appendChild(badge);
+    }
 
     if (amIHost && p.id !== myPlayerId) {
       const kickBtn = document.createElement('button');
@@ -65,7 +79,13 @@ export function renderLobby(gameState, myPlayerId) {
       kickBtn.title = 'Remove from lobby';
       kickBtn.textContent = '✕';
       kickBtn.addEventListener('click', () => {
-        getSocket().emit('kickPlayer', { lobbyId: gameState.id, targetId: p.id });
+        // Phase 5a: bots are removed via removeBot (no socket to 'kick');
+        // humans keep the existing kickPlayer path. Same ✕ affordance.
+        if (p.isBot) {
+          getSocket().emit('removeBot', { lobbyId: gameState.id, targetId: p.id });
+        } else {
+          getSocket().emit('kickPlayer', { lobbyId: gameState.id, targetId: p.id });
+        }
       });
       li.appendChild(kickBtn);
     }
@@ -122,6 +142,40 @@ export function renderLobby(gameState, myPlayerId) {
   } else {
     startBtn.innerText = 'Waiting for players...';
     startBtn.disabled = true;
+  }
+
+  // Phase 5a: host-only "Add Bot" + difficulty selector. Only classic/speed
+  // (mirrors the server gate so the UI never offers an action the server
+  // rejects). Built from elements (no innerHTML) consistent with this file.
+  // Remove any previously-rendered botRow on each re-render so re-renders
+  // never double-up the control (renderLobby is called on every state update).
+  const prevBotRow = startBtn.parentNode && startBtn.parentNode.querySelector('.add-bot-row');
+  if (prevBotRow) prevBotRow.remove();
+
+  const botModeOk = gameState.gameMode === 'classic' || gameState.gameMode === 'speed';
+  if (amIHost && botModeOk) {
+    const botRow = document.createElement('div');
+    botRow.className = 'add-bot-row';
+    const sel = document.createElement('select');
+    sel.className = 'bot-diff-select';
+    // Default to 'Normal' first so it's the pre-selected value when the host
+    // opens the lobby; easy/hard are secondary choices.
+    [['normal', 'Normal'], ['easy', 'Easy'], ['hard', 'Hard']].forEach(([v, label]) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = label;
+      sel.appendChild(o);
+    });
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn btn-secondary'; // reuse Phase 4 additive .btn
+    addBtn.textContent = '+ Add Bot';
+    addBtn.addEventListener('click', () => {
+      getSocket().emit('addBot', { lobbyId: gameState.id, difficulty: sel.value });
+    });
+    botRow.appendChild(addBtn);
+    botRow.appendChild(sel);
+    // insertAdjacentElement places botRow directly after the Start button
+    // in the existing host-controls flow — no new wrapper element needed.
+    startBtn.insertAdjacentElement('afterend', botRow);
   }
 }
 
@@ -221,6 +275,17 @@ function renderPlayerSidebar(gameState, mode) {
       li.append(nameSpan, document.createTextNode(' '), scoreSpan);
       if (!p.isAlive) li.classList.add('eliminated');
       if (index === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
+      // Phase 5a: when it's a BOT's turn, show a derived "thinking…" cue so
+      // other players see deliberate AI pacing instead of a silent timer.
+      // Pure state-derived (active player isBot + their turn) — NO new socket
+      // event. A span so it sits beside the existing turn highlight without
+      // disturbing row layout rules.
+      if (p.isBot && index === gameState.currentTurnIndex && gameState.status === 'playing') {
+        const thinking = document.createElement('span');
+        thinking.className = 'bot-thinking';
+        thinking.textContent = ' 🤖 thinking…';
+        li.appendChild(thinking);
+      }
       gamePlayersList.appendChild(li);
     });
   }

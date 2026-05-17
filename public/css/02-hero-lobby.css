@@ -689,3 +689,39 @@ input:disabled {
   cursor: not-allowed;
 }
 
+/* Phase 5a: bot opponents. ADDITIVE ONLY — these are brand-new selectors
+   (.bot-badge / .add-bot-row / .bot-diff-select / .bot-thinking); no existing
+   rule above is modified or removed, so human-only lobbies render
+   byte-identically. The badge makes a bot unmistakably a bot at a glance. */
+.bot-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #c7d2fe;
+  background: rgba(129, 140, 248, 0.16);
+  border: 1px solid rgba(129, 140, 248, 0.4);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.add-bot-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.bot-diff-select {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #1e1e22;
+  color: #e4e4e7;
+  border: 1px solid #3f3f46;
+}
+.bot-thinking {
+  opacity: 0.8;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
