@@ -1,0 +1,190 @@
+/* 01-base.css — :root tokens, global reset, body/screen base, poster-carousel background. Part 1/6 of split style.css; load order is load-bearing (cascade) — do not reorder. */
+:root {
+  --bg-base: #09090b;
+  --bg-surface: #121214;
+  --bg-elevated: #18181b;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(255, 255, 255, 0.2);
+  --text-main: #f8fafc;
+  /* Bumped from #94a3b8 -> #a8b2c4 for better readability at small sizes
+     (mode-chip names, hint text). Subtle but lifts contrast above WCAG AA
+     against the dark base. */
+  --text-muted: #a8b2c4;
+  --text-inverse: #0f172a;
+
+  --accent-primary: #818cf8;
+  --accent-primary-hover: #6366f1;
+  --accent-glow: rgba(129, 140, 248, 0.15);
+
+  /* Warm accent (Daily Challenge button, future warm-tinted UI). Tokenized
+     so the alternate-track CTA doesn't have hardcoded hex literals
+     scattered through the file. */
+  --accent-warm: #f59e0b;
+  --accent-warm-hover: #d97706;
+  --accent-warm-glow: rgba(245, 158, 11, 0.35);
+
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-danger: #ef4444;
+
+  /* Radius scale */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-pill: 999px;
+
+  /* Shadow scale */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.5);
+  --shadow-md: 0 4px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.3);
+  --shadow-xl: 0 24px 80px rgba(0,0,0,0.6);
+  --shadow-glow: 0 0 12px rgba(129,140,248,0.2);
+  --shadow-glow-strong: 0 0 12px rgba(129,140,248,0.5);
+
+  /* Blur scale */
+  --blur-sm: 4px;
+  --blur-md: 8px;
+  --blur-lg: 10px;
+  --blur-xl: 16px;
+
+  /* Timer bar colors (referenced in socketClient.js) */
+  --timer-green: var(--status-success);
+  --timer-yellow: var(--status-warning);
+  --timer-red: var(--status-danger);
+
+  /* Team colors */
+  --team-red: #f87171;
+  --team-red-bg: rgba(248,113,113,0.1);
+  --team-red-border: rgba(248,113,113,0.3);
+  --team-blue: #60a5fa;
+  --team-blue-bg: rgba(96,165,250,0.1);
+  --team-blue-border: rgba(96,165,250,0.3);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-main);
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  /* Block pull-to-refresh — without this, scrolling chat or chain to the top
+     and continuing to drag triggers a full page reload mid-game. */
+  overscroll-behavior-y: contain;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* Kill the default mobile gray-flash on tap. Per-element :active states
+     handle visual feedback where it matters. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* POSTER CAROUSEL BACKGROUND */
+#poster-carousel {
+  position: fixed;
+  top: -15%; left: -10%;
+  width: 120vw; height: 130vh;
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0.25; /* Restored cinematic visibility */
+  /* Removed grayscale and background blur to allow UI to act as the glass */
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  justify-content: center;
+  transform: rotate(-6deg) translate(0px, 0px);
+  pointer-events: none;
+  transition: transform 0.2s ease-out; /* Smooths JS parallax jitter */
+  will-change: transform;
+}
+
+
+.poster-row {
+  display: flex;
+  gap: 1rem;
+  width: max-content;
+  animation: scrollX 50s linear infinite;
+}
+
+.poster-row:nth-child(even) {
+  animation-direction: reverse;
+  animation-duration: 60s;
+}
+
+@keyframes scrollX {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.poster-row img {
+  height: 220px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+#app-container {
+  width: 100%;
+  /* The shell cap was 1200px, but the in-game 3-column layout-grid wants
+     ~240 + 1100 + 240 + gaps (~1660px) — at 1200px the sidebars (sized
+     in vw, see .layout-grid) grew on wide screens and crushed the center
+     board to a sliver, leaving the UI as three thin strips floating over
+     the poster carousel on ultrawide. Raised so the game screen can
+     actually reach its intended width. Hero (.hero-body max-width 1100)
+     and lobby (.lobby-panel max-width 380) self-center, so a wider shell
+     does not stretch them. */
+  max-width: 1800px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 2rem;
+  position: relative;
+  z-index: 10;
+}
+
+.app-header {
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.logo:hover {
+  opacity: 0.8;
+}
+
+.logo span {
+  color: var(--accent-primary);
+}
+
+/* SCREENS */
+.screen {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.screen.active {
+  display: flex;
+}
+

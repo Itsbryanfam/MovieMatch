@@ -1,0 +1,488 @@
+/* 03-game.css — game board layout, chain/connector/node, input area, autocomplete, chat. Part 3/6 of split style.css; load order is load-bearing (cascade) — do not reorder. */
+/* GAME LAYOUT */
+.layout-grid {
+  display: grid;
+  /* Center column caps at 1100px so the chain feed + input stay
+     ergonomic on ultrawide. The sidebars are now a BOUNDED pixel range
+     (240–300px) instead of 18vw: a vw width grew unbounded on wide
+     monitors and stole space from the center, which is the bug that
+     made the game board collapse to a sliver. Pixel-bounded sidebars
+     keep the center column the dominant, priority track at every width;
+     the whole grid is centered via justify-content so any extra
+     ultrawide space becomes symmetric margin, not a stretched sidebar. */
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1100px) minmax(240px, 300px);
+  justify-content: center;
+  gap: 1.5rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-header h3 {
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.sidebar-players {
+  list-style: none;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.sidebar-players li {
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.sidebar-players li.active-turn {
+  background: var(--accent-glow);
+  border-color: rgba(129, 140, 248, 0.3);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.sidebar-players li.eliminated {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.game-board {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-height: 0;
+}
+
+.feed-container {
+  flex: 1;
+  min-height: 60vh; /* Forces the glass board to stay expanded when empty */
+  background: rgba(15, 23, 42, 0.65); /* Translucent dark wash */
+  backdrop-filter: blur(var(--blur-xl));
+  -webkit-backdrop-filter: blur(var(--blur-xl)); /* Safari support */
+  border: 1px solid rgba(255, 255, 255, 0.1); /* Glass edge highlight */
+  border-radius: var(--radius-xl);
+  padding: 1.5rem 1.5rem 1.5rem 3.5rem; /* Expanded left padding for timeline */
+  overscroll-behavior: contain; /* Don't chain scroll back to body */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem; /* Increased gap for visual breathing room */
+  scroll-behavior: smooth;
+  position: relative;
+  box-shadow: var(--shadow-lg); /* Deep drop shadow for floating effect */
+}
+
+
+.chain-item {
+  background: rgba(30, 41, 59, 0.7); /* Translucent elevation */
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-md);
+  animation: dropInNode 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: border-color 0.3s ease;
+  opacity: 0;
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  position: relative; /* Anchor for timeline elements */
+}
+
+
+/* The Connecting Line */
+.chain-item::before {
+  content: '';
+  position: absolute;
+  left: -2rem;
+  top: 2.5rem;
+  bottom: -2.5rem;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--border-focus), transparent);
+  z-index: 1;
+}
+
+/* Hide line on the very last item */
+.chain-item:last-child::before {
+  display: none;
+}
+
+/* The Hollow Geometric Node */
+.chain-item::after {
+  content: '';
+  position: absolute;
+  left: -2.35rem;
+  top: 1.25rem;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 2px solid var(--border-focus);
+  z-index: 2;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Highlighted Node State */
+.chain-item.shared-highlight::after {
+  border-color: var(--accent-primary);
+  background: var(--accent-glow);
+  box-shadow: var(--shadow-glow-strong);
+  transform: scale(1.1);
+}
+
+
+/* Staggered Typography States */
+.chain-poster {
+  width: 60px;
+  border-radius: var(--radius-xs);
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+  background: var(--bg-surface);
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.05s forwards;
+}
+
+.chain-content {
+  flex: 1;
+}
+
+.chain-item .player-name {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
+}
+
+.chain-item .movie-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
+}
+
+.chain-item .movie-cast {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  opacity: 0;
+  animation: revealElement 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
+}
+
+.chain-item:hover {
+  border-color: rgba(255,255,255,0.13);
+}
+
+.chain-item.shared-highlight {
+  border-left: 2px solid var(--accent-primary);
+}
+
+.chain-item.shared-highlight .movie-cast strong {
+  color: var(--accent-primary);
+  font-weight: 600;
+  text-shadow: 0 0 12px rgba(129, 140, 248, 0.3);
+}
+
+/* Premium Keyframes */
+@keyframes dropInNode {
+  from { opacity: 0; transform: translateY(15px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes revealElement {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+
+/* INPUT AREA */
+.input-area {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 1.25rem;
+  position: relative;
+  overflow: visible;
+  transition: opacity 0.3s ease;
+}
+
+/* MOBILE AUTOCOMPLETE DROPDOWN — hidden everywhere except mobile */
+.mobile-ac-dropdown {
+  display: none;
+}
+
+/* Audit #2: during another player's turn the whole #input-area used to
+   drop to 0.4 opacity AND pointer-events:none — which also killed the
+   timer bar, the turn/status text, and the mute / invite / quit buttons
+   that a watching player most needs right then. Now only the text-entry
+   row and its hint are de-emphasized; the header row (status, time,
+   mute, invite, quit, theme badge) and the timer stay full-opacity and
+   clickable. The <input> and submit button are already disabled in JS
+   (renderTurnControls), so removing the blanket pointer-events:none does
+   not re-enable typing out of turn. */
+.input-area.disabled-area .input-row,
+.input-area.disabled-area #hint-text {
+  opacity: 0.4;
+  transition: opacity 0.3s ease;
+}
+
+.input-area.disabled-area .input-row {
+  pointer-events: none;
+}
+
+.timer-wrapper {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  overflow: hidden;
+}
+
+#timer-bar {
+  height: 100%;
+  width: 100%;
+  background: var(--status-success);
+  transition: width 1s linear, background-color 0.3s ease;
+}
+
+.input-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.status-indicator {
+  color: var(--accent-primary);
+}
+
+.time-text {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.input-row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.search-input {
+  flex: 1;
+  background: var(--bg-base);
+  margin-bottom: 0;
+}
+
+.btn-icon {
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent-primary-hover), var(--accent-primary));
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.btn-icon:disabled {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+/* M7: quit-game button. Subtle muted background by default — destructive
+   actions shouldn't visually compete with primary affordances — but the
+   hover state turns warm so a deliberate click feels intentional.
+   Idle border tint signals "destructive" without being loud, so the
+   button doesn't read as accidentally-disabled at a glance. */
+.btn-icon.quit-btn {
+  background: linear-gradient(135deg, #4b3a3a, #3a2828);
+  color: #ffd9d2;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+.btn-icon.quit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b54a3b, #8a2b1f);
+  color: #fff;
+}
+
+.hint-text {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* AUTOCOMPLETE PANEL */
+.autocomplete-panel-list {
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.empty-hint {
+  padding: 1.25rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  font-style: italic;
+}
+
+.autocomplete-item {
+  padding: 10px 15px;
+  color: var(--text-main);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  transition: background 0.2s;
+  font-size: 0.95rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.mini-poster {
+  width: 32px;
+  border-radius: var(--radius-xs);
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  background: var(--bg-surface);
+}
+
+.ac-text {
+  flex: 1;
+}
+
+.autocomplete-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  /* Inline border-accent on the focused suggestion — standard pattern that
+     telegraphs which item the click will land on. Padding compensates so
+     the row doesn't shift horizontally on hover. */
+  border-left: 3px solid var(--accent-primary);
+  padding-left: calc(0.6rem - 3px);
+}
+
+.autocomplete-item span.year {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-left: 8px;
+  display: block;
+}
+
+/* CHAT HALF */
+.sidebar-half {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-half {
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Audit #5: the desktop right rail split its height 50/50 between
+   "Search Suggestions" and "Lobby Chat". Suggestions are empty most of
+   the time (just a "Type to search..." hint), so half the prime rail
+   sat dead while Chat — the always-on surface — was cramped. Size the
+   suggestions half to its content and let Chat own the remaining rail;
+   the suggestions list still scrolls internally and is height-capped so
+   a long result set can't shove Chat back off-screen. Scoped to
+   .right-panel; mobile already hides the suggestions half entirely so
+   this is desktop/tablet only. (Relocating suggestions adjacent to the
+   input is a larger layout change deliberately left out of scope.) */
+.right-panel .sidebar-half:first-child {
+  flex: 0 1 auto;
+}
+
+.right-panel .chat-half {
+  flex: 1 1 auto;
+}
+
+.right-panel .autocomplete-panel-list {
+  flex: 0 1 auto;
+  max-height: 34vh;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-msg {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  word-wrap: break-word;
+  color: var(--text-main);
+}
+
+.chat-msg span.chat-author {
+  font-weight: 600;
+  color: var(--accent-primary);
+  margin-right: 4px;
+}
+
+.chat-input-wrapper {
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.chat-input-wrapper input {
+  width: 100%;
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  /* 16px to prevent iOS auto-zoom on focus. */
+  font-size: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--border-focus);
+}
+
+.chat-input-wrapper input:focus {
+  border-color: var(--accent-primary);
+}
+
