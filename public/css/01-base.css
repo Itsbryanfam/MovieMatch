@@ -194,10 +194,13 @@ body {
    .reaction-btn/.mode-chip/.spec-pred-btn/.modal-close) already declare
    identically, so promoting it to a base changes ZERO computed styles
    (variants load after 01-base and still win every property they set;
-   higher-specificity :disabled cursor overrides still win too). Richer
+   and any variant that needs a non-pointer cursor on :disabled already
+   declares it explicitly — there is no browser default to fall back on
+   once .btn sets cursor:pointer on the element, but every current variant
+   either sets cursor:pointer itself or has such an explicit override, so
+   the computed cursor is unchanged everywhere). Richer
    shared extraction (padding/color/focus ring) is deliberately out of
    scope — it could not be done without visual risk on the live site. */
 .btn {
   cursor: pointer;
 }
-
