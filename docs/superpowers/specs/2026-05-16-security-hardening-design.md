@@ -144,10 +144,14 @@ Manual check (documented, not automated — `process.exit` is impractical to uni
 | File | Change |
 |---|---|
 | `server/systems/dailySystem.js` | Drop `stableId` from `getDailyLeaderboard` return rows |
-| `server.js` | Add `validateAdminSecret` guard + fatal boot check; add `adminLimiter` + `app.use('/api/admin', ...)` |
+| `server.js` | Require + wire `validateAdminSecret` (fatal boot check) and `adminLimiter` (`app.use('/api/admin', ...)`) |
+| `server/validateAdminSecret.js` | **New module** — pure boot guard (see deviation note) |
+| `server/adminLimiter.js` | **New module** — configured strict limiter (see deviation note) |
 | `.env.example` | Add documented `ADMIN_SECRET` line |
 | `server/systems/dailySystem.test.js` | Add no-`stableId`-in-payload regression test |
-| `server/socket.integration.test.js` (or new) | Add admin limiter 429 test |
-| (test for `validateAdminSecret`) | New small unit test |
+| `server/admin-secret.test.js` | New `validateAdminSecret` unit test |
+| `server/admin-ratelimit.test.js` | New admin-limiter 429 integration test |
+
+> **Deviation note (resolved in the plan):** `validateAdminSecret` and `adminLimiter` were extracted into their own tiny modules rather than inlined in `server.js`, because `server.js` runs `startApp()` on import (Redis connect, port bind, `process.exit` on missing TMDB) and cannot be `require()`d from a test. Inlining would make this spec's "ships with its own tests" goal unachievable. Behavior-identical, ~6–10 lines each, lower-risk than the rejected Router refactor. Full rationale in `docs/superpowers/plans/2026-05-16-security-hardening.md` → "Deviations from spec".
 
 No client files. No Redis keys. No dependency changes (`express-rate-limit` already in `package.json`).
