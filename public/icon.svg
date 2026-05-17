@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MovieMatch">
+  <!-- WHY: self-contained (no external fonts/refs) so it renders identically
+       as a manifest icon, favicon, and apple-touch-icon. #09090b matches the
+       manifest theme_color/background_color; #818cf8 is --accent-primary.
+       All artwork sits inside the central ~80% so Android maskable cropping
+       never clips it. -->
+  <rect width="512" height="512" rx="112" fill="#09090b"/>
+  <rect x="120" y="120" width="272" height="272" rx="40" fill="none" stroke="#818cf8" stroke-width="24"/>
+  <path d="M232 196 L324 256 L232 316 Z" fill="#818cf8"/>
+</svg>
