@@ -114,6 +114,21 @@ export function showSelfEliminationScreen(details) {
   grid.appendChild(buildColumn('Needed a connection to', details.lastChainEntry, 'self-elim-col--needed'));
   grid.appendChild(buildColumn('You played', details.yourGuess, 'self-elim-col--played'));
 
+  // Phase 6a: when the server computed a move that WOULD have connected,
+  // surface it beneath the comparison — turns "you were wrong" into "here's
+  // what right looked like". Optional + additive: absent ⇒ this block (and
+  // the .self-elim-could node) simply does not exist, so the card is
+  // byte-identical to the pre-6a card. textContent (not innerHTML) keeps the
+  // file's no-innerHTML XSS posture; titles are TMDB-sourced but we stay
+  // consistent with the rest of this renderer.
+  let couldEl = null;
+  if (details.couldHavePlayed && details.couldHavePlayed.title) {
+    couldEl = document.createElement('div');
+    couldEl.className = 'self-elim-could';
+    const y = details.couldHavePlayed.year;
+    couldEl.textContent = `You could have played: ${details.couldHavePlayed.title}${y ? ` (${y})` : ''}`;
+  }
+
   // Hint line — small, encouraging, generic (we don't compute the literal
   // "best next move" here; that's a Week 4+ stretch).
   const hint = document.createElement('div');
@@ -136,6 +151,8 @@ export function showSelfEliminationScreen(details) {
 
   card.appendChild(head);
   card.appendChild(grid);
+  // Phase 6a: only present when the server supplied a suggestion (above).
+  if (couldEl) card.appendChild(couldEl);
   card.appendChild(hint);
   card.appendChild(close);
   el.appendChild(card);

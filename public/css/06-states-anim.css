@@ -1078,3 +1078,16 @@ a:focus-visible,
     border-color: inherit;
   }
 }
+
+/* Phase 6a: the "you could have played X" line on the detailed
+   self-elimination card. Additive only — no existing self-elim rule is
+   modified. Sits between the cast comparison grid and the generic hint. */
+.self-elim-could {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+  font-weight: 600;
+  text-align: center;
+}
