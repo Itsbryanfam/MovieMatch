@@ -103,6 +103,13 @@ app.use(limiter);
 
 app.use(express.static('public'));
 
+// Strict admin-only rate limiter (5 / 15min / IP), layered on top of the
+// global limiter. Path-prefixed so it covers every current and future
+// /api/admin/* route without restructuring the handlers. MUST be registered
+// before the admin route definitions — Express runs middleware in order.
+const adminLimiter = require('./server/adminLimiter');
+app.use('/api/admin', adminLimiter);
+
 app.post('/api/admin/flush-credits', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
   // safeEqual: constant-time compare so the response time doesn't leak how
@@ -238,6 +245,16 @@ subClient.on('error', (err) => logger.error(err, 'Redis Sub Client Error'));
 const TMDB_TOKEN = process.env.TMDB_READ_TOKEN;
 if (!TMDB_TOKEN) {
   logger.fatal('TMDB_READ_TOKEN environment variable is required. Set it in your .env file.');
+  process.exit(1);
+}
+// ADMIN_SECRET fail-fast — parity with the TMDB guard above. safeEqual
+// already fails closed when the secret is missing, but a missing/weak
+// secret should refuse to boot LOUDLY rather than silently shipping
+// unreachable (or brute-forceable) destructive admin endpoints.
+const validateAdminSecret = require('./server/validateAdminSecret');
+const adminSecretErr = validateAdminSecret(process.env.ADMIN_SECRET);
+if (adminSecretErr) {
+  logger.fatal(adminSecretErr + '. Set it in your .env file.');
   process.exit(1);
 }
 const TMDB_HEADERS = { Authorization: `Bearer ${TMDB_TOKEN}`, accept: 'application/json' };

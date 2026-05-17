@@ -239,7 +239,7 @@ async function finalizeDailyAttempt(pubClient, stableId, name, chainLength, date
   }
 }
 
-// Top-N for `date`. Returns [{ stableId, chainLength, name }] descending.
+// Top-N for `date`. Returns [{ chainLength, name }] descending.
 // Lazily fetches names from the existing leaderboard name cache (if any)
 // or from the attempt records as a fallback. Capped at limit=20 by default
 // to keep the response slim — the UI rarely shows more than top 10.
@@ -255,8 +255,15 @@ async function getDailyLeaderboard(pubClient, date = getTodayDate(), limit = 20)
     const records = await Promise.all(
       entries.map(e => getDailyAttempt(pubClient, e.value, date))
     );
+    // SECURITY (Phase 1): stableId is the only bearer credential in the
+    // system — it gates requestMyStats and daily-lobby rejoin auth. e.value
+    // is still used INTERNALLY above (entries.map(e => getDailyAttempt(...,
+    // e.value, ...))) to join each ZSET member to its attempt record, but it
+    // must never cross the wire. Echoing it here let any client call
+    // requestDailyLeaderboard and harvest every top-N player's secret. Rank
+    // is positional (client derives it from array index), so return only
+    // the display fields.
     return entries.map((e, i) => ({
-      stableId: e.value,
       chainLength: Math.floor(e.score),
       name: (records[i] && records[i].name) || 'Anonymous',
     }));
