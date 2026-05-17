@@ -69,6 +69,20 @@ function armTurnTimeout(io, pubClient, id, state) {
   }, turnTimeMs + 4000);
 
   activeTurnTimeouts.set(id, timeoutId);
+
+  // Phase 5a: armTurnTimeout is the single point a turn becomes active
+  // (nextTurn / startGame / rejoin / recovery sweeps all route here), so it
+  // is the one DRY place to drive a bot's move when the turn lands on one.
+  // Lazy require — gameLogic ⇄ botSystem ⇄ matchSystem would be a load-time
+  // cycle; deferring the require to call time resolves it (identical pattern
+  // and rationale to the lobbySystem lazy-require at the checkSoloWin hook
+  // ~L528-533). Wrapped so a bot-scheduling fault can never break the
+  // watchdog that was just armed above.
+  try {
+    require('./systems/botSystem').scheduleBotMove(io, pubClient, id, state);
+  } catch (e) {
+    logger.error(e, 'bot move scheduling hook failed');
+  }
 }
 
 // SECURITY (audit finding #1): the single source of truth for the

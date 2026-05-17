@@ -191,6 +191,69 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   }
 }
 
+// PERSON-CREDITS CACHE VERSION — bump on payload-shape change (same rationale
+// as CREDITS_CACHE_VERSION). v1 — { movies: [{ id, title, year, popularity }] }.
+const PERSON_CREDITS_CACHE_VERSION = 'v1';
+
+/**
+ * Phase 5a (bots): get a person's movie filmography from Redis cache or
+ * fetch+cache from TMDB for 7 days. Structurally identical to
+ * getOrFetchCredits (cache-first, NX stampede lock, drained-body throw on
+ * non-ok) so the bot move generator can rely on the same guarantees the
+ * submit pipeline already trusts. WHY a dedicated key/version: the payload
+ * shape (movie list, not cast list) differs from credits, so sharing a key
+ * would cross-contaminate two different schemas.
+ */
+async function getOrFetchPersonCredits(pubClient, personId, headers) {
+  const cacheKey = `personcredits:${PERSON_CREDITS_CACHE_VERSION}:${personId}`;
+  // 10s lock expiry > the 5s TMDB timeout so the lock can't outlive a stuck
+  // fetch — same invariant as getOrFetchCredits.
+  const lockKey = `${cacheKey}:fetching`;
+
+  const cached = await pubClient.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  // NX claim: only one worker fetches an uncached person; the rest wait+retry
+  // the cache. Without it, a busy bot turn could fan out duplicate TMDB calls.
+  const gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
+  if (!gotLock) {
+    await new Promise(r => setTimeout(r, 250));
+    const retry = await pubClient.get(cacheKey);
+    if (retry) return JSON.parse(retry);
+    // Fall through and fetch ourselves rather than hang the bot's turn.
+  }
+
+  try {
+    const url = `https://api.themoviedb.org/3/person/${personId}/movie_credits?language=en-US`;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) });
+    if (!response.ok) {
+      // Drain the body so the connection returns to the pool before we throw
+      // (identical to getOrFetchCredits' non-ok handling).
+      await response.arrayBuffer();
+      throw new Error(`TMDB person credits failed: ${response.status}`);
+    }
+    const raw = await response.json();
+    // Strip to the minimum the bot needs: a movie id (to submit by direct
+    // ID), a title (display/debug), a year (tie-break/recency), and
+    // popularity (the difficulty popularity-floor lever). Skip malformed
+    // entries (obscure people occasionally have id-less credit rows).
+    const stripped = {
+      movies: (raw.cast || [])
+        .filter(m => m && m.id != null && m.title)
+        .map(m => ({
+          id: m.id,
+          title: m.title,
+          year: (m.release_date || '').split('-')[0] || '',
+          popularity: typeof m.popularity === 'number' ? m.popularity : 0,
+        })),
+    };
+    await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    return stripped;
+  } finally {
+    if (gotLock) await pubClient.del(lockKey).catch(() => {});
+  }
+}
+
 // Lua compare-and-delete: only delete if the stored value still matches our token.
 // Runs server-side in Redis so the GET and DEL are atomic — no TOCTOU window
 // where another process could grab the lock between our check and our delete.
@@ -380,6 +443,10 @@ module.exports = {
   incrementPlayerWins,
   setPlayerWins,
   getOrFetchCredits,
+  // Phase 5a (bots): cached person filmography lookup, structurally identical
+  // to getOrFetchCredits so the bot generator inherits the same stampede-lock
+  // and body-draining guarantees.
+  getOrFetchPersonCredits,
   acquireSubmitLock,
   releaseSubmitLock,
   // Audit finding #4: per-lobby mutation mutex for all non-submit RMW paths.

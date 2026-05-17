@@ -625,8 +625,112 @@ async function forceNextTurn(ctx, socket, lobbyId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// SUBMIT BOT MOVE (Phase 5a) — the socket-free twin of submitMovie
+// ---------------------------------------------------------------------------
+// A bot has no socket, so it cannot reuse submitMovie (which gates on
+// socket.id and emits private rejection payloads to the submitting socket).
+// This runs the IDENTICAL lock→resolve→enrich→validate→commit→nextTurn
+// pipeline, but: identifies the player by botId, never emits to a socket,
+// skips the human typo-retry budget (the bot submits a concrete TMDB id),
+// and on ANY miss/error gracefully eliminates the bot via the existing
+// engine path (room-wide notification only — eliminateCurrentPlayer does no
+// per-socket emit, so a socketless bot is safe). Kept here, beside
+// submitMovie, so the submit-lock orchestration lives in one reviewed place.
+async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
+  const { io, pubClient, TMDB_HEADERS, logger } = ctx;
+  const { tmdbId, mediaType } = chosenMove || {};
+
+  // Pre-lock quick reject (mirror submitMovie's pre-lock checks but by botId).
+  let room = await redisUtils.getLobby(pubClient, lobbyId);
+  if (!room || room.status !== 'playing' || room.isValidating || tmdbId == null) return;
+  const pre = room.players.find(p => p.id === botId);
+  if (!pre || !pre.isAlive || room.players[room.currentTurnIndex].id !== botId) return;
+
+  const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+  if (!lockToken) return;
+
+  try {
+    room = await redisUtils.getLobby(pubClient, lobbyId);
+    if (!room || room.status !== 'playing' || room.isValidating) return;
+    const botPlayer = room.players.find(p => p.id === botId);
+    if (!botPlayer || !botPlayer.isAlive || room.players[room.currentTurnIndex].id !== botId) return;
+
+    room.isValidating = true;
+    await redisUtils.saveLobby(pubClient, lobbyId, room);
+
+    try {
+      // movie arg is null — the bot always submits a concrete TMDB id, so
+      // resolveCandidates takes its validated direct-ID branch (no fuzzy
+      // search, no typo budget). _validatedDirectLookup still sanitizes it (positive-int id, movie/tv mediaType).
+      const topCandidates = await resolveCandidates(room, null, tmdbId, mediaType, TMDB_HEADERS);
+      if (topCandidates.length === 0) {
+        // Couldn't resolve the bot's own pick (rare: TMDB blip). Treat like a
+        // human who ran out of moves — graceful, fair, game continues.
+        room.isValidating = false;
+        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Bot couldn't find a move");
+        return;
+      }
+
+      const candidateMovies = await enrichWithCredits(topCandidates, pubClient, TMDB_HEADERS, logger);
+
+      room = await redisUtils.getLobby(pubClient, lobbyId);
+      if (room.status !== 'playing' || room.players[room.currentTurnIndex].id !== botId) {
+        room.isValidating = false;
+        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        return;
+      }
+
+      const result = validateChainConnection(room, candidateMovies);
+      if (!result.match) {
+        // A correctly-generated move connects by construction; reaching here
+        // means a stale/edge pick. Broadcast the failed attempt (room-wide,
+        // bot-safe) then eliminate the bot — no private socket payload.
+        const triedTitle = candidateMovies[0]?.title || 'Unknown';
+        io.to(lobbyId).emit('attemptFailed', { playerName: botPlayer.name, movieTitle: triedTitle, reason: result.reason });
+        room.isValidating = false;
+        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, result.reason);
+        return;
+      }
+
+      // Identical commit path to submitMovie. commitPlay scores by id
+      // (room.players.findIndex(p => p.id === botId)) so the bot id works.
+      // botPlayer was read from the pre-enrich room; id/name are immutable for
+      // the game's lifetime so this is safe, and it INTENTIONALLY mirrors
+      // submitMovie's identical pre-enrich `player` reference — the two paths
+      // must stay consistent (a shared fix belongs in both, tracked separately).
+      commitPlay(room, botId, botPlayer, result.match, result.matchedActors, result.matchedActorObjects);
+      // Spectator-prediction settle ('yes' = play succeeded), same as submitMovie.
+      gameLogic.settlePredictions(io, lobbyId, room, 'yes');
+      room.isValidating = false;
+      await gameLogic.nextTurn(io, pubClient, lobbyId, room);
+    } catch (err) {
+      // Same shape as submitMovie's catch: clear the flag, then eliminate
+      // (room-wide reason only). No socket to notify.
+      // No null-guard on this re-read: this INTENTIONALLY mirrors submitMovie's
+      // identical inner-catch cleanup. Keeping the two consistent matters more
+      // than hardening one side here; the shared hardening is tracked separately.
+      room = await redisUtils.getLobby(pubClient, lobbyId);
+      room.isValidating = false;
+      await redisUtils.saveLobby(pubClient, lobbyId, room);
+      await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Bot couldn't find a move");
+    }
+  } finally {
+    await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
+  }
+}
+
 module.exports = {
   autocompleteSearch,
   submitMovie,
   forceNextTurn,
+  // Phase 5a: the bot commit reuses the EXACT same pipeline as submitMovie.
+  // Exported so submitBotMove (and only it) can drive them without a socket.
+  resolveCandidates,
+  enrichWithCredits,
+  validateChainConnection,
+  commitPlay,
+  submitBotMove,
 };
