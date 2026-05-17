@@ -130,11 +130,7 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   const cacheKey = `credits:${CREDITS_CACHE_VERSION}:${mediaType}:${tmdbId}`;
   // Companion lock for stampede protection — see logic below.
   // 10s expiry > the 5s TMDB timeout, so the lock can't outlive a stuck fetch.
-  // Phase 5b: lock key prefixed with `lock:` so it does NOT start with
-  // `credits:` — the fallback-path test checks that no `credits:` key is
-  // written on failure; the old `${cacheKey}:fetching` pattern would match
-  // that filter and create a false-positive "cache poisoning" signal.
-  const lockKey = `lock:${cacheKey}`;
+  const lockKey = `${cacheKey}:fetching`;
 
   // Cache hit — fast path. Most calls land here in steady state.
   const cached = await pubClient.get(cacheKey);

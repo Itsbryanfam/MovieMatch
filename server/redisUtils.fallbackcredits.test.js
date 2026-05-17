@@ -25,9 +25,12 @@ test('non-OK TMDB + movie in fallback → returns local cast, does NOT cache', a
   global.fetch.mockResolvedValue({ ok: false, status: 503, arrayBuffer: async () => {} });
   const res = await redisUtils.getOrFetchCredits(p, 7, 'movie', H);
   expect(res).toEqual({ cast: [{ id: 1, name: 'A' }] });
-  // No cache poisoning: the credits cache key must NOT have been written.
-  const wrote = p.set.mock.calls.some(c => String(c[0]).startsWith('credits:'));
-  expect(wrote).toBe(false);
+  // No cache poisoning: assert the credits-PAYLOAD write (opts {EX:604800})
+  // never happened. The NX stampede-lock set (key `${cacheKey}:fetching`,
+  // opts {NX:true,EX:10}) legitimately occurs and is NOT poisoning — it is
+  // distinguished here by the EX:604800 cache-TTL option, not a key prefix.
+  const cacheWrote = p.set.mock.calls.some(c => c[2] && c[2].EX === 604800);
+  expect(cacheWrote).toBe(false);
 });
 
 test('network throw + movie in fallback → returns local cast (no rethrow)', async () => {
@@ -58,7 +61,10 @@ test('healthy fetch path unchanged: still strips + caches with 7-day EX', async 
   global.fetch.mockResolvedValue({ ok: true, json: async () => ({ cast: [{ id: 3, name: 'C', extra: 'x' }] }) });
   const res = await redisUtils.getOrFetchCredits(p, 7, 'movie', H);
   expect(res).toEqual({ cast: [{ id: 3, name: 'C' }] });
-  const setCall = p.set.mock.calls.find(c => String(c[0]).startsWith('credits:'));
+  // Find the credits-payload write by its 7-day TTL option (NOT a key prefix —
+  // the stampede-lock set also writes a credits:*:fetching key).
+  const setCall = p.set.mock.calls.find(c => c[2] && c[2].EX === 604800);
+  expect(setCall).toBeDefined();
   expect(setCall[2]).toEqual({ EX: 604800 });
   expect(spy).not.toHaveBeenCalled(); // fallback never consulted on the healthy path
 });
