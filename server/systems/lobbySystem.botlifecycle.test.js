@@ -4,6 +4,7 @@
 const lobbySystem = require('./lobbySystem');
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
+const botSystem = require('./botSystem');
 jest.mock('../redisUtils');
 
 const HOST = 'sock-host';
@@ -17,7 +18,10 @@ function lobby(over = {}) {
 let io, ctx;
 beforeEach(() => {
   jest.clearAllMocks();
-  io = { to: jest.fn().mockReturnThis(), emit: jest.fn() };
+  // Mirror real Socket.IO + the established fakeIo() pattern in
+  // turn-watchdog.test.js: io.sockets.sockets is an always-present Map in
+  // production, so handleDisconnect's socket-leave must run as in prod.
+  io = { to: jest.fn().mockReturnThis(), emit: jest.fn(), sockets: { sockets: new Map() } };
   ctx = { io, pubClient: {}, TMDB_HEADERS: {}, logger: { error: jest.fn() } };
   // withLobbyLock(pub, id, fn) → runs fn(room), returns room (mirror real contract).
   redisUtils.withLobbyLock.mockImplementation(async (_p, _id, fn) => {
@@ -74,7 +78,9 @@ test('lobby with only bots left after the last human disconnects is deleted', as
     { id: 'bot_1', name: 'Bot', isBot: true, connected: true },
   ]});
   const clearTurn = jest.spyOn(gameLogic, 'clearTurnTimeout');
+  const clearBot = jest.spyOn(botSystem, 'clearBotTimeout');
   await lobbySystem.handleDisconnect(ctx, HOST);
   expect(redisUtils.deleteLobby).toHaveBeenCalledWith(ctx.pubClient, 'L');
   expect(clearTurn).toHaveBeenCalledWith('L');
+  expect(clearBot).toHaveBeenCalledWith('L');
 });

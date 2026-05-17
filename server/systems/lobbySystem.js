@@ -720,9 +720,7 @@ async function handleDisconnect(ctx, socketId) {
     const lobbyId = await redisUtils.getSocketLobby(pubClient, socketId);
     if (!lobbyId) return;
 
-    // Optional-chain guards against test environments / unexpected io shapes
-    // where io.sockets may be absent — production Socket.io always provides it.
-    const socket = io.sockets?.sockets?.get(socketId);
+    const socket = io.sockets.sockets.get(socketId);
     if (socket) socket.leave(lobbyId);
 
     await redisUtils.deleteSocketLobby(pubClient, socketId);
