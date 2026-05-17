@@ -352,6 +352,9 @@ async function startApp() {
   // lobby with an expired turn and nobody watching. This periodic sweep
   // closes that steady-state window. .unref() so the timer never by itself
   // keeps the process (or a Jest worker) alive — see Phase 2 R3.
+  // Intentionally NOT cleared in gracefulShutdown: this is a process-lifetime
+  // sweep; .unref() + the forced-exit path make clearInterval unnecessary.
+  // (Jest open-handle cleanup is Phase 2 R3 / Task 5's scope.)
   const turnSweepInterval = setInterval(() => {
     gameLogic.sweepMissingTurnWatchdogs(io, pubClient)
       .then(n => { if (n > 0) logger.info(`Turn-watchdog sweep armed ${n} unwatched lobbies`); })

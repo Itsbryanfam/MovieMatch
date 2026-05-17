@@ -8,7 +8,7 @@ describe('R2 — sweepMissingTurnWatchdogs', () => {
   const pub = {};
 
   afterEach(() => {
-    ['L-play', 'L-play-2', 'L-wait'].forEach(id => gameLogic.clearTurnTimeout(id));
+    ['L-play', 'L-wait'].forEach(id => gameLogic.clearTurnTimeout(id));
     jest.clearAllMocks();
   });
 
@@ -31,6 +31,10 @@ describe('R2 — sweepMissingTurnWatchdogs', () => {
 
     redisUtils.getAllLobbies.mockResolvedValue([room]);
     const armed = await gameLogic.sweepMissingTurnWatchdogs(io, pub);
+    // `armed === 0` is the actual guard proof: if the !hasActiveTurnTimeout
+    // gate were removed, armTurnTimeout would run (clearTurnTimeout + re-arm)
+    // and armed would be 1. hasActiveTurnTimeout staying true confirms the
+    // healthy timer was not cleared.
     expect(armed).toBe(0);
     expect(gameLogic.hasActiveTurnTimeout('L-play')).toBe(true);
   });
