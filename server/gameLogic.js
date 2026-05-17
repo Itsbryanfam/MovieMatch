@@ -368,6 +368,11 @@ function promoteSpectators(state) {
 }
 
 function scheduleGameReset(io, pubClient, id) {
+  // .unref() so this best-effort cleanup timer never by itself keeps a Node
+  // process (or a Jest worker) alive past test teardown. The timer still fires
+  // for the entire lifetime of a running server — .unref() only stops it from
+  // pinning a process that would otherwise exit. A missed reset on abrupt
+  // shutdown is harmless; the lobby status is re-checked inside the callback.
   setTimeout(async () => {
     try {
       const liveState = await redisUtils.getLobby(pubClient, id);
@@ -389,7 +394,7 @@ function scheduleGameReset(io, pubClient, id) {
     } catch (err) {
       logger.error(err, 'Game reset error');
     }
-  }, 7000);
+  }, 7000).unref();
 }
 
 function resetTimer(state) {

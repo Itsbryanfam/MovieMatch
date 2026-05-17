@@ -319,15 +319,21 @@ async function startApp() {
     // Must run after Redis connects because posterCache.setPosters triggers
     // an io.emit, and io is only ready after this function runs.
     fetchBackgroundPosters();
-    setInterval(fetchBackgroundPosters, POSTER_REFRESH_INTERVAL_MS);
+    // .unref() so this best-effort background refresh never by itself keeps a
+    // Node process (or a Jest worker) alive — the interval still fires on a
+    // running server; it just won't pin an otherwise-idle process. Mirrors the
+    // same pattern used for turnSweepInterval below (Phase 2 R3).
+    setInterval(fetchBackgroundPosters, POSTER_REFRESH_INTERVAL_MS).unref();
     // Audit finding #10: periodic full leaderboard prune. Best-effort —
     // a failed sweep just means stale entries linger until the next run or
     // an admin POST /api/admin/prune-leaderboard; it must never crash boot.
-    setInterval(() => {
+    // .unref() for the same reason as the poster-refresh interval above.
+    const leaderboardPruneInterval = setInterval(() => {
       redisUtils.pruneLeaderboard(pubClient)
         .then(n => { if (n > 0) logger.info(`Leaderboard prune removed ${n} stale entries`); })
         .catch(err => logger.error(err, 'Periodic leaderboard prune failed'));
     }, LEADERBOARD_PRUNE_INTERVAL_MS);
+    leaderboardPruneInterval.unref();
   } catch (err) {
     logger.error(err, 'Redis connection failed');
   }
