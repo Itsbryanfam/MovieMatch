@@ -37,6 +37,13 @@ export function renderLobby(gameState, myPlayerId) {
   });
   if (modeDescription) modeDescription.innerText = MODE_DESCRIPTIONS[mode] || '';
 
+  // Phase 5a: tear down any previously-rendered Add-Bot row on EVERY render,
+  // BEFORE the team-mode early return — otherwise a classic/speed→team
+  // switch would leave a stale .add-bot-row node lingering in the DOM
+  // (renderLobby runs on every stateUpdate; this keeps it idempotent).
+  const prevBotRow = startBtn.parentNode && startBtn.parentNode.querySelector('.add-bot-row');
+  if (prevBotRow) prevBotRow.remove();
+
   if (mode === 'team') {
     showScreen('team');                           // normalise waiting/team pair: show team
     renderTeamScreen(gameState, myPlayerId, amIHost);
@@ -68,7 +75,7 @@ export function renderLobby(gameState, myPlayerId) {
     if (p.isBot) {
       const badge = document.createElement('span');
       badge.className = 'bot-badge';
-      const diff = (p.difficulty || 'normal');
+      const diff = p.difficulty || 'normal';
       badge.textContent = `BOT · ${diff.charAt(0).toUpperCase()}${diff.slice(1)}`;
       li.appendChild(badge);
     }
@@ -147,17 +154,15 @@ export function renderLobby(gameState, myPlayerId) {
   // Phase 5a: host-only "Add Bot" + difficulty selector. Only classic/speed
   // (mirrors the server gate so the UI never offers an action the server
   // rejects). Built from elements (no innerHTML) consistent with this file.
-  // Remove any previously-rendered botRow on each re-render so re-renders
-  // never double-up the control (renderLobby is called on every state update).
-  const prevBotRow = startBtn.parentNode && startBtn.parentNode.querySelector('.add-bot-row');
-  if (prevBotRow) prevBotRow.remove();
-
   const botModeOk = gameState.gameMode === 'classic' || gameState.gameMode === 'speed';
   if (amIHost && botModeOk) {
     const botRow = document.createElement('div');
     botRow.className = 'add-bot-row';
     const sel = document.createElement('select');
     sel.className = 'bot-diff-select';
+    // a11y: the select has no visible <label>; the adjacent button gives
+    // sighted context but screen readers need an explicit name.
+    sel.setAttribute('aria-label', 'Bot difficulty');
     // Default to 'Normal' first so it's the pre-selected value when the host
     // opens the lobby; easy/hard are secondary choices.
     [['normal', 'Normal'], ['easy', 'Easy'], ['hard', 'Hard']].forEach(([v, label]) => {
@@ -283,7 +288,8 @@ function renderPlayerSidebar(gameState, mode) {
       if (p.isBot && index === gameState.currentTurnIndex && gameState.status === 'playing') {
         const thinking = document.createElement('span');
         thinking.className = 'bot-thinking';
-        thinking.textContent = ' 🤖 thinking…';
+        // Spacing handled via CSS margin-left on .bot-thinking (no leading space needed).
+        thinking.textContent = '🤖 thinking…';
         li.appendChild(thinking);
       }
       gamePlayersList.appendChild(li);

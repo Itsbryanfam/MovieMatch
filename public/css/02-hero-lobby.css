@@ -723,5 +723,6 @@ input:disabled {
   opacity: 0.8;
   font-size: 0.8rem;
   font-style: italic;
+  margin-left: 4px;
 }
 
