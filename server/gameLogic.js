@@ -2,9 +2,9 @@ const redisUtils = require('./redisUtils');
 const telemetry = require('./telemetry');
 const statsSystem = require('./systems/statsSystem');
 const soloObjectivesSystem = require('./systems/soloObjectivesSystem');
-const logger = require('pino')();
 // Player hard-cap constant (single source of truth — see server/constants.js).
 const { MAX_PLAYERS_PER_LOBBY } = require('./constants');
+const logger = require('pino')();
 
 // In-memory map for active turn timeouts.
 // Stored in-process (not Redis) because setTimeout handles are not serializable.
