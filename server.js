@@ -240,6 +240,16 @@ if (!TMDB_TOKEN) {
   logger.fatal('TMDB_READ_TOKEN environment variable is required. Set it in your .env file.');
   process.exit(1);
 }
+// ADMIN_SECRET fail-fast — parity with the TMDB guard above. safeEqual
+// already fails closed when the secret is missing, but a missing/weak
+// secret should refuse to boot LOUDLY rather than silently shipping
+// unreachable (or brute-forceable) destructive admin endpoints.
+const validateAdminSecret = require('./server/validateAdminSecret');
+const adminSecretErr = validateAdminSecret(process.env.ADMIN_SECRET);
+if (adminSecretErr) {
+  logger.fatal(adminSecretErr + '. Set it in your .env file.');
+  process.exit(1);
+}
 const TMDB_HEADERS = { Authorization: `Bearer ${TMDB_TOKEN}`, accept: 'application/json' };
 
 let io;
