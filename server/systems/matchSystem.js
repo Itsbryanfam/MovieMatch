@@ -138,7 +138,10 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
     // Re-read after acquiring lock — disconnects may have mutated state during acquisition
     room = await redisUtils.getLobby(pubClient, lobbyId);
     if (!room || room.status !== 'playing' || room.isValidating) return;
-    const player = room.players.find(p => p.id === socket.id);
+    // `let` (not const): re-derived from the freshly re-read room after the
+    // post-enrich re-read below, so commitPlay / attemptFailed use the player
+    // from the same object graph as the room they persist.
+    let player = room.players.find(p => p.id === socket.id);
     if (!player || !player.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
 
     room.isValidating = true;
@@ -207,6 +210,14 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
         await redisUtils.saveLobby(pubClient, lobbyId, room);
         return;
       }
+
+      // Re-derive `player` from the FRESHLY re-read room. The binding from
+      // before the enrich points at the PRE-enrich room object; commitPlay and
+      // the attemptFailed payload below must use the player from the same
+      // object graph as the `room` they mutate/persist — otherwise a player
+      // record that changed during the async resolve/enrich window would be
+      // committed/rendered with stale data. (submitBotMove mirrors this.)
+      player = room.players.find(p => p.id === socket.id);
 
       // Step 4: Validate against chain
       const result = validateChainConnection(room, candidateMovies);
@@ -304,10 +315,17 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
       await gameLogic.nextTurn(io, pubClient, lobbyId, room);
 
     } catch (err) {
+      // Guard the re-read: if Redis is briefly unavailable at cleanup time,
+      // getLobby returns null and `room.isValidating = false` would throw a
+      // TypeError that escapes past the outer finally as an unhandled
+      // rejection. The lock is still released by finally; we just skip the
+      // (now-unreachable) state cleanup. Mirrors submitBotMove's catch.
       room = await redisUtils.getLobby(pubClient, lobbyId);
-      room.isValidating = false;
-      await redisUtils.saveLobby(pubClient, lobbyId, room);
-      await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "API Error or Timeout!");
+      if (room) {
+        room.isValidating = false;
+        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "API Error or Timeout!");
+      }
     }
   } finally {
     // Pass the token so the Lua release script can verify ownership before
@@ -653,7 +671,9 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
   try {
     room = await redisUtils.getLobby(pubClient, lobbyId);
     if (!room || room.status !== 'playing' || room.isValidating) return;
-    const botPlayer = room.players.find(p => p.id === botId);
+    // `let` (not const): re-derived from the freshly re-read room after the
+    // post-enrich re-read below (mirrors submitMovie).
+    let botPlayer = room.players.find(p => p.id === botId);
     if (!botPlayer || !botPlayer.isAlive || room.players[room.currentTurnIndex].id !== botId) return;
 
     room.isValidating = true;
@@ -682,6 +702,12 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
         return;
       }
 
+      // Re-derive `botPlayer` from the FRESHLY re-read room (same rationale as
+      // submitMovie's post-enrich re-derive: the binding above is the
+      // PRE-enrich object; the attemptFailed payload / commitPlay below must
+      // use the player from the same graph as the persisted `room`).
+      botPlayer = room.players.find(p => p.id === botId);
+
       const result = validateChainConnection(room, candidateMovies);
       if (!result.match) {
         // A correctly-generated move connects by construction; reaching here
@@ -697,10 +723,9 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
 
       // Identical commit path to submitMovie. commitPlay scores by id
       // (room.players.findIndex(p => p.id === botId)) so the bot id works.
-      // botPlayer was read from the pre-enrich room; id/name are immutable for
-      // the game's lifetime so this is safe, and it INTENTIONALLY mirrors
-      // submitMovie's identical pre-enrich `player` reference — the two paths
-      // must stay consistent (a shared fix belongs in both, tracked separately).
+      // botPlayer was re-derived from the fresh post-enrich room above, so it
+      // belongs to the same object graph as `room` — consistent with
+      // submitMovie's matching re-derive.
       commitPlay(room, botId, botPlayer, result.match, result.matchedActors, result.matchedActorObjects);
       // Spectator-prediction settle ('yes' = play succeeded), same as submitMovie.
       gameLogic.settlePredictions(io, lobbyId, room, 'yes');
@@ -708,14 +733,16 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
       await gameLogic.nextTurn(io, pubClient, lobbyId, room);
     } catch (err) {
       // Same shape as submitMovie's catch: clear the flag, then eliminate
-      // (room-wide reason only). No socket to notify.
-      // No null-guard on this re-read: this INTENTIONALLY mirrors submitMovie's
-      // identical inner-catch cleanup. Keeping the two consistent matters more
-      // than hardening one side here; the shared hardening is tracked separately.
+      // (room-wide reason only). No socket to notify. Null-guard the re-read:
+      // a Redis blip at cleanup makes getLobby return null and the unguarded
+      // `room.isValidating = false` would escape the outer finally as an
+      // unhandled rejection. Mirrors submitMovie's guarded catch.
       room = await redisUtils.getLobby(pubClient, lobbyId);
-      room.isValidating = false;
-      await redisUtils.saveLobby(pubClient, lobbyId, room);
-      await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Bot couldn't find a move");
+      if (room) {
+        room.isValidating = false;
+        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Bot couldn't find a move");
+      }
     }
   } finally {
     await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
