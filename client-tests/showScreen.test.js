@@ -54,3 +54,33 @@ test('top-level toggle does not touch entry panels', () => {
   expect(cls('join-panel')).toBe('');
   expect(cls('private-panel')).toBe('hidden');
 });
+
+// WHY: guards the default branch — an unrecognised name must warn and leave
+// the DOM completely untouched (i.e. no partial mutation before the warn).
+test('unknown name warns and does not throw or mutate the DOM', () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(() => showScreen('nonexistent')).not.toThrow();
+  expect(warn).toHaveBeenCalledWith('showScreen: unknown screen name:', 'nonexistent');
+  // DOM untouched: hero was the initially-active screen in setDom()
+  expect(cls('hero-screen')).toBe('screen active');
+  expect(cls('lobby-screen')).toBe('screen');
+  expect(cls('game-screen')).toBe('screen');
+  warn.mockRestore();
+});
+
+// WHY: guards cross-group isolation — toggling the waiting/team sub-group
+// must never spill side-effects into the top-level screen group. This is
+// the symmetric counterpart of the 'top-level toggle does not touch entry
+// panels' test above, covering the other direction.
+test('waiting/team toggle does not touch the top-level screen group', () => {
+  // hero is .active from setDom(); normalising the waiting/team sub-group
+  // must not alter any top-level .screen .active state.
+  showScreen('team');
+  expect(cls('hero-screen')).toBe('screen active');
+  expect(cls('lobby-screen')).toBe('screen');
+  expect(cls('game-screen')).toBe('screen');
+  showScreen('waiting');
+  expect(cls('hero-screen')).toBe('screen active');
+  expect(cls('lobby-screen')).toBe('screen');
+  expect(cls('game-screen')).toBe('screen');
+});

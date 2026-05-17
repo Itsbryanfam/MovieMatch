@@ -150,7 +150,13 @@ document.addEventListener('DOMContentLoaded', () => {
   logo.addEventListener('click', () => {
     if (getCurrentLobbyId()) leaveLobby();
     showScreen('hero');                           // normalise top-level screen group
-    waitingRoom.classList.add('hidden');          // keep: not part of top-level group
+    // keep: waitingRoom is not part of the top-level screen group, so
+    // showScreen() does not hide it. NOTE: teamScreen has the same
+    // asymmetry and is intentionally NOT hidden here — that is a
+    // PRE-EXISTING bug (the old logo handler never hid teamScreen
+    // either), deliberately left out of Phase 3 (a zero-behaviour-change
+    // refactor) and tracked as a separate follow-up task (2026-05-17).
+    waitingRoom.classList.add('hidden');
     showScreen('join');                           // normalise entry-panel group back to join
   });
 
