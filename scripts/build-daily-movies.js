@@ -19,6 +19,7 @@ if (!TMDB_TOKEN) {
 }
 const TMDB_HEADERS = { Authorization: `Bearer ${TMDB_TOKEN}`, accept: 'application/json' };
 const OUT = path.join(__dirname, '..', 'data', 'dailyMovies.json');
+// 500 ≈ 16 months of non-repeating daily puzzles; pool grows on each regeneration
 const TARGET = 500;
 
 // Preserve the existing hand-curated entries: read whatever is there now and
@@ -28,6 +29,7 @@ function loadExisting() {
 }
 
 async function fetchPage(kind, page) {
+  // en-US: English titles match the game's UI/search; other locales return translated titles that wouldn't match player input
   const url = `https://api.themoviedb.org/3/movie/${kind}?language=en-US&page=${page}`;
   const res = await fetch(url, { headers: TMDB_HEADERS, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`TMDB ${kind} p${page} → HTTP ${res.status}`);
@@ -59,10 +61,12 @@ function toEntry(r) {
         const e = toEntry(r);
         if (e && !byId.has(e.id)) byId.set(e.id, e);
       }
+      // explicit early exit; the inner-loop size guard also stops here — kept for clarity
       if (byId.size >= TARGET + 40 && kind === 'popular') break outer;
     }
   }
 
+  // sort by id so re-runs are byte-stable (git diff stays clean on regeneration)
   const list = [...byId.values()].sort((a, b) => a.id - b.id);
   if (list.length < TARGET) {
     console.error(`Only collected ${list.length} (< ${TARGET}). TMDB may be rate-limiting; re-run.`);

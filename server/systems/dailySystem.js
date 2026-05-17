@@ -35,7 +35,7 @@ const DAILY_RETENTION_DAYS = 90;
 const DAILY_RETENTION_SEC = DAILY_RETENTION_DAYS * 24 * 60 * 60;
 
 // Lazy-load the curated starter list. fs.readFileSync at boot is fine
-// because the file is still small (~45KB for ~500 entries — a one-time
+// because the file is still small (~56KB for ~500 entries — a one-time
 // synchronous boot read, not a hot path) and the dev server restarts on
 // edits; no need for a hot-reload mechanism.
 let _movieList = null;
