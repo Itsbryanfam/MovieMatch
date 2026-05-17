@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "jest"
+    "test": "jest",
+    "build:daily-movies": "node scripts/build-daily-movies.js"
   },
   "keywords": [],
   "author": "",

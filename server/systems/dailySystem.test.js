@@ -59,10 +59,10 @@ describe('dailySystem.pickDailyMovie', () => {
 
   test('different dates produce (almost certainly) different movies', () => {
     // Spot check across a week — the FNV-1a hash distribution should map
-    // most consecutive dates to different list indices. Allow up to two
-    // collisions across the week (the curated list is ~50 entries; with
-    // small N some adjacent dates can hash-collide). If this fails
-    // catastrophically (everyone same), the seed function is broken.
+    // most consecutive dates to different list indices. The curated list is
+    // now ~500 entries, so 7 consecutive dates colliding is effectively
+    // impossible; the `- 2` slack is kept only as a defensive floor. If this
+    // fails (everyone same), the seed function is broken.
     const dates = ['2026-05-04','2026-05-05','2026-05-06','2026-05-07','2026-05-08','2026-05-09','2026-05-10'];
     const ids = dates.map(d => dailySystem.pickDailyMovie(d).id);
     const distinctCount = new Set(ids).size;

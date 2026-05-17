@@ -336,7 +336,8 @@ export function renderDailyResult(data) {
 
     const replayBtn = document.createElement('button');
     replayBtn.type = 'button';
-    replayBtn.className = 'btn-secondary daily-replay-btn';
+    // Phase 4: .btn additive base (cursor:pointer already on btn-secondary); zero visual change.
+    replayBtn.className = 'btn btn-secondary daily-replay-btn';
     replayBtn.textContent = '▶ Replay your chain';
 
     const replayContainer = document.createElement('div');
