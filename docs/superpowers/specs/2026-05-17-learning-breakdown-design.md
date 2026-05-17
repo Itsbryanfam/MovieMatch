@@ -1,10 +1,15 @@
-# Phase 5b — Post-Game Learning Breakdown: Design Spec
+# Phase 6a — Post-Game Learning Breakdown: Design Spec
 
 **Date:** 2026-05-17
 **Status:** Approved (brainstorming) — proceeding to implementation plan
-**Phase:** First slice of a post-remediation **growth bundle** sourced from a
-Codex idea pass. See §1 for the portfolio triage (the decision record for *all*
-12 proposed ideas) and the bundle decomposition.
+**Phase:** **6a** — first slice of a new post-remediation **growth initiative
+(Phase 6)** sourced from a Codex idea pass, distinct from and sequenced *after*
+the 5-phase post-2026-05-16-review remediation. The remediation's final
+sub-phase, **5b — Local Fallback Movie DB**, is specced separately at
+`docs/superpowers/specs/2026-05-17-fallback-movie-db-design.md` and is owned by
+the parallel track; this growth work does **not** renumber, block, or overlap
+it. See §1 for the portfolio triage (decision record for all 12 Codex ideas)
+and the Phase 6 decomposition.
 
 ---
 
@@ -16,23 +21,29 @@ Codex proposed 12 features. Each was checked against the **actual** codebase on
 - **Codex's #1 "Bot Quickplay" was already ~5/6 built and is now fully shipped.**
   Phase 5a bots merged via PR #18 (all 7 tasks incl. the Add-Bot client UI) +
   follow-up PR #19; `origin/main` HEAD `4e1372b`. Nothing to do.
-- **Codex's #3 "local movie connection graph" (a P0) is dropped as YAGNI.** Its
-  stated justifications — faster bots, stable dailies, lower TMDB dependency —
-  are *already solved*: bots run on Redis-cached TMDB person-filmography
-  (`credits:v2:*` / `personcredits:v1:*`, 7-day TTL), the Daily is deterministic
-  with 553 committed entries, and credits/search are cache-backed. It is a large
-  new data subsystem for problems the existing cache layer already mitigates.
+- **Codex's #3 "local movie connection graph" (a P0) is split, not built in
+  this initiative.** Its *stated* justifications — faster bots, stable dailies,
+  lower TMDB dependency — are already solved (bots run on Redis-cached TMDB
+  person-filmography `credits:v2:*` / `personcredits:v1:*` 7-day TTL, the Daily
+  is deterministic with 553 committed entries, credits/search are cache-backed),
+  so Codex's grandiose foundational-graph framing is dropped. **However**, a
+  sharper rationale Codex did *not* state — an **uncached** title submitted
+  during a TMDB outage unfairly eliminates the active player mid-game, because
+  the Redis cache only protects cache *hits* — is a real, verified resilience
+  defect. The narrow **failure-only** fix is the parallel track's **remediation
+  Phase 5b — Local Fallback Movie DB** (separate spec). This growth initiative
+  neither builds nor blocks it; it is correctly *not* a Phase 6 item.
 
 **Verdict on all 12:**
 
 | Codex idea | Verdict | Grounded reason |
 |---|---|---|
 | Bot Quickplay (P0) | **DONE** | Shipped: Phase 5a PR #18 + #19, in `main`. |
-| Post-Game Learning Breakdown (P0) | **DO — this spec (5b)** | Today only a cast comparison exists (H3). The mastery lever ("what *would* have worked") is missing and cheap — reuse merged bot pathfinding read-side. |
-| Achievements + Titles (P1) | **DO — 5c** | Pure derivation over `statsSystem` anonymous stats; cheap identity loop, no new persistence/accounts. |
-| Custom Rule Kits (P0, constrained) | **DO — 5d** | Presets over the existing `themesSystem` (7 genre/decade filters) + mode rules. Data-heavy presets (awards/franchise) stay out — no such data exists. |
-| Local connection graph (P0) | **DROP** | Premises already solved by Redis cache + deterministic daily. |
-| Movie Atlas / Discovery Book (P2) | **DROP** | Niche; conceptually couples to the dropped graph. |
+| Post-Game Learning Breakdown (P0) | **DO — this spec (6a)** | Today only a cast comparison exists (H3). The mastery lever ("what *would* have worked") is missing and cheap — reuse merged bot pathfinding read-side. |
+| Achievements + Titles (P1) | **DO — 6b** | Pure derivation over `statsSystem` anonymous stats; cheap identity loop, no new persistence/accounts. |
+| Custom Rule Kits (P0, constrained) | **DO — 6c** | Presets over the existing `themesSystem` (7 genre/decade filters) + mode rules. Data-heavy presets (awards/franchise) stay out — no such data exists. |
+| Local connection graph (P0) | **SPLIT** | Grandiose "foundational graph for faster bots/hints/stable dailies" framing dropped — premises already solved by Redis cache + deterministic daily. The genuinely valuable *failure-only* subset (TMDB-outage resilience) is being delivered as **remediation Phase 5b** (separate spec, parallel track) — **not** a Phase 6 item. |
+| Movie Atlas / Discovery Book (P2) | **DROP** | Niche; conceptually couples to the dropped grandiose-graph framing (not to the narrow 5b resilience fallback). |
 | Ranked Duel / Season Ladder (P0) | **DEFER** | Whole new subsystem (MMR/queue/seasons); needs a player base; sequence after the on-ramp proves out. |
 | Shareable Challenge Links (P1) | **DEFER** | Strong viral upside; extends the existing canvas share card — own later phase. |
 | Weekly Events & Streaks (P1) | **DEFER** | Cleanly extends Daily + soloObjectives; additive content loop, second-tier. |
@@ -46,17 +57,18 @@ features is far too large for one spec, and this project's validated workflow is
 strictly **one phase = one spec → plan → subagent build → PR**. So the bundle is
 sequenced into independent sub-phases, each its own spec/plan/build cycle:
 
-- **5b — Post-Game Learning Breakdown** (this spec; highest retention depth, and
+- **6a — Post-Game Learning Breakdown** (this spec; highest retention depth, and
   it directly compounds the just-shipped bots: practice only improves you if
   losing teaches you something).
-- **5c — Achievements + Titles** (cleanest; pure read-side derivation over
+- **6b — Achievements + Titles** (cleanest; pure read-side derivation over
   existing stats).
-- **5d — Constrained Custom Rule Kits** (party identity over existing themes).
+- **6c — Constrained Custom Rule Kits** (party identity over existing themes).
 
-This is a new growth initiative, distinct from the original 5-phase
-post-2026-05-16-review remediation (Phases 1–4 shipped; remediation Phase 5 =
-5a bots, shipped; the remediation's planned "5b local fallback movie DB" was
-dropped — see reality check above, premises already solved).
+This **Phase 6** is a new growth initiative, distinct from and sequenced after
+the original 5-phase post-2026-05-16-review remediation: Phases 1–4 shipped;
+remediation Phase 5 = **5a bots** (shipped, PR #18 + #19) **+ 5b Local Fallback
+Movie DB** (specced separately, parallel track — it closes the remediation).
+Phase 6 begins only this growth bundle and changes nothing about remediation 5b.
 
 ---
 
@@ -121,7 +133,7 @@ changing how anyone else experiences an elimination.
 - Persisting, storing, or sharing breakdowns; any new Redis key or datastore.
 - Any change to bot move logic, difficulty tables, validation, or scoring
   (`generateBotMove` is consumed strictly read-only).
-- 5c (Achievements/Titles) and 5d (Custom Rule Kits) — separate specs/plans.
+- 6b (Achievements/Titles) and 6c (Custom Rule Kits) — separate specs/plans.
 
 ---
 
@@ -301,8 +313,9 @@ subagent-driven-development → finishing-a-development-branch**.
 
 - This spec is committed to `main` locally. The plan + co-located
   `.md.tasks.json` will likewise be committed to `main`, then a **feature branch
-  `phase5b-learning-breakdown` off `main`** (not a worktree, not stacked on any
-  other branch) for all implementation commits.
+  `phase6a-learning-breakdown` off `main`** (not a worktree, not stacked on any
+  other branch — in particular **not** on the parallel `phase5b-fallback-movie-db`
+  branch) for all implementation commits.
 - Native Task tools are unavailable here → TodoWrite for in-session tracking +
   hand-authored co-located `.md.tasks.json`; a task is `completed` only after
   **both** its per-task reviews pass.
@@ -312,7 +325,8 @@ subagent-driven-development → finishing-a-development-branch**.
   review** before finishing.
 - WHY-comments on every changed line.
 - Out-of-scope findings surfaced during reviews → spawn a task chip; do **not**
-  expand this phase's scope (5c/5d are already specced out as separate phases).
+  expand this phase's scope (6b/6c are separate phases; remediation 5b is the
+  parallel track's — never absorb its scope here).
 - `coverage/` stays untracked (never `git add`).
 - Finishing: push the feature branch + `gh pr create` (base `main`). The
   PR-merge / push-to-main / Render production deploy is classifier-gated and
