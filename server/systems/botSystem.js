@@ -93,6 +93,8 @@ function _shuffled(arr, rng) {
 // id-equality, fall back to lowercase name. Local copy keeps botSystem from
 // depending on a gameLogic internal (it isn't exported).
 function _sameActor(a, b) {
+  // != null (loose) intentionally covers BOTH null and undefined — raw cast
+  // data may carry either when TMDB omits a person id.
   if (a && b && a.id != null && b.id != null) return a.id === b.id;
   if (!a || !b || !a.name || !b.name) return false;
   return a.name.toLowerCase() === b.name.toLowerCase();
@@ -106,7 +108,7 @@ function _sameActor(a, b) {
  * the existing submit pipeline will accept it; we still pre-filter
  * used/hardcore so we don't propose a move the engine would reject.
  *
- * deps = { pubClient, headers, rng, getOrFetchPersonCredits, dailySeed }
+ * deps = { pubClient, headers, rng: () => number in [0,1), getOrFetchPersonCredits, dailySeed }
  */
 async function generateBotMove(room, profile, deps) {
   const { pubClient, headers, rng, getOrFetchPersonCredits, dailySeed } = deps;

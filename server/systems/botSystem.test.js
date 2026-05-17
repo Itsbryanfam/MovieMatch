@@ -125,14 +125,23 @@ describe('generateBotMove', () => {
     expect(deps.getOrFetchPersonCredits).not.toHaveBeenCalledWith(deps.pubClient, 42, deps.headers);
   });
 
-  test('returns null when no actor yields a qualifying film within retryCap', async () => {
+  test('retryCap caps how many actors are queried (3rd actor never reached)', async () => {
     const deps = baseDeps();
-    deps.getOrFetchPersonCredits.mockResolvedValue({ movies: [{ id: 8, title: 'Used', year: '1', popularity: 99 }] });
+    // retryCap=2 → only the first 2 (shuffled) actors are sampled. With
+    // rng:()=>0.99 _shuffled is order-preserving here, so actors [1,2] are
+    // queried and actor 3 is NOT — even though actor 3 HAS a qualifying film.
+    // If the .slice(retryCap) cap were removed this test would fail (it would
+    // reach actor 3, find movie 9, and return it instead of null).
+    deps.getOrFetchPersonCredits
+      .mockResolvedValueOnce({ movies: [{ id: 8, title: 'Used', year: '1', popularity: 99 }] })
+      .mockResolvedValueOnce({ movies: [{ id: 8, title: 'Used', year: '1', popularity: 99 }] })
+      .mockResolvedValueOnce({ movies: [{ id: 9, title: 'Reachable only without the cap', year: '1', popularity: 99 }] });
     const room = {
       chain: [{ movie: { id: 1, cast: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }, { id: 3, name: 'C' }] } }],
       usedMovies: ['movie:1', 'movie:8'], previousSharedActors: [], hardcoreMode: false,
     };
     expect(await botSystem.generateBotMove(room, profile, deps)).toBeNull();
+    expect(deps.getOrFetchPersonCredits).toHaveBeenCalledTimes(2); // capped at retryCap=2, not 3
   });
 
   test('swallows a getOrFetchPersonCredits throw and tries the next actor', async () => {
