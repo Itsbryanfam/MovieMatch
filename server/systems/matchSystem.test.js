@@ -465,22 +465,27 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
 
   test('payload omits couldHavePlayed when the computation exceeds the timeout', async () => {
     jest.useFakeTimers();
-    const room = makeInceptionRoom();
-    redisUtils.getLobby.mockResolvedValue(room);
-    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
-    global.fetch = fetchByUrl();
-    // Never resolves → simulates TMDB slower than COULD_HAVE_PLAYED_TIMEOUT_MS (1200ms).
-    jest.spyOn(botSystem, 'generateBotMove').mockReturnValue(new Promise(() => {}));
+    try {
+      const room = makeInceptionRoom();
+      redisUtils.getLobby.mockResolvedValue(room);
+      redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
+      global.fetch = fetchByUrl();
+      // Never resolves → simulates TMDB slower than COULD_HAVE_PLAYED_TIMEOUT_MS (1200ms).
+      jest.spyOn(botSystem, 'generateBotMove').mockReturnValue(new Promise(() => {}));
 
-    const submitPromise = matchSystem.submitMovie(ctx, mockSocket,
-      { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
-    // Fire the 1200ms fail-closed timer (literal 1201 = COULD_HAVE_PLAYED_TIMEOUT_MS + 1).
-    await jest.advanceTimersByTimeAsync(1201);
-    await submitPromise;
+      const submitPromise = matchSystem.submitMovie(ctx, mockSocket,
+        { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
+      // Fire the 1200ms fail-closed timer (literal 1201 = COULD_HAVE_PLAYED_TIMEOUT_MS + 1).
+      await jest.advanceTimersByTimeAsync(1201);
+      await submitPromise;
 
-    const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
-    expect(payload.couldHavePlayed).toBeUndefined();
-    jest.useRealTimers();
+      const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
+      expect(payload.couldHavePlayed).toBeUndefined();
+    } finally {
+      // Failure-safe: restore real timers even if an assertion throws above,
+      // so fake timers can never bleed into sibling tests in this describe.
+      jest.useRealTimers();
+    }
   });
 });
 
