@@ -239,3 +239,34 @@ describe('dailySystem.releaseInProgressAttempt', () => {
     expect(mockPubClient.del).not.toHaveBeenCalled();
   });
 });
+
+describe('dailySystem.getDailyLeaderboard', () => {
+  test('returns name + chainLength only — never echoes stableId to clients', async () => {
+    // stableId is the system's sole bearer credential (gates requestMyStats
+    // and daily-lobby rejoin). It is the ZSET member used internally to join
+    // to attempt records, but it must never appear in the client-bound row.
+    const mockPubClient = {
+      zRangeWithScores: jest.fn().mockResolvedValue([
+        { value: 'p_alice', score: 12 },
+        { value: 'p_bob', score: 7 },
+      ]),
+      // Key-addressed mock (order-independent) matching the real attempt-key
+      // format asserted elsewhere in this file ('daily:attempt:<date>:<id>').
+      get: jest.fn((key) => {
+        if (key === 'daily:attempt:2026-05-04:p_alice') return Promise.resolve(JSON.stringify({ name: 'Alice', status: 'done', chainLength: 12 }));
+        if (key === 'daily:attempt:2026-05-04:p_bob') return Promise.resolve(JSON.stringify({ name: 'Bob', status: 'done', chainLength: 7 }));
+        return Promise.resolve(null);
+      }),
+    };
+
+    const lb = await dailySystem.getDailyLeaderboard(mockPubClient, '2026-05-04', 20);
+
+    expect(lb).toEqual([
+      { chainLength: 12, name: 'Alice' },
+      { chainLength: 7, name: 'Bob' },
+    ]);
+    lb.forEach((row) => {
+      expect('stableId' in row).toBe(false);
+    });
+  });
+});
