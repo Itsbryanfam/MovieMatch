@@ -21,6 +21,7 @@ import {
   movieInput, submitBtn, inputArea, turnIndicator, hintText,
   MODE_DESCRIPTIONS,
   attachPosterFallback,
+  showScreen, // WHY: Phase 3 Task D — use canonical group-normaliser for waiting/team pair
 } from './ui-dom.js';
 // Import clearGhostAttempt — renderChainItems removes the ghost card when a
 // new chain entry arrives, which lives in the notifications module.
@@ -37,13 +38,11 @@ export function renderLobby(gameState, myPlayerId) {
   if (modeDescription) modeDescription.innerText = MODE_DESCRIPTIONS[mode] || '';
 
   if (mode === 'team') {
-    waitingRoom.classList.add('hidden');
-    teamScreen.classList.remove('hidden');
+    showScreen('team');                           // normalise waiting/team pair: show team
     renderTeamScreen(gameState, myPlayerId, amIHost);
     return;
   } else {
-    teamScreen.classList.add('hidden');
-    waitingRoom.classList.remove('hidden');
+    showScreen('waiting');                        // normalise waiting/team pair: show waiting
   }
 
   lobbyCodeDisplay.innerText = gameState.id || '';

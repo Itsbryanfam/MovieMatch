@@ -16,6 +16,7 @@
 import {
   initUIElements, closeMobileAc, openShareModal, showNotification, showToast,
   buildTextRecap,
+  showScreen, // WHY: canonical group-normaliser added in Phase 3 Task D
   playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
   tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
@@ -148,13 +149,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   logo.addEventListener('click', () => {
     if (getCurrentLobbyId()) leaveLobby();
-    gameScreen.classList.remove('active');
-    lobbyScreen.classList.remove('active');
-    heroScreen.classList.add('active');
-    waitingRoom.classList.add('hidden');
-    if (privatePanel) privatePanel.classList.add('hidden');
-    if (publicPanel) publicPanel.classList.add('hidden');
-    if (joinPanel) joinPanel.classList.remove('hidden');
+    showScreen('hero');                           // normalise top-level screen group
+    waitingRoom.classList.add('hidden');          // keep: not part of top-level group
+    showScreen('join');                           // normalise entry-panel group back to join
   });
 
   // =========================================================================
@@ -184,25 +181,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   showPrivateBtn?.addEventListener('click', () => {
     if (!checkName()) return;
-    joinPanel.classList.add('hidden');
-    privatePanel.classList.remove('hidden');
+    showScreen('private');                        // normalise entry-panel group
   });
 
   showPublicBtn?.addEventListener('click', () => {
     if (!checkName()) return;
-    joinPanel.classList.add('hidden');
-    publicPanel.classList.remove('hidden');
-    socket.emit('requestPublicLobbies');
+    showScreen('public');                         // normalise entry-panel group
+    socket.emit('requestPublicLobbies');          // keep: non-visibility side-effect
   });
 
   backToJoinBtn?.addEventListener('click', () => {
-    privatePanel.classList.add('hidden');
-    joinPanel.classList.remove('hidden');
+    showScreen('join');                           // normalise entry-panel group
   });
 
   backToJoinBtn2?.addEventListener('click', () => {
-    publicPanel.classList.add('hidden');
-    joinPanel.classList.remove('hidden');
+    showScreen('join');                           // normalise entry-panel group
   });
 
   refreshLobbiesBtn?.addEventListener('click', () => {
@@ -219,9 +212,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const name = playerNameInput ? playerNameInput.value.trim() : '';
     if (!name) {
       showNotification('Enter a name first!');
-      if (privatePanel) privatePanel.classList.add('hidden');
-      if (joinPanel) joinPanel.classList.remove('hidden');
-      if (playerNameInput) playerNameInput.focus();
+      showScreen('join');                         // normalise entry-panel group (error path)
+      if (playerNameInput) playerNameInput.focus(); // keep: non-visibility side-effect
       return;
     }
     localStorage.setItem('mm_playerName', name);
@@ -230,7 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
       lobbyId: lobbyIdInput ? lobbyIdInput.value.trim() : '',
       stableId: getStableId()
     });
-    if (privatePanel) privatePanel.classList.add('hidden');
+    showScreen('join');                           // normalise entry-panel group (success path)
   }
 
   joinBtn?.addEventListener('click', handleJoinRoomSubmit);
@@ -261,8 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // players skip straight through. The screen swap is the continueFn so
     // it can't run until any tutorial is dismissed.
     runTutorialThenContinue(() => {
-      heroScreen.classList.remove('active');
-      lobbyScreen.classList.add('active');
+      showScreen('lobby');                        // normalise top-level screen group
     });
   });
 
@@ -308,10 +299,9 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('mm_playerName', name);
       if (playerNameInput) playerNameInput.value = name;
       overlay.remove();
-      heroScreen.classList.remove('active');
-      lobbyScreen.classList.add('active');
+      showScreen('lobby');                        // normalise top-level screen group
       socket.emit('joinLobby', { name, lobbyId: roomCode, stableId: getStableId() });
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, '', window.location.pathname); // keep: non-visibility side-effect
     }
 
     btn.addEventListener('click', submit);
@@ -378,9 +368,8 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('mm_playerName', name);
       if (playerNameInput) playerNameInput.value = name;
       overlay.remove();
-      prepareAudio();
-      heroScreen.classList.remove('active');
-      lobbyScreen.classList.add('active');
+      prepareAudio();                             // keep: non-visibility side-effect
+      showScreen('lobby');                        // normalise top-level screen group
       socket.emit('joinLobby', { name, lobbyId: code, stableId: getStableId() });
     }
 
@@ -417,10 +406,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (savedName) {
       if (playerNameInput) playerNameInput.value = savedName;
-      heroScreen.classList.remove('active');
-      lobbyScreen.classList.add('active');
+      showScreen('lobby');                        // normalise top-level screen group
       socket.emit('joinLobby', { name: savedName, lobbyId: code, stableId: getStableId() });
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, '', window.location.pathname); // keep: non-visibility side-effect
     } else {
       showNamePrompt(code);
     }
@@ -478,8 +466,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.emit('assignTeam', { lobbyId: getCurrentLobbyId(), teamId: 1 });
   });
   teamBackBtn?.addEventListener('click', () => {
-    teamScreen.classList.add('hidden');
-    waitingRoom.classList.remove('hidden');
+    showScreen('waiting');                        // normalise waiting/team pair
   });
   teamStartBtn?.addEventListener('click', () => {
     socket.emit('startLobby', getCurrentLobbyId());

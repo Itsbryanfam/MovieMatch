@@ -14,6 +14,7 @@ import {
   openShareModal, showGameOverBanner, resetMobileTab,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
   showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
+  showScreen, // WHY: Phase 3 Task D — canonical group-normaliser for screen transitions
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
@@ -64,24 +65,30 @@ export function initSocket() {
   socket.on('joined', (data) => {
     onJoined(data);
 
+    // NOTE: entry-panel hides below use direct getElementById because this
+    // handler runs during initSocket() before initUIElements() has assigned
+    // the module-level refs. We keep the direct DOM lookups and hide all
+    // three panels (not just private/public) because on join the canonical
+    // state is "no panel visible" — showScreen('join') would show the join
+    // panel, which is incorrect here.
     const joinPanel = document.getElementById('join-panel');
     const privatePanel = document.getElementById('private-panel');
     const publicPanel = document.getElementById('public-panel');
-    const waitingRoomEl = document.getElementById('waiting-room');
-    const lobbyScreenEl = document.getElementById('lobby-screen');
-    const heroScreenEl = document.getElementById('hero-screen');
-
-    if (joinPanel) joinPanel.classList.add('hidden');
+    if (joinPanel) joinPanel.classList.add('hidden');     // hide all panels on join
     if (privatePanel) privatePanel.classList.add('hidden');
     if (publicPanel) publicPanel.classList.add('hidden');
-    if (heroScreenEl) heroScreenEl.classList.remove('active');
+
     if (getIsSpectator()) {
-      if (lobbyScreenEl) lobbyScreenEl.classList.remove('active');
-      const gameScreenEl = document.getElementById('game-screen');
-      if (gameScreenEl) gameScreenEl.classList.add('active');
+      // Spectator path: hero-active + lobby-active already cleared by
+      // showScreen('game') normalising the full top-level group.
+      // WHY: hero line was a partial toggle before — showScreen covers it.
+      showScreen('game');                                  // normalise top-level group: hero+lobby→off, game→on
     } else {
-      if (waitingRoomEl) waitingRoomEl.classList.remove('hidden');
-      if (lobbyScreenEl) lobbyScreenEl.classList.add('active');
+      // Player path: hero-active cleared by showScreen('lobby'); also show
+      // waiting room for the player's lobby view.
+      // WHY: hero line was a partial toggle before — showScreen covers it.
+      showScreen('lobby');                                 // normalise top-level group: hero+game→off, lobby→on
+      showScreen('waiting');                               // normalise waiting/team pair: show waiting room
     }
     // H2: For daily lobbies, the lobby ID is an internal `DAILY-xxx-...`
     // string not meant to be shared. Show a friendlier label instead so
@@ -298,9 +305,8 @@ export function initSocket() {
       : 'MovieMatch';
 
     if (state.status === 'playing') {
-      if (lobbyScreen) lobbyScreen.classList.remove('active');
-      if (gameScreen) gameScreen.classList.add('active');
-      resetMobileTab();
+      showScreen('game');                               // normalise top-level group: lobby→off, game→on
+      resetMobileTab();                                 // keep: non-visibility side-effect
       renderGame(state, getMyPlayerId(), getIsSpectator());
 
       // M5: Solo streak / objective celebrations. The server stamps
@@ -403,10 +409,11 @@ export function initSocket() {
 
     } else if (state.status === 'waiting') {
       clearTurnTimer();
-      if (gameScreen) gameScreen.classList.remove('active');
-      if (lobbyScreen) lobbyScreen.classList.add('active');
+      showScreen('lobby');                              // normalise top-level group: game→off, lobby→on
       // join-panel starts visible on every page load — hide it here so a
       // stateUpdate received after a page refresh never reveals it alongside waitingRoom.
+      // NOTE: hide ALL three panels (not showScreen('join') which would show join) —
+      // the lobby/waiting view should show neither join nor private nor public.
       document.getElementById('join-panel')?.classList.add('hidden');
       document.getElementById('private-panel')?.classList.add('hidden');
       document.getElementById('public-panel')?.classList.add('hidden');
@@ -761,8 +768,14 @@ export function initSocket() {
     const savedLobbyId = sessionStorage.getItem('mm_lobbyId');
     const savedPlayerId = sessionStorage.getItem('mm_playerId');
     if (savedLobbyId && savedPlayerId) {
-      // Hide hero screen immediately \u2014 rejoinSuccess/rejoinFailed will handle final state.
-      // This prevents the hero from flashing behind the lobby/game on page refresh.
+      // NOTE: not migrated \u2014 lone partial toggle (hero only).
+      // Intentionally hides hero immediately to prevent flash; rejoinSuccess/
+      // rejoinFailed handles the final normalised screen state. Calling
+      // showScreen('lobby') or showScreen('game') here would be wrong because
+      // we don't know the destination yet; showScreen('hero') would remove
+      // .active from all screens including ones not visible, which is harmless
+      // but the explicit intent here is a momentary hide-only, not a full
+      // group normalisation.
       if (heroScreen) heroScreen.classList.remove('active');
       socket.emit('rejoinLobby', {
         lobbyId: savedLobbyId,
@@ -784,22 +797,20 @@ export function initSocket() {
     sessionStorage.setItem('mm_lobbyId', data.lobbyId);
     sessionStorage.setItem('mm_playerId', data.playerId);
 
-    if (heroScreen) heroScreen.classList.remove('active');
-
     // Always hide join-flow panels — rejoining means we're already in a lobby.
+    // NOTE: hide ALL three panels (not showScreen('join')) — rejoin should show
+    // no panel; this "hide all" pattern is distinct from the entry-panel group.
     document.getElementById('join-panel')?.classList.add('hidden');
     document.getElementById('private-panel')?.classList.add('hidden');
     document.getElementById('public-panel')?.classList.add('hidden');
 
     if (data.state.status === 'playing' || data.state.status === 'finished') {
-      if (lobbyScreen) lobbyScreen.classList.remove('active');
-      if (gameScreen) gameScreen.classList.add('active');
-      resetMobileTab();
+      showScreen('game');                               // normalise top-level group: hero+lobby→off, game→on
+      resetMobileTab();                                 // keep: non-visibility side-effect
       renderGame(data.state, getMyPlayerId(), getIsSpectator());
     } else {
-      if (gameScreen) gameScreen.classList.remove('active');
-      if (lobbyScreen) lobbyScreen.classList.add('active');
-      if (waitingRoom) waitingRoom.classList.remove('hidden');
+      showScreen('lobby');                              // normalise top-level group: hero+game→off, lobby→on
+      showScreen('waiting');                            // normalise waiting/team pair: show waiting room
       renderLobby(data.state, getMyPlayerId());
     }
     // H2: Same lobby-code-display override as the 'joined' handler \u2014 after
@@ -816,10 +827,8 @@ export function initSocket() {
     sessionStorage.removeItem('mm_lobbyId');
     sessionStorage.removeItem('mm_playerId');
     // Restore hero screen (was hidden optimistically on connect)
-    if (heroScreen) heroScreen.classList.add('active');
-    if (lobbyScreen) lobbyScreen.classList.remove('active');
-    if (gameScreen) gameScreen.classList.remove('active');
-    const banner = document.getElementById('offline-banner');
+    showScreen('hero');                                   // normalise top-level group: lobby+game→off, hero→on
+    const banner = document.getElementById('offline-banner'); // keep: non-visibility side-effect
     // Only show error if there was an active disconnect (banner visible)
     if (banner && !banner.classList.contains('hidden')) {
       banner.classList.add('hidden');
@@ -830,10 +839,8 @@ export function initSocket() {
   socket.on('kicked', (msg) => {
     showNotification(msg || 'You were removed from the lobby.');
     resetSession();
-    if (gameScreen) gameScreen.classList.remove('active');
-    if (lobbyScreen) lobbyScreen.classList.remove('active');
-    if (heroScreen) heroScreen.classList.add('active');
-    if (waitingRoom) waitingRoom.classList.add('hidden');
+    showScreen('hero');                                   // normalise top-level group: game+lobby→off, hero→on
+    if (waitingRoom) waitingRoom.classList.add('hidden'); // keep: not part of top-level group
   });
 
   return socket;

@@ -106,6 +106,46 @@ export function initUIElements() {
   leaderboardList = document.getElementById('leaderboard-list');
 }
 
+// Canonical screen controller. WHY: screen visibility was toggled
+// ad-hoc at ~22 sites across app.js/socketClient.js/ui-render.js with
+// two inconsistent mechanisms (.active for top-level screens, .hidden
+// for lobby sub-panels) — the 2026-05-16 review flagged the drift risk.
+// Contract: normalise exactly ONE group (top-level screens, OR the
+// entry-panel trio, OR the waiting/team pair). No opportunistic
+// cross-group resets — callers keep extra side-effects as adjacent
+// lines, so behaviour is unchanged. Group members are mutually
+// exclusive, so normalising the whole group == the prior subset
+// toggles (removing a class an element lacks is a no-op). Null-guarded
+// per element to mirror the existing `if (el)` call-site guards.
+function _toggle(el, cls, on) {
+  if (!el) return;                 // some refs absent on some pages
+  el.classList[on ? 'add' : 'remove'](cls);
+}
+export function showScreen(name) {
+  switch (name) {
+    case 'hero': case 'lobby': case 'game':
+      _toggle(heroScreen, 'active', name === 'hero');
+      _toggle(lobbyScreen, 'active', name === 'lobby');
+      _toggle(gameScreen, 'active', name === 'game');
+      return;
+    case 'join': case 'private': case 'public':
+      _toggle(joinPanel, 'hidden', name !== 'join');
+      _toggle(privatePanel, 'hidden', name !== 'private');
+      _toggle(publicPanel, 'hidden', name !== 'public');
+      return;
+    case 'waiting':
+      _toggle(waitingRoom, 'hidden', false);   // show waiting room
+      _toggle(teamScreen, 'hidden', true);     // hide team screen
+      return;
+    case 'team':
+      _toggle(teamScreen, 'hidden', false);    // show team screen
+      _toggle(waitingRoom, 'hidden', true);    // hide waiting room
+      return;
+    default:
+      console.warn('showScreen: unknown screen name:', name);
+  }
+}
+
 // Shared low-level DOM helper used by ui-render (chain board) and
 // ui-autocomplete (suggestion items) — and available to any future ui-*
 // module. Lives here (the DOM-primitives leaf) so neither render nor
