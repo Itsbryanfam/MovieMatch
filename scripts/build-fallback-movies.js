@@ -51,6 +51,9 @@ async function fetchListPage(kind, page) {
 }
 
 function listResultToBase(r) {
+  // TMDB list result → our base shape. Drop entries with no parseable year
+  // here rather than emit year:NaN — the data test would reject them and a
+  // runtime fallback lookup on a NaN-year entry would be worse than absence.
   const year = parseInt(String(r.release_date || '').slice(0, 4), 10);
   if (!r.id || !r.title || !Number.isInteger(year)) return null;
   return { id: r.id, title: r.title, year, mediaType: 'movie' };
@@ -86,6 +89,9 @@ async function fetchCast(id) {
         const b = listResultToBase(r);
         if (b && !base.has(b.id)) base.set(b.id, b);
       }
+      // explicit early exit; the inner-loop guard (base.size < TARGET+60) also
+      // stops here — kept for clarity, and the popular-only gate means
+      // top_rated always fully contributes before popular backfills.
       if (base.size >= TARGET + 60 && kind === 'popular') break outer;
       await sleep(SLEEP_MS);
     }
