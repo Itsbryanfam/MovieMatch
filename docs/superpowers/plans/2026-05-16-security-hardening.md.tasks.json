@@ -4,22 +4,22 @@
     {
       "id": 0,
       "subject": "Task 1: Stop leaking stableId from the daily leaderboard",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** getDailyLeaderboard returns only { chainLength, name } per row; stableId never reaches any client.\n\n**Files:**\n- Modify: server/systems/dailySystem.js (getDailyLeaderboard return map, ~lines 258-262)\n- Test: server/systems/dailySystem.test.js (append describe block)\n\n**Acceptance Criteria:**\n- Every returned row has exactly chainLength and name; 'stableId' in row === false\n- Name join + score-desc ordering unchanged\n- Full suite green\n\n**Verify:** npx jest server/systems/dailySystem.test.js -t \"getDailyLeaderboard\" then npx jest --silent\n\n**Steps:** TDD — write failing no-stableId test; remove `stableId: e.value,` from the return map; run test; run full suite; commit.\n\n```json:metadata\n{\"files\": [\"server/systems/dailySystem.js\", \"server/systems/dailySystem.test.js\"], \"verifyCommand\": \"npx jest server/systems/dailySystem.test.js -t \\\"getDailyLeaderboard\\\" && npx jest --silent\", \"acceptanceCriteria\": [\"no stableId key in any returned row\", \"name/order unchanged\", \"full suite green\"]}\n```"
     },
     {
       "id": 1,
       "subject": "Task 2: Fail-fast on missing/weak ADMIN_SECRET",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Missing or <32-char ADMIN_SECRET refuses to boot with a fatal log; rule unit-tested and documented in .env.example.\n\n**Files:**\n- Create: server/validateAdminSecret.js\n- Create: server/admin-secret.test.js\n- Modify: server.js (require + fatal check after the TMDB guard, ~after line 242)\n- Modify: .env.example (append documented ADMIN_SECRET)\n\n**Acceptance Criteria:**\n- validateAdminSecret: error string for undefined/''/non-string/31-char; null for 32-char\n- server.js logger.fatal + process.exit(1) on failure, mirroring TMDB guard\n- .env.example documents required 32-char minimum\n- Full suite green\n\n**Verify:** npx jest server/admin-secret.test.js -v then npx jest --silent\n\n**Steps:** TDD — failing unit test; create server/validateAdminSecret.js; wire fatal check into server.js; update .env.example; run; commit.\n\n```json:metadata\n{\"files\": [\"server/validateAdminSecret.js\", \"server/admin-secret.test.js\", \"server.js\", \".env.example\"], \"verifyCommand\": \"npx jest server/admin-secret.test.js -v && npx jest --silent\", \"acceptanceCriteria\": [\"guard rejects undefined/''/non-string/31-char, accepts 32-char\", \"fatal boot check wired mirroring TMDB\", \".env.example documents the requirement\", \"full suite green\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 3: Dedicated admin rate limiter",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** /api/admin/* protected by a strict per-IP limiter (5/15min) independent of the global limiter; 6th in-window request → 429.\n\n**Files:**\n- Create: server/adminLimiter.js\n- Create: server/admin-ratelimit.test.js\n- Modify: server.js (require + app.use('/api/admin', adminLimiter) between express.static line 104 and first admin route line 106)\n\n**Acceptance Criteria:**\n- 5 sequential stubbed /api/admin requests succeed; 6th in-window → 429\n- Auth-failing requests still consume budget\n- Limiter registered by path prefix BEFORE any admin route\n- Full suite green\n\n**Verify:** npx jest server/admin-ratelimit.test.js -v then npx jest --silent\n\n**Steps:** TDD — failing supertest 429 test against the real exported limiter; create server/adminLimiter.js; wire into server.js; run; commit.\n\n**Note:** blockedBy Task 2 — both modify server.js; serialize so patches stay clean and reviewable.\n\n```json:metadata\n{\"files\": [\"server/adminLimiter.js\", \"server/admin-ratelimit.test.js\", \"server.js\"], \"verifyCommand\": \"npx jest server/admin-ratelimit.test.js -v && npx jest --silent\", \"acceptanceCriteria\": [\"5 ok then 6th 429\", \"auth failures consume budget\", \"registered before admin routes\", \"full suite green\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-16T00:00:00Z"
+  "lastUpdated": "2026-05-17T00:00:00Z"
 }
