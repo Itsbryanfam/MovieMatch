@@ -1,0 +1,40 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-17-content-polish.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: gitignore coverage/",
+      "status": "pending",
+      "description": "**Goal:** Stop Jest's coverage/ output showing as untracked clutter.\n\n**Files:** Modify .gitignore (append `coverage/`).\n\n**Precondition:** `git ls-files coverage/` must be empty (nothing tracked under it).\n\n**Verify:** `git check-ignore coverage/` exit 0; `git status --porcelain` no longer lists coverage/.\n\n```json:metadata\n{\"files\": [\".gitignore\"], \"verifyCommand\": \"git check-ignore coverage/\", \"acceptanceCriteria\": [\".gitignore contains coverage/\", \"git ls-files coverage/ empty precondition verified\", \"git status no longer lists coverage/\", \"no coverage/ file ever staged\"], \"reviewModel\": \"cheap\"}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Daily movie list 50 -> ~500 (TMDB-sourced generator)",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Regenerate data/dailyMovies.json with >=500 TMDB-sourced entries (ids valid by construction) via committed one-time scripts/build-daily-movies.js; runtime path unchanged. Add structural test; fix 2 stale comments.\n\n**Files:** Create scripts/build-daily-movies.js, server/systems/dailyMovies.data.test.js; modify data/dailyMovies.json (regenerated), package.json (add build:daily-movies script), server/systems/dailySystem.js (stale <10KB comment ~L37-39), server/systems/dailySystem.test.js (stale ~50-entries comment ~L63-65).\n\n**Key facts:** TMDB token = process.env.TMDB_READ_TOKEN; headers {Authorization:`Bearer ${t}`, accept:'application/json'} (mirror server.js:250/265); endpoints api.themoviedb.org/3/movie/top_rated|popular?language=en-US&page=N; Node18+ global fetch; dotenv is a dep. Union-in the 50 existing curated ids; dedupe by id; sort by id; 2-space JSON + trailing newline.\n\n**Verify:** `npx jest server/systems/dailyMovies.data.test.js server/systems/dailySystem.test.js` PASS; `npm test` all pass; coverage floors held.\n\n```json:metadata\n{\"files\": [\"scripts/build-daily-movies.js\", \"data/dailyMovies.json\", \"package.json\", \"server/systems/dailySystem.js\", \"server/systems/dailySystem.test.js\", \"server/systems/dailyMovies.data.test.js\"], \"verifyCommand\": \"npx jest server/systems/dailyMovies.data.test.js server/systems/dailySystem.test.js\", \"acceptanceCriteria\": [\">=500 unique entries each {id,title,year,mediaType:movie}\", \"all 50 original curated ids present\", \"package.json build:daily-movies script\", \"data test passes, dailySystem.test.js unchanged-assertions passes, 2 stale comments fixed\", \"npm test green, coverage floors held\"], \"reviewModel\": \"standard\"}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: PWA manifest icons (SVG)",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Add a self-contained SVG app icon + manifest.icons[] + index.html icon/apple-touch links so the app is installable (Android/desktop).\n\n**Files:** Create public/icon.svg, server/manifest.data.test.js; modify public/manifest.json (add icons after categories), public/index.html (2 link tags after L17 manifest link).\n\n**Palette (from 01-base.css :root):** bg #09090b (== theme_color), accent #818cf8. SVG: viewBox 0 0 512 512, mark within central ~80% (maskable-safe), no external refs.\n\n**Verify:** `npx jest server/manifest.data.test.js` PASS; `npm test` all pass; coverage floors held.\n\n```json:metadata\n{\"files\": [\"public/icon.svg\", \"public/manifest.json\", \"public/index.html\", \"server/manifest.data.test.js\"], \"verifyCommand\": \"npx jest server/manifest.data.test.js\", \"acceptanceCriteria\": [\"public/icon.svg self-contained square maskable-safe #09090b/#818cf8\", \"manifest.icons[] references /icon.svg\", \"index.html has icon + apple-touch-icon links\", \"manifest.data.test.js passes\", \"npm test green, coverage floors held\"], \"reviewModel\": \"standard\"}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Service worker (conservative, network-first)",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Conservative first SW: network-first + cache fallback for same-origin GET; hard bypass non-GET / cross-origin / /socket.io; no skipWaiting. Pure swDecision() unit-tested (UMD: importScripts in sw.js, require in Jest).\n\n**Files:** Create public/sw-routing.js, public/sw.js, client-tests/sw-routing.test.js; modify public/js/app.js (register on window load, guarded+swallowed, before the DOMContentLoaded handler's closing `});` ~L910).\n\n**Contract:** swDecision({method,url,mode,origin}) -> 'bypass' (non-GET / cross-origin / /socket.io / unparseable) | 'network-first' (same-origin GET nav+static). Cache 'mm-cache-v1'; install precache ['/']; activate delete-stale + clients.claim; NO skipWaiting.\n\n**Verify:** `npx jest client-tests/sw-routing.test.js` PASS; `npm test` all pass; coverage floors held; manual SW smoke (registers, app+socket work, offline shell loads) reported.\n\n```json:metadata\n{\"files\": [\"public/sw-routing.js\", \"public/sw.js\", \"public/js/app.js\", \"client-tests/sw-routing.test.js\"], \"verifyCommand\": \"npx jest client-tests/sw-routing.test.js\", \"acceptanceCriteria\": [\"swDecision bypass for non-GET/cross-origin/socket.io/unparseable; network-first for same-origin GET nav+static\", \"sw.js mm-cache-v1, precache ['/'], activate cleanup+claim, NO skipWaiting\", \"app.js registers /sw.js on load guarded+swallowed\", \"sw-routing.test.js passes\", \"npm test green, coverage floors held\", \"manual SW smoke reported\"], \"reviewModel\": \"standard\"}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: .btn additive base class (provable zero-visual-change)",
+      "status": "pending",
+      "blockedBy": [3],
+      "description": "**Goal:** Add `.btn { cursor: pointer; }` (the only declaration all 9 button variants already share) to the END of 01-base.css + add `btn` token to audited buttons. ADDITIVE ONLY — no variant rule modified; provable zero visual change.\n\n**Files:** Modify public/css/01-base.css (append one .btn rule), public/index.html (prepend `btn ` to buttons already carrying one of the 9 audited variants), public/js/ui/ui-render.js (L602 shareBtn, L609 playAgainBtn), public/js/ui/ui-panels.js (L339 replayBtn).\n\n**9 audited variants (all already declare cursor:pointer):** .btn-primary/.btn-secondary/.btn-icon/.nav-link-btn/.btn-join-team/.reaction-btn/.mode-chip/.spec-pred-btn/.modal-close. Do NOT add `btn` to .btn-kick/.self-elim-close/.mobile-tab/app.js inline overlay buttons. Do NOT remove/modify any variant declaration.\n\n**Verify:** `npm test` all pass; `git diff` shows only additions (one CSS rule + `btn ` tokens), zero deletions in variant blocks; manual visual smoke reported.\n\n```json:metadata\n{\"files\": [\"public/css/01-base.css\", \"public/index.html\", \"public/js/ui/ui-render.js\", \"public/js/ui/ui-panels.js\"], \"verifyCommand\": \"npm test\", \"acceptanceCriteria\": [\"01-base.css end has exactly one new rule .btn{cursor:pointer} with WHY comment\", \"no existing variant block modified (diff additions only)\", \"btn token added only to elements already carrying one of the 9 audited variants (index.html + 3 JS buttons)\", \"client-tests pass unchanged, npm test green, coverage floors held\", \"manual visual smoke reported\"], \"reviewModel\": \"standard\"}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-17T00:00:00Z"
+}
