@@ -239,7 +239,7 @@ async function finalizeDailyAttempt(pubClient, stableId, name, chainLength, date
   }
 }
 
-// Top-N for `date`. Returns [{ stableId, chainLength, name }] descending.
+// Top-N for `date`. Returns [{ chainLength, name }] descending.
 // Lazily fetches names from the existing leaderboard name cache (if any)
 // or from the attempt records as a fallback. Capped at limit=20 by default
 // to keep the response slim — the UI rarely shows more than top 10.
