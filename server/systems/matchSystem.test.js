@@ -547,3 +547,94 @@ describe('matchSystem.submitMovie — valid play commits and advances turn (CI2)
     expect(room.isValidating).toBe(false);
   });
 });
+
+// ============================================================================
+// Phase 5a follow-up — two pre-existing latent gaps in submitMovie that
+// submitBotMove also mirrors (fixed together for consistency):
+//   Gap 1: after the post-enrich room re-read, `player` must be re-derived
+//          from the FRESH room — using the stale pre-enrich object means a
+//          player whose record changed during the async enrich window is
+//          rendered with stale data on the chain / attemptFailed payload.
+//   Gap 2: the inner catch re-reads getLobby with no null-check, so a Redis
+//          blip at cleanup throws a TypeError that escapes as an unhandled
+//          rejection (the lock is still released by finally).
+// ============================================================================
+describe('submitMovie — post-enrich object-graph + catch null-guard (Phase 5a follow-up)', () => {
+  let mockIo, mockSocket, mockPubClient, logger, ctx;
+
+  function freshClone(obj, mutate) {
+    const c = JSON.parse(JSON.stringify(obj));
+    if (mutate) mutate(c);
+    return c;
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIo = { to: jest.fn().mockReturnThis(), emit: jest.fn() };
+    mockSocket = { id: 'sock-1', emit: jest.fn() };
+    mockPubClient = {};
+    logger = { error: jest.fn(), info: jest.fn(), warn: jest.fn() };
+    ctx = { io: mockIo, pubClient: mockPubClient, TMDB_HEADERS: { Authorization: 'Bearer test', accept: 'application/json' }, logger };
+    redisUtils.acquireSubmitLock.mockResolvedValue('token-abc');
+    redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+    redisUtils.saveLobby.mockResolvedValue(undefined);
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+  });
+
+  afterEach(() => gameLogic.clearTurnTimeout('TEST'));
+
+  function preRoom() {
+    return {
+      id: 'TEST', status: 'playing', isValidating: false, gameMode: 'classic',
+      players: [
+        { id: 'sock-1', name: 'StaleName', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1' },
+        { id: 'sock-2', name: 'Other', isHost: false, isAlive: true, connected: true, score: 0, wins: 0, teamId: 1, stableId: 's2' },
+      ],
+      spectators: [],
+      chain: [{ playerId: 'sock-2', playerName: 'Other', movie: { id: 1, title: 'First', year: '2000', cast: [{ id: 1, name: 'A' }], mediaType: 'movie' }, matchedActors: [] }],
+      usedMovies: ['movie:1'], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0,
+      turnExpiresAt: Date.now() + 60000, currentTurnIndex: 0, currentTurnRetries: 0,
+    };
+  }
+
+  test('Gap 1: attemptFailed uses the player from the freshly re-read room (not the stale pre-enrich object)', async () => {
+    const pre = preRoom();
+    // The post-enrich re-read returns a DISTINCT room object whose current
+    // player has been renamed (models any change to the player record during
+    // the async resolve/enrich window). The chain is unchanged so the
+    // candidate still fails to connect → the attemptFailed broadcast fires.
+    const fresh = freshClone(pre, (c) => { c.players[0].name = 'FreshName'; });
+
+    redisUtils.getLobby
+      .mockResolvedValueOnce(pre)    // L125 pre-lock
+      .mockResolvedValueOnce(pre)    // L139 post-lock
+      .mockResolvedValueOnce(fresh); // L204 post-enrich
+    // resolveCandidates direct-ID path → one candidate; its cast shares NO
+    // actor with the chain's last node ([{id:1}]) → validateChainConnection
+    // returns no match → the no-match attemptFailed branch runs.
+    global.fetch.mockResolvedValueOnce({ json: async () => ({ id: 99, title: 'Guess', release_date: '2010-01-01' }) });
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 999, name: 'Nobody In Common' }] });
+
+    await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', tmdbId: 99, mediaType: 'movie' });
+
+    const attemptFailed = mockIo.emit.mock.calls.find(([e]) => e === 'attemptFailed');
+    expect(attemptFailed).toBeDefined();
+    expect(attemptFailed[1].playerName).toBe('FreshName');
+  });
+
+  test('Gap 2: inner catch tolerates getLobby returning null at cleanup (resolves, lock still released)', async () => {
+    const pre = preRoom();
+    redisUtils.getLobby
+      .mockResolvedValueOnce(pre)                                 // L125 pre-lock
+      .mockResolvedValueOnce(pre)                                 // L139 post-lock
+      .mockRejectedValueOnce(new Error('redis blip mid-pipeline')) // L204 post-enrich → throws into inner catch
+      .mockResolvedValueOnce(null);                               // L307 catch re-read → null
+    global.fetch.mockResolvedValueOnce({ json: async () => ({ id: 99, title: 'G', release_date: '2010-01-01' }) });
+
+    await expect(
+      matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', tmdbId: 99, mediaType: 'movie' })
+    ).resolves.toBeUndefined();
+    expect(redisUtils.releaseSubmitLock).toHaveBeenCalledTimes(1);
+  });
+});

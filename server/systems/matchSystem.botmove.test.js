@@ -112,3 +112,49 @@ test('a mid-pipeline Redis throw eliminates the bot and still releases the lock'
   expect(redisUtils.releaseSubmitLock).toHaveBeenCalledTimes(1);
   expect(room.isValidating).toBe(false);
 });
+
+// ============================================================================
+// Phase 5a follow-up — the same two latent gaps submitMovie has, mirrored here
+// (fixed together for consistency):
+//   Gap 1: re-derive botPlayer from the FRESH post-enrich room (not the stale
+//          pre-enrich object).
+//   Gap 2: inner-catch getLobby re-read must be null-guarded (the existing
+//          inner-catch test above returns a valid room; this one returns
+//          NULL, which is the case that throws before the fix).
+// ============================================================================
+test('Gap 1: attemptFailed uses the botPlayer from the freshly re-read room', async () => {
+  const pre = buildRoom();
+  pre.players[1].name = 'StaleBot';
+  // Post-enrich re-read returns a DISTINCT room whose bot was renamed during
+  // the async enrich window; chain unchanged so the pick fails to connect.
+  const fresh = JSON.parse(JSON.stringify(pre));
+  fresh.players[1].name = 'FreshBot';
+
+  redisUtils.getLobby
+    .mockResolvedValueOnce(pre)    // L645 pre-lock
+    .mockResolvedValueOnce(pre)    // L654 post-lock
+    .mockResolvedValueOnce(fresh); // L678 post-enrich
+  global.fetch.mockResolvedValueOnce({ json: async () => ({ id: 99, title: 'Guess', release_date: '2010-01-01' }) });
+  redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 999, name: 'Nobody In Common' }] });
+
+  await matchSystem.submitBotMove(ctx, 'TEST', 'bot_1', { tmdbId: 99, mediaType: 'movie' });
+
+  const attemptFailed = mockIo.emit.mock.calls.find(([e]) => e === 'attemptFailed');
+  expect(attemptFailed).toBeDefined();
+  expect(attemptFailed[1].playerName).toBe('FreshBot');
+});
+
+test('Gap 2: inner catch tolerates getLobby returning NULL at cleanup (resolves, lock released)', async () => {
+  const room = buildRoom();
+  redisUtils.getLobby
+    .mockResolvedValueOnce(room)                                  // L645 pre-lock
+    .mockResolvedValueOnce(room)                                  // L654 post-lock
+    .mockRejectedValueOnce(new Error('redis blip mid-pipeline'))  // L678 post-enrich → throws into inner catch
+    .mockResolvedValueOnce(null);                                 // L715 catch re-read → NULL
+  global.fetch.mockResolvedValueOnce({ json: async () => ({ id: 99, title: 'G', release_date: '2010-01-01' }) });
+
+  await expect(
+    matchSystem.submitBotMove(ctx, 'TEST', 'bot_1', { tmdbId: 99, mediaType: 'movie' })
+  ).resolves.toBeUndefined();
+  expect(redisUtils.releaseSubmitLock).toHaveBeenCalledTimes(1);
+});
