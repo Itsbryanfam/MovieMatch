@@ -631,14 +631,35 @@ async function quitGame(ctx, socket, lobbyId) {
   if (isCurrentTurn) {
     await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, 'Quit');
   } else {
-    player.isAlive = false;
-    // 'info' kind = no shake/sound effects — quitting isn't a strategic
-    // failure to celebrate or mourn, just a player departing.
-    io.to(lobbyId).emit('notification', { msg: `${player.name} quit the game.`, kind: 'info' });
-    await redisUtils.saveLobby(pubClient, lobbyId, room);
-    await gameLogic.checkWinCondition(io, pubClient, lobbyId, room);
-    const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
-    if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+    // R1: previously this did an unlocked getLobby (top of quitGame) ->
+    // mutate -> saveLobby, so a concurrent submit/quit/grace-expiry on the
+    // same lobby could interleave and clobber the write (a dead player
+    // resurrected, or a chain advance lost). Mutate INSIDE the per-lobby
+    // mutex; broadcast OUTSIDE it on the room the lock returns — the exact
+    // pattern every other withLobbyLock caller in this file uses. `changed`
+    // is the side-channel commit signal: withLobbyLock returns the room
+    // whenever the lobby exists (null only if it's gone), so we cannot use
+    // the returned room to tell "mutator committed" from "mutator declined"
+    // (already-dead/absent player) — without this we'd emit a spurious
+    // "X quit" + broadcast on an unmodified room.
+    let changed = false;
+    const updated = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+      const lp = r.players.find(p => p.id === socket.id);
+      if (!lp || !lp.isAlive) return false;
+      lp.isAlive = false;
+      changed = true;
+    });
+    if (changed && updated) {
+      // Name from the fresh in-lock room (changed === true guarantees the
+      // player is present on `updated`), not the pre-lock snapshot.
+      const quitter = updated.players.find(p => p.id === socket.id);
+      // 'info' kind = no shake/sound effects — quitting isn't a strategic
+      // failure to celebrate or mourn, just a player departing.
+      io.to(lobbyId).emit('notification', { msg: `${quitter.name} quit the game.`, kind: 'info' });
+      await gameLogic.checkWinCondition(io, pubClient, lobbyId, updated);
+      const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+      if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+    }
   }
 }
 
@@ -733,11 +754,25 @@ async function handleDisconnect(ctx, socketId) {
           if (isCurrentTurn) {
             await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, liveRoom, 'Disconnected');
           } else {
-            livePlayer.isAlive = false;
-            await redisUtils.saveLobby(pubClient, lobbyId, liveRoom);
-            await gameLogic.checkWinCondition(io, pubClient, lobbyId, liveRoom);
-            const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
-            if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+            // R1: same lost-update race as quitGame's else branch — the
+            // getLobby above this block is unlocked. Re-find the player on
+            // the FRESH in-lock room (by stableId, falling back to socketId,
+            // mirroring the lookup that produced livePlayer) and mutate
+            // inside the mutex; broadcast outside on the returned room.
+            // `changed` side-channel: see the quitGame else branch — the
+            // returned room can't distinguish commit from a declined no-op.
+            let changed = false;
+            const updated = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+              const lp = r.players.find(p => p.stableId === player.stableId || p.id === socketId);
+              if (!lp || !lp.isAlive) return false;
+              lp.isAlive = false;
+              changed = true;
+            });
+            if (changed && updated) {
+              await gameLogic.checkWinCondition(io, pubClient, lobbyId, updated);
+              const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
+              if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+            }
           }
         } catch (err) {
           logger.error(err, 'Grace period elimination error');

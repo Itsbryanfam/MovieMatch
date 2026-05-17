@@ -103,12 +103,23 @@ app.use(limiter);
 
 app.use(express.static('public'));
 
+// M3: pubClient/subClient are constructed here (moved up from below the
+// telemetry routes) because the admin limiter now needs the Redis client at
+// mount time, and the mount MUST stay before the /api/admin route defs.
+// createClient is lazy — no connection happens until startApp() calls
+// .connect(), so relocating the construction is behavior-neutral.
+const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
+const subClient = pubClient.duplicate();
+
+pubClient.on('error', (err) => logger.error(err, 'Redis Pub Client Error'));
+subClient.on('error', (err) => logger.error(err, 'Redis Sub Client Error'));
+
 // Strict admin-only rate limiter (5 / 15min / IP), layered on top of the
 // global limiter. Path-prefixed so it covers every current and future
 // /api/admin/* route without restructuring the handlers. MUST be registered
 // before the admin route definitions — Express runs middleware in order.
-const adminLimiter = require('./server/adminLimiter');
-app.use('/api/admin', adminLimiter);
+const createAdminLimiter = require('./server/adminLimiter');
+app.use('/api/admin', createAdminLimiter(pubClient));
 
 app.post('/api/admin/flush-credits', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
@@ -236,12 +247,6 @@ app.get('/api/admin/stats', async (req, res) => {
   }
 });
 
-const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
-const subClient = pubClient.duplicate();
-
-pubClient.on('error', (err) => logger.error(err, 'Redis Pub Client Error'));
-subClient.on('error', (err) => logger.error(err, 'Redis Sub Client Error'));
-
 const TMDB_TOKEN = process.env.TMDB_READ_TOKEN;
 if (!TMDB_TOKEN) {
   logger.fatal('TMDB_READ_TOKEN environment variable is required. Set it in your .env file.');
@@ -301,6 +306,10 @@ const POSTER_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 // long-lived public deployment without adding meaningful load — ZSCAN is
 // cursor-paged and the whole set is tiny relative to lobby traffic.
 const LEADERBOARD_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// Phase 2 R2: how often every instance re-checks for playing lobbies it
+// isn't watching. 30s bounds worst-case soft-lock latency to one cycle
+// while keeping the getAllLobbies load negligible.
+const TURN_SWEEP_INTERVAL_MS = 30 * 1000; // 30 seconds
 
 async function startApp() {
   try {
@@ -310,15 +319,21 @@ async function startApp() {
     // Must run after Redis connects because posterCache.setPosters triggers
     // an io.emit, and io is only ready after this function runs.
     fetchBackgroundPosters();
-    setInterval(fetchBackgroundPosters, POSTER_REFRESH_INTERVAL_MS);
+    // .unref() so this best-effort background refresh never by itself keeps a
+    // Node process (or a Jest worker) alive — the interval still fires on a
+    // running server; it just won't pin an otherwise-idle process. Mirrors the
+    // same pattern used for turnSweepInterval below (Phase 2 R3).
+    setInterval(fetchBackgroundPosters, POSTER_REFRESH_INTERVAL_MS).unref();
     // Audit finding #10: periodic full leaderboard prune. Best-effort —
     // a failed sweep just means stale entries linger until the next run or
     // an admin POST /api/admin/prune-leaderboard; it must never crash boot.
-    setInterval(() => {
+    // .unref() for the same reason as the poster-refresh interval above.
+    const leaderboardPruneInterval = setInterval(() => {
       redisUtils.pruneLeaderboard(pubClient)
         .then(n => { if (n > 0) logger.info(`Leaderboard prune removed ${n} stale entries`); })
         .catch(err => logger.error(err, 'Periodic leaderboard prune failed'));
     }, LEADERBOARD_PRUNE_INTERVAL_MS);
+    leaderboardPruneInterval.unref();
   } catch (err) {
     logger.error(err, 'Redis connection failed');
   }
@@ -337,6 +352,21 @@ async function startApp() {
   gameLogic.recoverActiveTurns(io, pubClient)
     .then(n => { if (n > 0) logger.info(`Recovered turn watchdogs for ${n} in-flight lobbies`); })
     .catch(err => logger.error(err, 'Turn-watchdog recovery sweep failed'));
+
+  // Phase 2 R2: boot recovery only fixes THIS process at THIS instant. A
+  // mid-game crash/deploy/scale event elsewhere can still leave a playing
+  // lobby with an expired turn and nobody watching. This periodic sweep
+  // closes that steady-state window. .unref() so the timer never by itself
+  // keeps the process (or a Jest worker) alive — see Phase 2 R3.
+  // Intentionally NOT cleared in gracefulShutdown: this is a process-lifetime
+  // sweep; .unref() + the forced-exit path make clearInterval unnecessary.
+  // (Jest open-handle cleanup is Phase 2 R3 / Task 5's scope.)
+  const turnSweepInterval = setInterval(() => {
+    gameLogic.sweepMissingTurnWatchdogs(io, pubClient)
+      .then(n => { if (n > 0) logger.info(`Turn-watchdog sweep armed ${n} unwatched lobbies`); })
+      .catch(err => logger.error(err, 'Periodic turn-watchdog sweep failed'));
+  }, TURN_SWEEP_INTERVAL_MS);
+  turnSweepInterval.unref();
 
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => logger.info(`Server listening on port ${PORT}`));

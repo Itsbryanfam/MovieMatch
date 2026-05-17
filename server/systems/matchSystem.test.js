@@ -448,3 +448,102 @@ describe('matchSystem.submitMovie — client mediaType/tmdbId validation (#8)', 
     expect(tvFetchCalls().length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CI2 — the core success path: a valid connecting movie commits and advances
+// the turn. This is the central game action and was previously untested on
+// the happy path (only the not-found / invalid-connection branches were).
+// ---------------------------------------------------------------------------
+describe('matchSystem.submitMovie — valid play commits and advances turn (CI2)', () => {
+  let mockIo, mockSocket, mockPubClient, ctx, logger;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIo = { to: jest.fn().mockReturnThis(), emit: jest.fn() };
+    mockSocket = { id: 'sock-1', emit: jest.fn() };
+    mockPubClient = {};
+    logger = { error: jest.fn(), info: jest.fn(), warn: jest.fn() };
+    ctx = {
+      io: mockIo, pubClient: mockPubClient,
+      TMDB_HEADERS: { Authorization: 'Bearer test', accept: 'application/json' },
+      logger,
+    };
+    redisUtils.acquireSubmitLock.mockResolvedValue('token-abc');
+    redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+    redisUtils.saveLobby.mockResolvedValue(undefined);
+    // Safe default for getOrFetchCredits — keeps this describe self-contained
+    // so a future test added here doesn't silently inherit undefined from
+    // jest.clearAllMocks (which resets mock implementations to undefined, not
+    // to their previous resolved value). The individual test that needs a
+    // specific cast overrides this in its own body.
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+  });
+
+  afterEach(() => gameLogic.clearTurnTimeout('TEST'));
+
+  test('commits a valid play and advances to the next player', async () => {
+    // Chain head "Inception" has Leonardo DiCaprio. The submitted candidate
+    // shares Leonardo DiCaprio, so validateChainConnection returns a match
+    // and commitPlay runs, then nextTurn advances to player 2.
+    const room = {
+      id: 'TEST', status: 'playing',
+      players: [
+        { id: 'sock-1', name: 'Tester', isHost: true, isAlive: true,
+          connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1' },
+        { id: 'sock-2', name: 'Other', isHost: false, isAlive: true,
+          connected: true, score: 0, wins: 0, teamId: 1, stableId: 's2' },
+      ],
+      spectators: [],
+      chain: [{
+        playerId: 'sock-2', playerName: 'Other',
+        movie: {
+          id: 27205, title: 'Inception', year: '2010',
+          cast: [{ id: 6193, name: 'Leonardo DiCaprio' }, { id: 24045, name: 'Joseph Gordon-Levitt' }],
+          mediaType: 'movie',
+        },
+        matchedActors: [],
+      }],
+      usedMovies: ['movie:27205'],
+      hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0,
+      turnExpiresAt: Date.now() + 60000, isValidating: false, gameMode: 'classic',
+      currentTurnIndex: 0, currentTurnRetries: 0, turnTime: 45000,
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    // Direct-ID path: getOrFetchCredits returns a cast that SHARES Leonardo
+    // DiCaprio with the chain head → a valid connection.
+    redisUtils.getOrFetchCredits.mockResolvedValue({
+      cast: [{ id: 6193, name: 'Leonardo DiCaprio' }, { id: 3, name: 'Tom Hardy' }],
+    });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 272, title: 'Batman Begins', release_date: '2005-06-15', poster_path: null }),
+    });
+
+    await matchSystem.submitMovie(ctx, mockSocket, {
+      lobbyId: 'TEST', movie: 'Batman Begins', tmdbId: 272, mediaType: 'movie',
+    });
+
+    // Success contract:
+    expect(room.players[0].isAlive).toBe(true);
+    const rejected = mockSocket.emit.mock.calls.filter(
+      ([e]) => e === 'submissionRejected' || e === 'youWereEliminated');
+    expect(rejected).toHaveLength(0);
+    const elim = mockIo.emit.mock.calls.filter(
+      ([e, p]) => e === 'notification' && p?.kind === 'elimination');
+    expect(elim).toHaveLength(0);
+    // the chain grew by one (the committed play)
+    expect(room.chain.length).toBe(2);
+    // Not just "a push happened" — the committed entry must be the movie
+    // we submitted (tmdbId 272), so a regression that pushes a stub/wrong
+    // entry is caught too. commitPlay stores validMatch.id on the
+    // lightweightMovie object under room.chain[n].movie.id.
+    expect(room.chain[1].movie.id).toBe(272);
+    // nextTurn ran: turn advanced to player 2 and the retry budget reset
+    expect(room.currentTurnIndex).toBe(1);
+    expect(room.currentTurnRetries).toBe(0);
+    // validation flag released
+    expect(room.isValidating).toBe(false);
+  });
+});
