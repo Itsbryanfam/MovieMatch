@@ -25,7 +25,9 @@ beforeEach(() => {
   ctx = { io, pubClient: {}, TMDB_HEADERS: {}, logger: { error: jest.fn() } };
   // withLobbyLock(pub, id, fn) → runs fn(room), returns room (mirror real contract).
   redisUtils.withLobbyLock.mockImplementation(async (_p, _id, fn) => {
-    const r = global.__room; const out = await fn(r); return out === false ? r : r;
+    // Real contract: the mutator may return false to signal "no save", but
+    // withLobbyLock still resolves to the (possibly-mutated) room either way.
+    const r = global.__room; await fn(r); return r;
   });
   redisUtils.getLobby.mockImplementation(async () => global.__room);
   redisUtils.deleteLobby.mockResolvedValue(undefined);
@@ -42,7 +44,7 @@ test('addBot appends a bot for the host in a waiting classic lobby', async () =>
   expect(bot).toMatchObject({ isBot: true, difficulty: 'hard' });
 });
 
-test('addBot rejected for non-host / non-waiting / non-classic / full', async () => {
+test('addBot rejected for non-host, non-classic mode, and a full lobby', async () => {
   const socket = { id: HOST, emit: jest.fn() };
   global.__room = lobby({ players: [{ id: HOST, isHost: false }] });
   await lobbySystem.addBot(ctx, socket, { lobbyId: 'L' });
@@ -51,6 +53,18 @@ test('addBot rejected for non-host / non-waiting / non-classic / full', async ()
   global.__room = lobby({ gameMode: 'team' });
   await lobbySystem.addBot(ctx, { id: HOST, emit: jest.fn() }, { lobbyId: 'L' });
   expect(global.__room.players.some(p => p.isBot)).toBe(false);
+
+  // Capacity: a lobby already at the 8-player cap rejects addBot.
+  const { MAX_PLAYERS_PER_LOBBY } = require('../constants');
+  const full = [{ id: HOST, name: 'Host', isHost: true, isAlive: true, connected: true, teamId: 0, stableId: 'h' }];
+  while (full.length < MAX_PLAYERS_PER_LOBBY) {
+    full.push({ id: `p${full.length}`, name: `P${full.length}`, isHost: false, isAlive: true, connected: true, teamId: full.length % 2, stableId: `s${full.length}` });
+  }
+  global.__room = lobby({ players: full });
+  const emitter = { id: HOST, emit: jest.fn() };
+  await lobbySystem.addBot(ctx, emitter, { lobbyId: 'L' });
+  expect(global.__room.players.some(p => p.isBot)).toBe(false);
+  expect(global.__room.players.length).toBe(MAX_PLAYERS_PER_LOBBY); // unchanged
 });
 
 test('removeBot drops a bot by id for the host', async () => {

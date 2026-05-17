@@ -347,7 +347,7 @@ async function addBot(ctx, socket, { lobbyId, difficulty }) {
 }
 
 // Phase 5a: host removes a bot pre-game (the bot analogue of kickPlayer;
-// no socket side-effects since a bot has no socket).
+// bots have no socket, so the socket-teardown steps kickPlayer runs (deleteSocketLobby / targetSocket.leave / 'kicked' emit) are intentionally skipped).
 async function removeBot(ctx, socket, { lobbyId, targetId }) {
   const { io, pubClient } = ctx;
   let removed = false;
@@ -776,11 +776,14 @@ async function handleDisconnect(ctx, socketId) {
 
     await redisUtils.saveLobby(pubClient, lobbyId, room);
 
-    // Phase 5a: generalize "no players" to "no connected humans". A lobby
-    // whose only remaining members are bots can never be played to/by anyone
-    // and would otherwise ghost forever (bots never fire 'disconnect' and
-    // never empty room.players). Tear it down and clear BOTH in-process
-    // timers so a stale watchdog/bot-move can't fire against a dead lobby.
+    // Phase 5a: generalize "no players" to "no connected humans". In WAITING
+    // state a bots-only lobby can never start and would ghost forever (bots
+    // never fire 'disconnect' and never empty room.players). In PLAYING state
+    // a bots-only remnant is also unrecoverable — no human can re-enter a game
+    // mid-play — so we tear down immediately here, BEFORE the grace-timer
+    // block, intentionally giving the last human no 15s reconnect window
+    // (bots can't run the game forward for a reconnect anyway). Clear BOTH
+    // in-process timers so a stale watchdog/bot-move can't fire on a dead lobby.
     const connectedHumans = room.players.filter(p => !p.isBot && p.connected);
     if (room.players.length === 0 || connectedHumans.length === 0) {
       gameLogic.clearTurnTimeout(lobbyId);

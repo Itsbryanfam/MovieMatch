@@ -311,6 +311,7 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     });
 
     on('removeBot', async (data) => {
+      // Phase 5a: mirror addBot — same lobbyConfig bucket throttles remove-spam.
       if (await lobbyConfigLimited()) return;
       await lobbySystem.removeBot(ctx, socket, data || {});
     });
