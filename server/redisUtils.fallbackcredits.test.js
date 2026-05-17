@@ -31,6 +31,12 @@ test('non-OK TMDB + movie in fallback → returns local cast, does NOT cache', a
   // distinguished here by the EX:604800 cache-TTL option, not a key prefix.
   const cacheWrote = p.set.mock.calls.some(c => c[2] && c[2].EX === 604800);
   expect(cacheWrote).toBe(false);
+  // Concurrency-critical: the NX stampede lock MUST be released even on the
+  // fallback return (it returns inside the try, so finally still runs del).
+  // A leaked lock would stall every concurrent submit for this title for 10s
+  // during an outage — assert it, don't just trust code inspection.
+  expect(p.del).toHaveBeenCalledTimes(1);
+  expect(p.del.mock.calls[0][0]).toMatch(/:fetching$/);
 });
 
 test('network throw + movie in fallback → returns local cast (no rethrow)', async () => {
@@ -38,6 +44,9 @@ test('network throw + movie in fallback → returns local cast (no rethrow)', as
   jest.spyOn(fallbackMovies, 'getFallbackById').mockReturnValue({ id: 7, cast: [{ id: 9, name: 'B' }] });
   global.fetch.mockRejectedValue(new Error('ETIMEDOUT'));
   await expect(redisUtils.getOrFetchCredits(p, 7, 'movie', H)).resolves.toEqual({ cast: [{ id: 9, name: 'B' }] });
+  // Same lock-release invariant on the catch (network-throw) fallback path.
+  expect(p.del).toHaveBeenCalledTimes(1);
+  expect(p.del.mock.calls[0][0]).toMatch(/:fetching$/);
 });
 
 test('TMDB failure + NOT in fallback → throws as today', async () => {
