@@ -310,6 +310,33 @@ async function recoverActiveTurns(io, pubClient) {
   return rearmed;
 }
 
+// Phase 2 R2: steady-state companion to recoverActiveTurns. Watchdogs are
+// in-process; recoverActiveTurns only re-arms at boot, so a mid-game
+// crash/deploy/scale event on another instance can leave a playing lobby in
+// Redis with an expired turn and no process watching it. This sweep (run on
+// an interval, on every instance) arms a watchdog for any playing lobby THIS
+// instance is not already watching. It MUST gate on !hasActiveTurnTimeout:
+// re-arming a healthy in-flight timer every tick would clear+reset it
+// forever and turns would never expire. Safe across instances because
+// armTurnTimeout is idempotent + submit-lock-guarded + re-reads fresh state
+// — only one instance's watchdog ever actually eliminates. Best-effort: a
+// Redis hiccup must never throw out of the interval callback.
+async function sweepMissingTurnWatchdogs(io, pubClient) {
+  let armed = 0;
+  try {
+    const lobbies = await redisUtils.getAllLobbies(pubClient);
+    for (const room of lobbies) {
+      if (!room || room.status !== 'playing') continue;
+      if (hasActiveTurnTimeout(room.id)) continue; // already watched here
+      armTurnTimeout(io, pubClient, room.id, room);
+      armed++;
+    }
+  } catch (err) {
+    logger.error(err, 'sweepMissingTurnWatchdogs failed');
+  }
+  return armed;
+}
+
 function promoteSpectators(state) {
   if (!state.spectators || state.spectators.length === 0) return;
   // Disconnected spectators don't get promoted — they wouldn't be there to play.
@@ -789,6 +816,9 @@ module.exports = {
   // Audit finding #6: boot-time re-arm of watchdogs for in-flight games
   // (in-process timers don't survive a restart; Redis state does).
   recoverActiveTurns,
+  // Phase 2 R2: steady-state periodic re-arm of watchdogs this instance
+  // isn't already tracking (multi-instance / mid-game-restart soft-lock).
+  sweepMissingTurnWatchdogs,
   promoteSpectators,
   // L3: Exposed for matchSystem.commitPlay's success path. Internal
   // detail otherwise — kept underscore-prefixed in the implementation

@@ -306,6 +306,10 @@ const POSTER_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 // long-lived public deployment without adding meaningful load — ZSCAN is
 // cursor-paged and the whole set is tiny relative to lobby traffic.
 const LEADERBOARD_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// Phase 2 R2: how often every instance re-checks for playing lobbies it
+// isn't watching. 30s bounds worst-case soft-lock latency to one cycle
+// while keeping the getAllLobbies load negligible.
+const TURN_SWEEP_INTERVAL_MS = 30 * 1000; // 30 seconds
 
 async function startApp() {
   try {
@@ -342,6 +346,18 @@ async function startApp() {
   gameLogic.recoverActiveTurns(io, pubClient)
     .then(n => { if (n > 0) logger.info(`Recovered turn watchdogs for ${n} in-flight lobbies`); })
     .catch(err => logger.error(err, 'Turn-watchdog recovery sweep failed'));
+
+  // Phase 2 R2: boot recovery only fixes THIS process at THIS instant. A
+  // mid-game crash/deploy/scale event elsewhere can still leave a playing
+  // lobby with an expired turn and nobody watching. This periodic sweep
+  // closes that steady-state window. .unref() so the timer never by itself
+  // keeps the process (or a Jest worker) alive — see Phase 2 R3.
+  const turnSweepInterval = setInterval(() => {
+    gameLogic.sweepMissingTurnWatchdogs(io, pubClient)
+      .then(n => { if (n > 0) logger.info(`Turn-watchdog sweep armed ${n} unwatched lobbies`); })
+      .catch(err => logger.error(err, 'Periodic turn-watchdog sweep failed'));
+  }, TURN_SWEEP_INTERVAL_MS);
+  turnSweepInterval.unref();
 
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => logger.info(`Server listening on port ${PORT}`));
