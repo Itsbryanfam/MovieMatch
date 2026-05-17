@@ -23,6 +23,16 @@ function _tmdbHeaders() {
   return { Authorization: `Bearer ${process.env.TMDB_READ_TOKEN}`, accept: 'application/json' };
 }
 
+// Lazy-memoized root logger. WHY lazy: pino must NOT be top-level required
+// (cycle-safety — botSystem top-level requires only fs+path). WHY memoized:
+// scheduleBotMove's timer fires on every bot turn; a fresh pino instance per
+// fire is wasteful and loses stable pid/instance correlation.
+let _logger = null;
+function _getLogger() {
+  if (!_logger) _logger = require('pino')();
+  return _logger;
+}
+
 // Difficulty = a named parameter set the move generator reads. NOT branching
 // code paths — just a profile object. WHY each knob:
 //   whiff          — per-turn probability the bot "blanks" even when a move
@@ -265,7 +275,7 @@ function scheduleBotMove(io, pubClient, lobbyId, state, opts = {}) {
       const matchSystem = require('./matchSystem'); // lazy: cycle-safe
       if (move) {
         await matchSystem.submitBotMove(
-          { io, pubClient, TMDB_HEADERS: headers, logger: require('pino')() },
+          { io, pubClient, TMDB_HEADERS: headers, logger: _getLogger() },
           lobbyId, botId, move
         );
         return;
@@ -278,7 +288,10 @@ function scheduleBotMove(io, pubClient, lobbyId, state, opts = {}) {
       if (!token) return; // a submit is in flight; it will advance the turn
       try {
         const r2 = await redisUtils.getLobby(pubClient, lobbyId);
-        if (!r2 || r2.status !== 'playing') return;
+        // !isValidating mirrors submitMovie/submitBotMove's lock discipline:
+        // if a submit is mid-commit for this turn, do NOT race it with a
+        // whiff-elimination.
+        if (!r2 || r2.status !== 'playing' || r2.isValidating) return;
         const c2 = r2.players[r2.currentTurnIndex];
         if (!c2 || c2.id !== botId || !c2.isAlive) return;
         await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, r2, "Bot couldn't find a move");
@@ -288,7 +301,7 @@ function scheduleBotMove(io, pubClient, lobbyId, state, opts = {}) {
     } catch (e) {
       // A bot-turn failure must never crash the process or the lobby — the
       // turn watchdog is still armed and will eliminate the bot on timeout.
-      require('pino')().error(e, 'scheduleBotMove fire failed');
+      _getLogger().error(e, 'scheduleBotMove fire failed');
     }
   }, delay);
   // .unref() so a pending bot timer never by itself pins a Jest worker / Node

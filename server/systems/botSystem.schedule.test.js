@@ -55,7 +55,7 @@ describe('scheduleBotMove', () => {
     const elim = jest.spyOn(gameLogic, 'eliminateCurrentPlayer').mockResolvedValue(undefined);
     botSystem.scheduleBotMove(io, {}, 'L1', r, { rng: () => 0 });
     await jest.advanceTimersByTimeAsync(3000 + 5);
-    expect(elim).toHaveBeenCalledWith(io, expect.anything(), 'L1', r, "Bot couldn't find a move");
+    expect(elim).toHaveBeenCalledWith(io, expect.anything(), 'L1', expect.objectContaining({ status: 'playing', currentTurnIndex: 1 }), "Bot couldn't find a move");
   });
 
   test('stale fire is a safe no-op when the turn has moved on', async () => {
