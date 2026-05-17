@@ -103,6 +103,13 @@ app.use(limiter);
 
 app.use(express.static('public'));
 
+// Strict admin-only rate limiter (5 / 15min / IP), layered on top of the
+// global limiter. Path-prefixed so it covers every current and future
+// /api/admin/* route without restructuring the handlers. MUST be registered
+// before the admin route definitions — Express runs middleware in order.
+const adminLimiter = require('./server/adminLimiter');
+app.use('/api/admin', adminLimiter);
+
 app.post('/api/admin/flush-credits', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
   // safeEqual: constant-time compare so the response time doesn't leak how
