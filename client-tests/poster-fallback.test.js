@@ -10,7 +10,7 @@
 // covers the load-FAILURE case for the chain board, the autocomplete
 // list, and the static hero demo posters.
 
-import { initUIElements, renderGame, renderAutocompleteResults } from '../public/js/ui.js';
+import { initUIElements, renderGame, renderAutocompleteResults, playChainReplay } from '../public/js/ui.js';
 const { loadIndexHtml, makePlayingState, makeChainItem } = require('./fixtures');
 
 describe('poster load-failure fallback (audit #3)', () => {
@@ -53,6 +53,34 @@ describe('poster load-failure fallback (audit #3)', () => {
 
     expect(item.querySelector('img.mini-poster')).toBeNull();
     expect(item.querySelector('.mini-poster.placeholder')).not.toBeNull();
+  });
+
+  test('a chain-replay poster that fails to load is replaced by the placeholder', () => {
+    // The daily-result "▶ Replay your chain" panel builds its own poster
+    // <img>s via _buildReplayEntry. Pre-fix this was the ONE poster site
+    // (of three) missing the broken-image fallback the other two have.
+    // Force the reduced-motion branch so playChainReplay renders all
+    // entries synchronously (no setTimeout to await).
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = () => ({ matches: true });
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+
+      playChainReplay(container, [makeChainItem({
+        movie: { title: 'Iron Man', year: 2008, cast: ['RDJ'], poster: 'https://image.tmdb.org/t/p/w200/test.jpg' },
+      })]);
+
+      const img = container.querySelector('img.chain-poster');
+      expect(img).not.toBeNull();
+
+      img.dispatchEvent(new Event('error'));
+
+      expect(container.querySelector('img.chain-poster')).toBeNull();
+      expect(container.querySelector('.chain-poster.placeholder')).not.toBeNull();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
   });
 
   test('the static hero demo posters declare an onerror fallback', () => {
