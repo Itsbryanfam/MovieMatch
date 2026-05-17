@@ -11,6 +11,8 @@ const gameLogic = require('../gameLogic');
 const posterCache = require('../posterCache');
 const telemetry = require('../telemetry');
 const dailySystem = require('./dailySystem');
+// Player hard-cap constant (single source of truth — see server/constants.js).
+const { MAX_PLAYERS_PER_LOBBY } = require('../constants');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
@@ -95,10 +97,10 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
       outcome = 'spectator';
       return;
     }
-    // 8-player hard cap. (A brand-new lobby has 0 players, so this never
-    // wrongly rejects the creator — the old !isNewLobby guard was just an
-    // optimization for that always-false case.)
-    if (r.players.length >= 8) { outcome = 'full'; return false; }
+    // Player hard cap (MAX_PLAYERS_PER_LOBBY). A brand-new lobby has 0
+    // players, so this never wrongly rejects the creator — the old
+    // !isNewLobby guard was just an optimization for that always-false case.
+    if (r.players.length >= MAX_PLAYERS_PER_LOBBY) { outcome = 'full'; return false; }
     const isHost = r.players.length === 0;
     const teamId = r.players.length % 2;
     const wins = await redisUtils.getPlayerWins(pubClient, stableId);
@@ -115,7 +117,9 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
     return socket.emit('error', 'Lobby unavailable — please try again.');
   }
   if (outcome === 'full') {
-    return socket.emit('error', 'Lobby is full (8 player maximum).');
+    // Interpolate the constant so the user-facing copy can never drift
+    // from the enforced cap. Renders identically: "Lobby is full (8 player maximum)."
+    return socket.emit('error', `Lobby is full (${MAX_PLAYERS_PER_LOBBY} player maximum).`);
   }
 
   // Side-effects AFTER the lock — none of these touch lobby state, so they
@@ -567,7 +571,8 @@ function _vibeTag(chatCount, createdAt) {
 async function requestPublicLobbies(ctx, socket) {
   const { pubClient } = ctx;
   const all = await redisUtils.getAllLobbies(pubClient);
-  const publicList = all.filter(r => r.status === 'waiting' && r.isPublic && r.players.length < 8).map(room => {
+  // Only surface lobbies with a free slot (same cap as joinLobby).
+  const publicList = all.filter(r => r.status === 'waiting' && r.isPublic && r.players.length < MAX_PLAYERS_PER_LOBBY).map(room => {
     const host = room.players.find(p => p.isHost);
     const hostWins = host ? (host.wins | 0) : 0;
     const skill = _skillBracketForWins(hostWins);

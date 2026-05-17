@@ -3,6 +3,8 @@ const telemetry = require('./telemetry');
 const statsSystem = require('./systems/statsSystem');
 const soloObjectivesSystem = require('./systems/soloObjectivesSystem');
 const logger = require('pino')();
+// Player hard-cap constant (single source of truth — see server/constants.js).
+const { MAX_PLAYERS_PER_LOBBY } = require('./constants');
 
 // In-memory map for active turn timeouts.
 // Stored in-process (not Redis) because setTimeout handles are not serializable.
@@ -341,8 +343,9 @@ function promoteSpectators(state) {
   if (!state.spectators || state.spectators.length === 0) return;
   // Disconnected spectators don't get promoted — they wouldn't be there to play.
   const connected = state.spectators.filter(s => s.connected);
-  // 8-player hard cap defined in joinLobby; same value used here.
-  const slotsAvailable = 8 - state.players.length;
+  // Same hard cap enforced in lobbySystem.joinLobby — now a shared
+  // constant so the two can no longer silently disagree.
+  const slotsAvailable = MAX_PLAYERS_PER_LOBBY - state.players.length;
   const promoted = connected.slice(0, slotsAvailable);
 
   promoted.forEach(s => {
