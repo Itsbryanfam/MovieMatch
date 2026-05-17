@@ -471,6 +471,12 @@ describe('matchSystem.submitMovie — valid play commits and advances turn (CI2)
     redisUtils.acquireSubmitLock.mockResolvedValue('token-abc');
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     redisUtils.saveLobby.mockResolvedValue(undefined);
+    // Safe default for getOrFetchCredits — keeps this describe self-contained
+    // so a future test added here doesn't silently inherit undefined from
+    // jest.clearAllMocks (which resets mock implementations to undefined, not
+    // to their previous resolved value). The individual test that needs a
+    // specific cast overrides this in its own body.
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
   });
 
   afterEach(() => gameLogic.clearTurnTimeout('TEST'));
@@ -529,6 +535,11 @@ describe('matchSystem.submitMovie — valid play commits and advances turn (CI2)
     expect(elim).toHaveLength(0);
     // the chain grew by one (the committed play)
     expect(room.chain.length).toBe(2);
+    // Not just "a push happened" — the committed entry must be the movie
+    // we submitted (tmdbId 272), so a regression that pushes a stub/wrong
+    // entry is caught too. commitPlay stores validMatch.id on the
+    // lightweightMovie object under room.chain[n].movie.id.
+    expect(room.chain[1].movie.id).toBe(272);
     // nextTurn ran: turn advanced to player 2 and the retry budget reset
     expect(room.currentTurnIndex).toBe(1);
     expect(room.currentTurnRetries).toBe(0);

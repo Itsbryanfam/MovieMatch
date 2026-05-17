@@ -11,6 +11,10 @@
 // regressions without being flaky. Raise these in later phases as coverage
 // improves; never lower them without an explicit decision.
 module.exports = {
+  // server/**/*.js intentionally excludes the root server.js boot file (it
+  // lives at repo root, not under server/). That file runs boot side-effects
+  // (Redis connect, port bind, process.exit) and is not require()-able in
+  // tests, so excluding it from coverage instrumentation is correct.
   collectCoverageFrom: [
     'server/**/*.js',
     '!server/**/*.test.js',
