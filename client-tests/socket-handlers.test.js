@@ -172,6 +172,36 @@ describe('socketClient handlers — screen transitions', () => {
   });
 
   // ------------------------------------------------------------------------
+  // return-to-hero — must reset the lobby sub-panels (waiting + team)
+  // Pre-existing bug: leaving a team-mode lobby back to hero hid only
+  // waitingRoom (or neither), leaving #team-screen with stale visibility
+  // that resurfaced on the next lobby entry.
+  // ------------------------------------------------------------------------
+
+  test("'kicked' returns to hero and hides BOTH waiting-room and team-screen", () => {
+    // Simulate being on the team-assignment screen of a team-mode lobby.
+    document.getElementById('team-screen').classList.remove('hidden');
+    document.getElementById('waiting-room').classList.remove('hidden');
+
+    fakeSocket.trigger('kicked', 'Removed by host');
+
+    expect(document.getElementById('hero-screen').classList.contains('active')).toBe(true);
+    expect(document.getElementById('team-screen').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('waiting-room').classList.contains('hidden')).toBe(true);
+  });
+
+  test("'rejoinFailed' returns to hero and hides BOTH waiting-room and team-screen", () => {
+    document.getElementById('team-screen').classList.remove('hidden');
+    document.getElementById('waiting-room').classList.remove('hidden');
+
+    fakeSocket.trigger('rejoinFailed', 'Could not rejoin game');
+
+    expect(document.getElementById('hero-screen').classList.contains('active')).toBe(true);
+    expect(document.getElementById('team-screen').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('waiting-room').classList.contains('hidden')).toBe(true);
+  });
+
+  // ------------------------------------------------------------------------
   // connect — page-refresh recovery via sessionStorage + stableId
   // ------------------------------------------------------------------------
 
