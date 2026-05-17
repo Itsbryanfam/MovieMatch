@@ -599,14 +599,16 @@ export function showGameOverBanner(state, myPlayerId) {
 
   const shareBtn = document.createElement('button');
   shareBtn.id = 'share-results-btn';
-  shareBtn.className = 'btn-primary';
+  // Phase 4: .btn additive base (cursor:pointer already on btn-primary); zero visual change.
+  shareBtn.className = 'btn btn-primary';
   shareBtn.textContent = '🎬 Share Results';
   actionsDiv.appendChild(shareBtn);
 
   if (isHost) {
     const playAgainBtn = document.createElement('button');
     playAgainBtn.id = 'play-again-btn';
-    playAgainBtn.className = 'btn-secondary';
+    // Phase 4: .btn additive base (cursor:pointer already on btn-secondary); zero visual change.
+    playAgainBtn.className = 'btn btn-secondary';
     playAgainBtn.textContent = '↩ Play Again';
     actionsDiv.appendChild(playAgainBtn);
   }
