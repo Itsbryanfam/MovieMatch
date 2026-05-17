@@ -15,8 +15,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="MovieMatch">
   <link rel="manifest" href="/manifest.json">
-  <!-- SVG app icon (Phase 4). One self-contained asset doubles as favicon +
-       apple-touch-icon; manifest.icons drives Android/desktop installability. -->
+  <!-- WHY (Phase 4): explicit icon link tags so browsers that don't parse
+       manifest.json for icons still show the branded favicon + iOS
+       home-screen icon; one SVG serves manifest, favicon, and apple-touch. -->
   <link rel="icon" type="image/svg+xml" href="/icon.svg">
   <link rel="apple-touch-icon" href="/icon.svg">
 
