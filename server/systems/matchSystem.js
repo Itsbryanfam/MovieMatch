@@ -19,6 +19,18 @@ const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
 const TMDB_FETCH_TIMEOUT_MS = 5000;
 
+// Phase 6a — Post-Game Learning Breakdown.
+// Upper bound on the best-effort "a move you could have played" computation.
+// On a TMDB cache HIT (the common case — same person-filmography/details the
+// Phase 5a bot cache holds) this completes in tens of ms; the bound only
+// trips on a cache MISS, where we omit the suggestion rather than stall the
+// elimination. Fail-closed: the H3 card already renders fine without it.
+const COULD_HAVE_PLAYED_TIMEOUT_MS = 1200;
+// A non-difficulty "always finds a move" profile for the SUGGESTION use of
+// generateBotMove. whiff:0 ⇒ `rng() < 0` is never true ⇒ it never blanks.
+// Plain literal consumed read-only by generateBotMove — no botSystem change.
+const SUGGESTION_BOT_PROFILE = { whiff: 0, popularityFloor: 4, retryCap: 3 };
+
 // H1: Per-turn budget for "title not found" retries before falling back to
 // elimination. A typo or off-canon title is almost never a strategic mistake —
 // eliminating on the first miss made early-game frustration the #1 player
@@ -256,6 +268,13 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
           // wire format so the client doesn't have to handle both shapes.
           const namesOnly = (cast) =>
             (cast || []).slice(0, 10).map(a => typeof a === 'string' ? a : (a && a.name) || '');
+          // Phase 6a: best-effort, fail-closed "what would have worked".
+          // Awaited before the private emit so it rides the existing single
+          // youWereEliminated event (no new event by design). Bounded by
+          // COULD_HAVE_PLAYED_TIMEOUT_MS; worst case (TMDB cache miss) this
+          // delays the room-wide elimination by that bound — acceptable and
+          // bounded; the common path is a cache hit (tens of ms).
+          const couldHavePlayed = await _computeCouldHavePlayed(room, pubClient, TMDB_HEADERS);
           socket.emit('youWereEliminated', {
             yourGuess: {
               title: triedCandidate.title,
@@ -268,6 +287,9 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
               cast: namesOnly(lastChainEntry.movie.cast),
             },
             reason: result.reason,
+            // Additive + optional: omitted entirely on miss/error/timeout so
+            // the client (and every existing H3 assertion) sees no change.
+            ...(couldHavePlayed ? { couldHavePlayed } : {}),
           });
         }
 
@@ -371,6 +393,45 @@ function _fallbackCandidate(entry) {
     first_air_date: undefined,
     poster_path: null,
   };
+}
+
+// Phase 6a: compute one valid "you could have played X" suggestion for the
+// eliminated player, reusing the merged Phase 5a bot pathfinder READ-ONLY.
+// Contract: NEVER throws, NEVER returns partial data, and never blocks the
+// caller beyond COULD_HAVE_PLAYED_TIMEOUT_MS. Any miss/error/timeout → null
+// (the H3 card degrades gracefully — see ui-notifications legacy path).
+// botSystem is lazy-required here because botSystem already lazy-requires
+// matchSystem (cycle-safe, mirrors botSystem.js's lazy require of matchSystem).
+async function _computeCouldHavePlayed(room, pubClient, headers) {
+  try {
+    const work = (async () => {
+      const botSystem = require('./botSystem');
+      // rng:()=>0 ⇒ deterministic pick of the most-popular candidate; with
+      // SUGGESTION_BOT_PROFILE.whiff===0 the pathfinder never blanks.
+      const move = await botSystem.generateBotMove(room, SUGGESTION_BOT_PROFILE, {
+        pubClient,
+        headers,
+        rng: () => 0,
+        getOrFetchPersonCredits: redisUtils.getOrFetchPersonCredits,
+        dailySeed: [], // unused on a non-empty chain (always true at the H3 site)
+      });
+      if (!move || move.tmdbId == null) return null;
+      // Resolve id → title/year via the SAME direct-ID path submitBotMove
+      // uses (cached). movie arg is null ⇒ no fuzzy search.
+      const cands = await resolveCandidates(room, null, move.tmdbId, move.mediaType, headers);
+      const top = cands && cands[0];
+      if (!top || !top.id) return null;
+      const title = top.title || top.name;
+      if (!title) return null;
+      const year = (`${top.release_date || top.first_air_date || ''}`).split('-')[0] || '';
+      return { title, year };
+    })();
+    // Fail-closed time box: the loser of the race is null.
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), COULD_HAVE_PLAYED_TIMEOUT_MS));
+    return await Promise.race([work, timeout]);
+  } catch (e) {
+    return null; // best-effort: a missing suggestion must never break elimination
+  }
 }
 
 async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
