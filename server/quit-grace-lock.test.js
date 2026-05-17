@@ -88,9 +88,22 @@ describe('R1 — non-current-turn quit/grace mutate through withLobbyLock', () =
 
     const final = await redisUtils.getLobby(pub, 'L1');
     expect(final.players.find(p => p.id === 's1').isAlive).toBe(false);
+    // C1 regression guard: a no-op quit on an already-dead player must NOT
+    // emit a spurious "quit" notification or broadcast (withLobbyLock
+    // returns the room even when the mutator declines to persist).
+    // `io.to(lobbyId).emit(...)` routes through `io.emit` because
+    // `io.to` is mocked to return `this` (the same `io` object), so
+    // `io.emit` not being called proves no notification or broadcastState
+    // fired on this path.
+    expect(io.emit).not.toHaveBeenCalled();
   });
 
   afterEach(() => {
     require('../server/gameLogic').clearTurnTimeout('L1');
+    // NOTE (Phase 2 R3): the win path in test 1 (two concurrent quits kill
+    // both non-current players, leaving one survivor) may arm a
+    // scheduleGameReset timer; Task 5 (Jest clean-exit) owns sweeping any
+    // residual open handle. scheduleGameReset is not exported from
+    // gameLogic.js, so no simple clear call exists here.
   });
 });
