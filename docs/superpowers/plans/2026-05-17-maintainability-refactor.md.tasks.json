@@ -1,0 +1,36 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-17-maintainability-refactor.md",
+  "spec": "docs/superpowers/specs/2026-05-17-maintainability-refactor-design.md",
+  "branch": "phase3-maintainability",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: server/constants.js — de-duplicate the player cap",
+      "status": "completed",
+      "description": "**Goal:** Replace duplicated literal 8 (max players/lobby) with MAX_PLAYERS_PER_LOBBY in a new server/constants.js; existing server Jest suite proves losslessness.\n\n**Files:** Create server/constants.js; modify server/systems/lobbySystem.js (require + lines 98-101, 118, 570) and server/gameLogic.js (require + lines 344-345). Do NOT touch the unrelated 8s: socketHandlers.js:32/48/51/357, matchSystem.js:25/325.\n\n**Verify:** `npm test -- --selectProjects server` PASS; `npm test -- --coverage --runInBand` floor held; grep -nE \"players\\.length (>=|<) 8|\\(8 player\" on the two files → no matches.\n\n```json:metadata\n{\"files\":[\"server/constants.js\",\"server/systems/lobbySystem.js\",\"server/gameLogic.js\"],\"verifyCommand\":\"npm test -- --selectProjects server\",\"acceptanceCriteria\":[\"constants.js exports MAX_PLAYERS_PER_LOBBY=8\",\"4 real cap sites use the constant; full-lobby error byte-identical\",\"unrelated 8s untouched\",\"server suite green + coverage floor held\"],\"reviewModel\":\"cheap\"}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: split public/js/ui.js into a barrel + 6 domain modules",
+      "status": "completed",
+      "blockedBy": [0],
+      "description": "**Goal:** Move ui.js sections verbatim into public/js/ui/{ui-dom,ui-render,ui-notifications,ui-autocomplete,ui-sharecard,ui-panels}.js; rewrite ui.js as a re-export-only barrel. Proven lossless by the existing client-tests/ jsdom suite staying 100% green with ZERO test edits.\n\n**Files:** Create the 6 public/js/ui/*.js; rewrite public/js/ui.js. Do NOT edit app.js, socketClient.js, client-tests/*.\n\n**Verify:** exported-symbol superset check (old ui.js exports ⊆ barrel re-exports); `npm test -- --selectProjects client` PASS (ghost-attempt/poster-fallback/render-chain/render-lobby/socket-handlers/tutorial-trigger); `git diff --stat main -- public/js/app.js public/js/socketClient.js client-tests/` empty; browser smoke.\n\n```json:metadata\n{\"files\":[\"public/js/ui.js\",\"public/js/ui/ui-dom.js\",\"public/js/ui/ui-render.js\",\"public/js/ui/ui-notifications.js\",\"public/js/ui/ui-autocomplete.js\",\"public/js/ui/ui-sharecard.js\",\"public/js/ui/ui-panels.js\"],\"verifyCommand\":\"npm test -- --selectProjects client\",\"acceptanceCriteria\":[\"every old ui.js export importable from ui.js barrel\",\"ui.js is re-exports only\",\"app.js/socketClient.js/client-tests unmodified\",\"client jsdom suite 100% green unchanged\",\"no new dependency\"],\"reviewModel\":\"standard\"}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: split public/style.css into 6 ordered partials",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** Cut style.css into public/css/01-base..06-states-anim.css at top-level banner boundaries (verbatim, no reformatting); load in original cascade order via 6 ordered <link> tags in index.html. Byte-identity gate is the spec.\n\n**Files:** Create public/css/0N-*.css (6); modify public/index.html (~line 61 single <link>); git rm public/style.css after the gate passes.\n\n**Verify:** `git show main:public/style.css > /tmp/o.css; cat public/css/01..06 > /tmp/c.css; diff /tmp/o.css /tmp/c.css` → EMPTY (capture pre-comment, Step 3); browser smoke at 1440px + 390px.\n\n```json:metadata\n{\"files\":[\"public/css/01-base.css\",\"public/css/02-hero-lobby.css\",\"public/css/03-game.css\",\"public/css/04-modals.css\",\"public/css/05-responsive.css\",\"public/css/06-states-anim.css\",\"public/index.html\"],\"verifyCommand\":\"diff <(git show main:public/style.css) <(cat public/css/0*.css)\",\"acceptanceCriteria\":[\"concat(01..06)==original byte-identical\",\"index.html links exactly 6 partials in order, cache-busted; old <link> + style.css gone\",\"no other index.html change\",\"per-file WHY header added after gate\"],\"reviewModel\":\"standard\"}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: showScreen() helper + call-site migration (only logic change)",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "**Goal:** TDD a canonical showScreen(name) in public/js/ui/ui-dom.js (re-exported by the barrel); migrate the unambiguous .active/.hidden call sites; pin behaviour with client-tests/showScreen.test.js. Exclude ui-render.js gameScreen.classList.toggle('solo-mode-ui'/'speed-mode') (styling, not visibility). Lone/branchy app.js:233, socketClient.js:766/:787: migrate only if cleanly canonical else leave + // NOTE.\n\n**Files:** Modify public/js/ui/ui-dom.js, public/js/ui/ui-render.js, public/js/app.js, public/js/socketClient.js; create client-tests/showScreen.test.js. Spec-first (red→green→migrate).\n\n**Verify:** `npm test` all green incl. new spec and UNMODIFIED socket-handlers.test.js; `git diff --stat main -- client-tests/` shows only showScreen.test.js added; coverage floor held; browser smoke of every migrated transition.\n\n```json:metadata\n{\"files\":[\"public/js/ui/ui-dom.js\",\"public/js/ui/ui-render.js\",\"public/js/app.js\",\"public/js/socketClient.js\",\"client-tests/showScreen.test.js\"],\"verifyCommand\":\"npm test\",\"acceptanceCriteria\":[\"showScreen in ui-dom.js, importable via ./ui.js barrel\",\"showScreen.test.js asserts per-name group state, passes\",\"migrated sites use showScreen; side-effects kept adjacent\",\"solo-mode/speed-mode toggles untouched\",\"lone sites migrated-or-NOTE per policy\",\"full npm test green, zero edits to existing tests, coverage floor held\"],\"reviewModel\":\"standard\"}\n```"
+    }
+  ],
+  "reviewProcess": "Per task: independent spec-compliance review THEN independent code-quality review (separate subagents). Fix loop until both pass, then set status=completed + bump lastUpdated. Final whole-branch holistic review (most-capable model) before PR. Every changed line gets a WHY-comment. coverage/ never staged. PR-merge/deploy is user-gated.",
+  "lastUpdated": "2026-05-17T04:00:00Z (ALL 4 TASKS COMPLETE — each passed independent spec + code-quality reviews; Tasks 2/3/4 each took 1 fix-loop. Commits: 30aaa40 T1; 92ccbda+91a4a71 T2; c5974cf+8e9ce4d T3; d884c7e+fb97d39 T4. Suite 210 tests/25 suites green; coverage floors held; byte-identity + export-superset + behaviour-identity all independently verified. NEXT: final whole-branch holistic review (opus), then PR. Carried Minor notes for holistic: Task1 gameLogic require-ordering; utils.js:189 stale 'style.css' comment. Spawned separate task chips (NOT holistic scope): _buildReplayEntry poster-fallback gap; pre-existing teamScreen-not-hidden-on-logo bug.)"
+}

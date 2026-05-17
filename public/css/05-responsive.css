@@ -1,0 +1,619 @@
+/* 05-responsive.css — mobile tab bar, tablet/mobile/small-screen responsive @media overrides, solo mode UI. Part 5/6 of split style.css; load order is load-bearing (cascade) — do not reorder. */
+/* =============================================
+   MOBILE TAB BAR (hidden by default on desktop)
+   ============================================= */
+.mobile-tabs {
+  display: none;
+}
+
+/* =============================================
+   TABLET — iPad Portrait (768px–1023px)
+   2-column: board + right panel
+   ============================================= */
+@media (max-width: 1023px) {
+  #app-container {
+    padding: 1rem 1.25rem;
+  }
+
+  .app-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .layout-grid {
+    grid-template-columns: 1fr 240px;
+    gap: 1rem;
+  }
+
+  [data-panel="players"] {
+    display: none;
+  }
+
+  .lobby-panel {
+    max-width: 420px;
+    padding: 1.5rem;
+  }
+
+  .nav-link-btn {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.7rem;
+  }
+}
+
+/* =============================================
+   MOBILE — iPhone and small screens ≤ 767px
+   Single column + bottom tab navigation
+   ============================================= */
+@media (max-width: 767px) {
+  body {
+    overflow: hidden;
+    align-items: flex-start;
+  }
+
+  #app-container {
+    padding: 0.75rem 1rem 0;
+    height: 100dvh;
+  }
+
+  /* Audit #1: the header was a single non-wrapping flex row (logo +
+     4 nav buttons). With body{overflow:hidden} any horizontal overflow
+     is CLIPPED, not scrollable — at <=390px the last nav button ran off
+     the edge. Allowing the header and its nav to wrap guarantees every
+     control stays on-screen; the logo holds the first row and the nav
+     centers onto a second row only when it can't fit beside it. */
+  .app-header {
+    margin-bottom: 0.75rem;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.4rem 0.75rem;
+  }
+
+  .header-nav {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .logo {
+    font-size: 1.25rem;
+  }
+
+  .nav-link-btn {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  /* LOBBY PANELS */
+  .lobby-panel {
+    max-width: 100%;
+    width: 100%;
+    padding: 1.25rem;
+    border-radius: var(--radius-xl);
+    margin: auto;
+  }
+
+  #lobby-screen {
+    overflow-y: auto;
+    padding-bottom: 1rem;
+  }
+
+  /* 4-across mode chips cramp at 375px and force text overflow. 2x2 keeps
+     each chip wide enough to fit the icon + name comfortably. */
+  .mode-chips {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+  }
+
+  .mode-chip {
+    padding: 0.85rem 0.5rem;
+    min-height: 60px;
+  }
+
+  .mode-chip-name {
+    font-size: 0.85rem;
+  }
+
+  /* GAME SCREEN */
+  #game-screen {
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* MOBILE TAB BAR */
+  /* Hide desktop search suggestions — replaced by floating dropdown */
+  [data-panel="chat"] .sidebar-half:first-child {
+    display: none;
+  }
+
+  /* Remove the dividing border since only chat remains */
+  [data-panel="chat"] .chat-half {
+    border-top: none;
+  }
+
+  .mobile-tabs {
+    display: flex;
+    flex-shrink: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    padding: 4px;
+    gap: 4px;
+    /* Anchor to the bottom of the viewport so the tab bar stays put when
+       the on-screen keyboard opens. --keyboard-inset is updated by app.js
+       via the Visual Viewport API; without keyboard, env(safe-area-inset-bottom)
+       handles iPhones with home indicators. */
+    position: fixed;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px));
+    z-index: 50;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.4);
+    transition: bottom 0.15s ease-out;
+  }
+
+  /* Reserve space at the bottom of the game screen so the fixed tab bar
+     never overlaps the input row or chat. */
+  #game-screen {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Lift the chat input above the keyboard when it opens — same pattern
+     as the tab bar. The chat panel has its own scroll, so we shift only
+     the input wrapper itself. */
+  [data-panel="chat"].mobile-visible .chat-input-wrapper {
+    position: sticky;
+    bottom: var(--keyboard-inset, 0px);
+    background: var(--bg-surface);
+    z-index: 5;
+  }
+
+  .mobile-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.5rem 0.4rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s;
+    min-height: 44px;
+  }
+
+  .mobile-tab.active {
+    background: var(--bg-elevated);
+    color: var(--text-main);
+    font-weight: 600;
+  }
+
+  /* LAYOUT GRID — single column */
+  .layout-grid {
+    grid-template-columns: 1fr;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Sidebars hidden by default, shown by JS */
+  [data-panel="players"],
+  [data-panel="chat"] {
+    display: none;
+  }
+
+  [data-panel="players"].mobile-visible,
+  [data-panel="chat"].mobile-visible {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .game-board.mobile-hidden {
+    display: none;
+  }
+
+  /* Game board */
+  .game-board {
+    gap: 0.75rem;
+  }
+
+  .input-area {
+    padding: 1rem;
+    flex-shrink: 0;
+  }
+
+  .feed-container {
+    min-height: 0;
+  }
+
+  /* Chain items */
+  .chain-item {
+    padding: 0.75rem 1rem;
+    gap: 0.75rem;
+  }
+
+  .chain-poster {
+    width: 44px;
+  }
+
+  .chain-item .movie-title {
+    font-size: 1rem;
+  }
+
+  .chain-item .movie-cast {
+    /* Bumped from 0.8rem (~12.8px) — was hard to read with muted text color
+       on small phones in bright light. */
+    font-size: 0.9rem;
+  }
+
+  /* Buttons */
+  .btn-primary,
+  .btn-secondary {
+    min-height: 44px;
+    font-size: 0.9rem;
+  }
+
+  .btn-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Reactions */
+  .reaction-bar {
+    gap: 0.5rem;
+  }
+
+  .reaction-btn {
+    padding: 0.4rem 0.6rem;
+    font-size: 1.1rem;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Notifications */
+  #notification-text {
+    font-size: 1.75rem;
+    padding: 1rem;
+  }
+
+  /* Waiting room: stack public toggle below header */
+  #waiting-room .panel-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  #waiting-room .panel-header label.setting-toggle {
+    position: static;
+  }
+
+  /* Modals */
+  .modal-card {
+    padding: 1.5rem;
+    border-radius: var(--radius-xl);
+    max-height: 90dvh;
+    overflow-y: auto;
+  }
+
+  .how-to-steps {
+    gap: 1rem;
+  }
+
+  .step-number {
+    width: 28px;
+    height: 28px;
+    font-size: 0.8rem;
+  }
+
+  /* MOBILE AUTOCOMPLETE FLOATING DROPDOWN */
+  .mobile-ac-dropdown {
+    display: block; /* visible on mobile */
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 8px); /* floats ABOVE input area so keyboard doesn't cover it */
+    z-index: 50;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+
+  .mobile-ac-dropdown.open {
+    max-height: 300px;
+    pointer-events: auto;
+  }
+
+  .mobile-ac-dropdown .autocomplete-item {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.75rem 1rem;
+    min-height: 52px; /* generous touch target */
+  }
+
+  .mobile-ac-dropdown .autocomplete-item:last-child {
+    border-bottom: none;
+  }
+
+  .mobile-ac-dropdown .empty-hint {
+    padding: 1rem;
+    font-size: 0.8rem;
+  }
+}
+
+/* =============================================
+   VERY SMALL — iPhone SE (≤ 390px)
+   ============================================= */
+@media (max-width: 390px) {
+  .logo {
+    font-size: 1.1rem;
+  }
+
+  .nav-link-btn {
+    font-size: 0.65rem;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .mobile-tab {
+    font-size: 0.72rem;
+  }
+
+  #notification-text {
+    font-size: 1.4rem;
+  }
+}
+
+/* =============================================
+   SOLO MODE UI — focused single-column layout
+   =============================================
+   Without the players sidebar and chat to fill the multiplayer 3-column
+   grid, solo mode used to leave a 380px right panel mostly empty (just
+   autocomplete suggestions) and forced 1fr 380px on every viewport,
+   which broke mobile entirely. Now solo collapses to a single centered
+   column on all screen sizes and uses the mobile-style floating
+   autocomplete dropdown that already works for the small-screen game. */
+
+.solo-mode-ui .sidebar {
+  display: none !important;
+}
+
+.solo-mode-ui .reaction-bar {
+  display: none !important;
+}
+
+.solo-mode-ui .mobile-tabs {
+  display: none !important;
+}
+
+.solo-mode-ui .layout-grid {
+  display: flex;
+  justify-content: center;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.solo-mode-ui .game-board {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+.solo-mode-ui .feed-container {
+  border-color: rgba(129, 140, 248, 0.2);
+  box-shadow: 0 8px 32px rgba(129, 140, 248, 0.05);
+}
+
+.solo-mode-ui .chain-badge {
+  font-size: 1.1rem;
+  background: var(--accent-glow);
+  padding: 0.25rem 0.75rem;
+  border: 1px solid rgba(129, 140, 248, 0.4);
+}
+
+/* Always use the floating autocomplete dropdown in solo mode (no side
+   panel exists to host the desktop autocomplete, since the sidebars are
+   hidden). The .mobile-ac-dropdown class is normally only enabled on
+   <=767px screens; we re-enable it here for all widths. */
+.solo-mode-ui .mobile-ac-dropdown {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 50;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.solo-mode-ui .mobile-ac-dropdown.open {
+  max-height: 300px;
+  pointer-events: auto;
+}
+
+.solo-mode-ui .mobile-ac-dropdown .autocomplete-item {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0.75rem 1rem;
+  min-height: 52px;
+}
+
+.solo-mode-ui .mobile-ac-dropdown .autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.solo-mode-ui .mobile-ac-dropdown .empty-hint {
+  padding: 1rem;
+  font-size: 0.8rem;
+}
+
+/* On mobile, fall back into the existing single-column flow but drop the
+   max-width cap (already constrained by the viewport) and the horizontal
+   padding the multiplayer mobile layout uses. */
+@media (max-width: 767px) {
+  .solo-mode-ui .layout-grid {
+    max-width: none;
+    padding: 0;
+  }
+
+  /* The 60px bottom-padding on #game-screen reserves room for the fixed
+     mobile tab bar — solo hides that bar, so reclaim the space. */
+  .solo-mode-ui#game-screen,
+  #game-screen.solo-mode-ui {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* =============================================
+   UTILITY CLASSES
+   ============================================= */
+
+/* Offline banner */
+.offline-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  background: var(--status-danger);
+  color: #fff;
+  text-align: center;
+  padding: 0.5rem;
+  z-index: 9999;
+  font-weight: 600;
+  font-size: 0.9rem;
+  box-shadow: var(--shadow-sm);
+  /* Slide down on appear instead of snapping in — feels less alarming for
+     transient disconnects. The prefers-reduced-motion block at the bottom
+     of the file auto-suppresses this for users who opted out. */
+  animation: slideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+
+/* =============================================
+   MOBILE ANIMATION BUDGET
+   =============================================
+   Chain reveals stack the dropInNode (0.4s) and three revealElement
+   passes (0.5s each, staggered) for a ~0.7s per-entry cascade. On a
+   6-player game with rapid turns this compounds and feels sluggish on
+   budget Android. Halve durations on small screens. The keyframes
+   themselves are unchanged; only the apparent speed shifts. */
+@media (max-width: 767px) {
+  .chain-item,
+  .chain-item .movie-poster,
+  .chain-item .player-name,
+  .chain-item .movie-title,
+  .chain-item .movie-cast {
+    animation-duration: 0.25s !important;
+  }
+}
+
+/* Layout helpers for lobby panels */
+.btn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.team-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+#team-back-btn  { flex: 1; }
+#team-start-btn { flex: 2; }
+
+/* Public panel sizing */
+#public-panel {
+  max-width: 500px;
+  width: 100%;
+}
+
+#public-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#refresh-lobbies-btn {
+  width: auto;
+  padding: 0.5rem 1rem;
+}
+
+#public-lobbies-list {
+  max-height: 350px;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Lobby panel header position for host toggle */
+.lobby-panel .panel-header {
+  position: relative;
+}
+
+/* Chat tab badge */
+.mobile-tab[data-tab="chat"] {
+  position: relative;
+}
+
+#chat-badge {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: var(--status-danger);
+  border-radius: 50%;
+}
+
+/* Chat send button */
+.chat-send-btn {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+}
+
+/* JS-rendered player list classes */
+.spectator-count {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.solo-run-label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+/* Empty board placeholder */
+.empty-board-hint {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+}
+
+.empty-board-icon  { font-size: 2rem; }
+.empty-board-title { font-size: 1.1rem; font-weight: 600; }
+.empty-board-sub   { font-size: 0.9rem; opacity: 0.8; }
+
