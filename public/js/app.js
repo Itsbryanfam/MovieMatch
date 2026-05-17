@@ -150,13 +150,13 @@ document.addEventListener('DOMContentLoaded', () => {
   logo.addEventListener('click', () => {
     if (getCurrentLobbyId()) leaveLobby();
     showScreen('hero');                           // normalise top-level screen group
-    // keep: waitingRoom is not part of the top-level screen group, so
-    // showScreen() does not hide it. NOTE: teamScreen has the same
-    // asymmetry and is intentionally NOT hidden here — that is a
-    // PRE-EXISTING bug (the old logo handler never hid teamScreen
-    // either), deliberately left out of Phase 3 (a zero-behaviour-change
-    // refactor) and tracked as a separate follow-up task (2026-05-17).
+    // waitingRoom + teamScreen are lobby sub-panels, NOT part of the
+    // top-level screen group that showScreen('hero') resets. Hide both
+    // so returning to hero from a team-mode lobby doesn't leave
+    // #team-screen with stale visibility that resurfaces on the next
+    // lobby entry (fixes the pre-existing asymmetry flagged in Phase 3).
     waitingRoom.classList.add('hidden');
+    teamScreen.classList.add('hidden');
     showScreen('join');                           // normalise entry-panel group back to join
   });
 

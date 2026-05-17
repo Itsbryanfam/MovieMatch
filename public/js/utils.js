@@ -186,7 +186,7 @@ export function playTick()    { playSfx('tick'); }
 // ---------------------------------------------------------------------------
 // Users who set `prefers-reduced-motion: reduce` at the OS/browser level are
 // asking us to suppress all decorative motion. CSS already respects this via
-// the global media query in style.css, but JS-driven motion (parallax,
+// a global `prefers-reduced-motion` media query, but JS-driven motion (parallax,
 // haptics, animation timeouts) needs an explicit check.
 //
 // Wrapped in a try/catch because matchMedia is unavailable in old WebViews

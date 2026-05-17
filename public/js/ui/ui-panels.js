@@ -7,6 +7,11 @@
 import { playSfx } from '../utils.js';
 // Import showToast — renderDailyResult's share button confirms copy via toast.
 import { showToast } from './ui-notifications.js';
+// Import attachPosterFallback — the replay panel builds its own poster
+// <img>s; without this a broken/404 TMDB poster shows the native
+// broken-image glyph instead of the designed placeholder (the chain
+// board and autocomplete already use this shared ui-dom helper).
+import { attachPosterFallback } from './ui-dom.js';
 
 // =========================================================================
 // ANIMATED CHAIN REPLAY (L2)
@@ -89,6 +94,10 @@ function _buildReplayEntry(item, index, allItems) {
     img.src = item.movie.poster;
     img.alt = 'Poster';
     img.className = 'chain-poster';
+    // Swap to the designed placeholder if the poster fails to load —
+    // matches renderChainItems / renderAutocompleteResults so all three
+    // poster sites degrade identically (was the only one missing this).
+    attachPosterFallback(img, 'chain-poster');
     div.appendChild(img);
   } else {
     const placeholder = document.createElement('div');
