@@ -8,6 +8,21 @@
 // room.players[] entry with isBot:true and no socket.
 // ============================================================================
 
+// Only fs and path are safe to top-level require: all other modules
+// (matchSystem, redisUtils, gameLogic, pino) are lazy-required INSIDE
+// functions to avoid circular dependency at module load time.
+const fs = require('fs');
+const path = require('path');
+
+// TMDB auth headers from the process-global token — same construction as
+// server.js:265 and scripts/build-daily-movies.js:20. WHY here: the bot
+// scheduler is hooked into gameLogic.armTurnTimeout, which has no
+// ctx.TMDB_HEADERS in scope. Deriving from env keeps the hook signature
+// minimal and matches how the one-time daily-movies generator authenticates.
+function _tmdbHeaders() {
+  return { Authorization: `Bearer ${process.env.TMDB_READ_TOKEN}`, accept: 'application/json' };
+}
+
 // Difficulty = a named parameter set the move generator reads. NOT branching
 // code paths — just a profile object. WHY each knob:
 //   whiff          — per-turn probability the bot "blanks" even when a move
@@ -168,4 +183,124 @@ async function generateBotMove(room, profile, deps) {
   return null;
 }
 
-module.exports = { BOT_DIFFICULTIES, BOT_NAMES, createBot, generateBotMove };
+// In-process bot-move timers, keyed by lobbyId — the bot analogue of
+// gameLogic.activeTurnTimeouts. In-process (setTimeout handles aren't
+// serializable). Cross-instance double-fire is harmless: submitBotMove and
+// the whiff-eliminate both take the Redis submit lock, so only one wins; the
+// loser no-ops on the fresh-state re-check (same soft-lock family the turn
+// sweep solves).
+const activeBotTimeouts = new Map();
+
+function clearBotTimeout(lobbyId) {
+  if (activeBotTimeouts.has(lobbyId)) {
+    clearTimeout(activeBotTimeouts.get(lobbyId));
+    activeBotTimeouts.delete(lobbyId);
+  }
+}
+
+// First-move seed pool = the curated daily list (valid, popular by
+// construction). Read once and cached; a missing/corrupt file degrades to an
+// empty pool (bot whiffs its FIRST move only — never crashes boot). Same
+// tolerance posture as dailySystem's fallback.
+let _dailySeedCache = null;
+function _loadDailySeed() {
+  if (_dailySeedCache) return _dailySeedCache;
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'data', 'dailyMovies.json'), 'utf8');
+    const arr = JSON.parse(raw);
+    _dailySeedCache = Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    _dailySeedCache = [];
+  }
+  return _dailySeedCache;
+}
+
+/**
+ * Schedule the current bot's move. Called from gameLogic.armTurnTimeout (the
+ * single point a turn becomes active). No-op unless the current player is a
+ * bot. The fired timer RE-READS fresh lobby state and no-ops unless it's
+ * still that bot's turn — same defensive posture as the turn watchdog, so a
+ * stale fire after a disconnect/turn-change is harmless (this is why we don't
+ * need every clearTurnTimeout call site to also clear bot timers).
+ * `opts.rng` is injectable for deterministic tests.
+ */
+function scheduleBotMove(io, pubClient, lobbyId, state, opts = {}) {
+  const cur = state.players && state.players[state.currentTurnIndex];
+  if (!cur || !cur.isBot) return;
+  clearBotTimeout(lobbyId); // never stack two bot timers for one lobby
+
+  const rng = opts.rng || Math.random;
+  const profile = BOT_DIFFICULTIES[cur.difficulty] || BOT_DIFFICULTIES.normal;
+  // Uniform delay within the profile window. Kept under the turn timer so a
+  // non-whiff move lands in time; Easy's wide window + 0.45 whiff are what
+  // make it self-destruct (no special-case code — the existing watchdog
+  // eliminates a bot that somehow runs out the clock).
+  const delay = Math.floor(profile.delayMinMs + rng() * (profile.delayMaxMs - profile.delayMinMs));
+
+  const botId = cur.id;
+  const timer = setTimeout(async () => {
+    activeBotTimeouts.delete(lobbyId);
+    try {
+      // Re-read fresh — the turn may have advanced (human reconnect, sweep,
+      // elimination) while we waited. Mirror the watchdog's re-check.
+      const live = await pubClient_getLobby(pubClient, lobbyId);
+      if (!live || live.status !== 'playing' || live.isValidating) return;
+      const liveCur = live.players[live.currentTurnIndex];
+      if (!liveCur || liveCur.id !== botId || !liveCur.isAlive) return;
+
+      // Headers: env-derived by default (armTurnTimeout has no ctx headers);
+      // opts.headers lets tests inject without touching process.env.
+      const headers = opts.headers || _tmdbHeaders();
+      // Call via module.exports so jest.spyOn(botSystem,'generateBotMove')
+      // can intercept in tests — spyOn patches the exports property, not the
+      // closed-over local binding.
+      const move = await module.exports.generateBotMove(live, profile, {
+        pubClient,
+        headers,
+        rng,
+        getOrFetchPersonCredits: require('../redisUtils').getOrFetchPersonCredits,
+        dailySeed: _loadDailySeed(),
+      });
+
+      const matchSystem = require('./matchSystem'); // lazy: cycle-safe
+      if (move) {
+        await matchSystem.submitBotMove(
+          { io, pubClient, TMDB_HEADERS: headers, logger: require('pino')() },
+          lobbyId, botId, move
+        );
+        return;
+      }
+      // Whiff: eliminate gracefully UNDER the submit lock so it can't race a
+      // real submit/forceNextTurn (identical guard to the turn watchdog).
+      const redisUtils = require('../redisUtils');
+      const gameLogic = require('../gameLogic');
+      const token = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+      if (!token) return; // a submit is in flight; it will advance the turn
+      try {
+        const r2 = await redisUtils.getLobby(pubClient, lobbyId);
+        if (!r2 || r2.status !== 'playing') return;
+        const c2 = r2.players[r2.currentTurnIndex];
+        if (!c2 || c2.id !== botId || !c2.isAlive) return;
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, r2, "Bot couldn't find a move");
+      } finally {
+        await redisUtils.releaseSubmitLock(pubClient, lobbyId, token).catch(() => {});
+      }
+    } catch (e) {
+      // A bot-turn failure must never crash the process or the lobby — the
+      // turn watchdog is still armed and will eliminate the bot on timeout.
+      require('pino')().error(e, 'scheduleBotMove fire failed');
+    }
+  }, delay);
+  // .unref() so a pending bot timer never by itself pins a Jest worker / Node
+  // process past shutdown (same rationale as scheduleGameReset's .unref()).
+  if (typeof timer.unref === 'function') timer.unref();
+  activeBotTimeouts.set(lobbyId, timer);
+}
+
+// Tiny indirection so the fresh-read above is mockable without pulling the
+// whole redisUtils mock surface into scheduling tests.
+function pubClient_getLobby(pubClient, lobbyId) {
+  return require('../redisUtils').getLobby(pubClient, lobbyId);
+}
+
+module.exports = { BOT_DIFFICULTIES, BOT_NAMES, createBot, generateBotMove, scheduleBotMove, clearBotTimeout };
