@@ -697,6 +697,10 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
 
       // Identical commit path to submitMovie. commitPlay scores by id
       // (room.players.findIndex(p => p.id === botId)) so the bot id works.
+      // botPlayer was read from the pre-enrich room; id/name are immutable for
+      // the game's lifetime so this is safe, and it INTENTIONALLY mirrors
+      // submitMovie's identical pre-enrich `player` reference — the two paths
+      // must stay consistent (a shared fix belongs in both, tracked separately).
       commitPlay(room, botId, botPlayer, result.match, result.matchedActors, result.matchedActorObjects);
       // Spectator-prediction settle ('yes' = play succeeded), same as submitMovie.
       gameLogic.settlePredictions(io, lobbyId, room, 'yes');
@@ -705,6 +709,9 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
     } catch (err) {
       // Same shape as submitMovie's catch: clear the flag, then eliminate
       // (room-wide reason only). No socket to notify.
+      // No null-guard on this re-read: this INTENTIONALLY mirrors submitMovie's
+      // identical inner-catch cleanup. Keeping the two consistent matters more
+      // than hardening one side here; the shared hardening is tracked separately.
       room = await redisUtils.getLobby(pubClient, lobbyId);
       room.isValidating = false;
       await redisUtils.saveLobby(pubClient, lobbyId, room);

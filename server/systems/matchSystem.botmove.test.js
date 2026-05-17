@@ -72,3 +72,43 @@ test('exports the reusable pipeline helpers', () => {
     expect(typeof matchSystem[fn]).toBe('function');
   }
 });
+
+test('success path releases the submit lock exactly once', async () => {
+  const room = buildRoom();
+  redisUtils.getLobby.mockResolvedValue(room);
+  global.fetch.mockResolvedValueOnce({ json: async () => ({ id: 2, title: 'Second', release_date: '2005-01-01' }) });
+  redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 42, name: 'Shared' }] });
+  await matchSystem.submitBotMove(ctx, 'TEST', 'bot_1', { tmdbId: 2, mediaType: 'movie' });
+  // A leaked lock would freeze the lobby for every future move — assert release.
+  expect(redisUtils.releaseSubmitLock).toHaveBeenCalledTimes(1);
+  expect(redisUtils.releaseSubmitLock).toHaveBeenCalledWith(ctx.pubClient, 'TEST', 'token-bot');
+});
+
+test('isValidating is reset to false after a completed bot submit', async () => {
+  const room = buildRoom();
+  redisUtils.getLobby.mockResolvedValue(room);
+  global.fetch.mockResolvedValueOnce({ json: async () => ({ id: 2, title: 'Second', release_date: '2005-01-01' }) });
+  redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 42, name: 'Shared' }] });
+  await matchSystem.submitBotMove(ctx, 'TEST', 'bot_1', { tmdbId: 2, mediaType: 'movie' });
+  // A branch that sets isValidating but forgets to clear it would soft-lock the lobby.
+  expect(room.isValidating).toBe(false);
+});
+
+test('a mid-pipeline Redis throw eliminates the bot and still releases the lock', async () => {
+  // Force the inner-catch path by making the post-enrich getLobby re-read
+  // (inside the inner try) throw. enrichWithCredits completes successfully
+  // first, then getLobby throws, landing in submitBotMove's inner catch →
+  // bot eliminated + isValidating cleared + lock released via outer finally.
+  const room = buildRoom();
+  redisUtils.getLobby
+    .mockResolvedValueOnce(room)                              // pre-lock check
+    .mockResolvedValueOnce(room)                              // post-lock check (inside outer try)
+    .mockRejectedValueOnce(new Error('redis mid-pipeline'))  // post-enrich re-read (inner try) → throws to inner catch
+    .mockResolvedValue(room);                                 // inner-catch re-read for cleanup
+  global.fetch.mockResolvedValueOnce({ json: async () => ({ id: 2, title: 'Second', release_date: '2005-01-01' }) });
+  redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 42, name: 'Shared' }] });
+  await expect(matchSystem.submitBotMove(ctx, 'TEST', 'bot_1', { tmdbId: 2, mediaType: 'movie' })).resolves.not.toThrow();
+  expect(room.players.find(p => p.id === 'bot_1').isAlive).toBe(false);
+  expect(redisUtils.releaseSubmitLock).toHaveBeenCalledTimes(1);
+  expect(room.isValidating).toBe(false);
+});
