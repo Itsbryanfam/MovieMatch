@@ -907,4 +907,17 @@ document.addEventListener('DOMContentLoaded', () => {
     window.visualViewport.addEventListener('scroll', updateKeyboardOffset);
     updateKeyboardOffset();
   }
+
+  // =========================================================================
+  // SERVICE WORKER (Phase 4)
+  // =========================================================================
+  // Registered on `load` (not immediately) so it never competes with
+  // critical first-paint resources. Guarded + swallowed: a registration
+  // failure (unsupported browser, insecure context in some dev setups) must
+  // never break the app. The SW itself is network-first — see public/sw.js.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
 });
