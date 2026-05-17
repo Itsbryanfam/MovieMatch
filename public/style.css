@@ -135,7 +135,15 @@ body {
 
 #app-container {
   width: 100%;
-  max-width: 1200px;
+  /* The shell cap was 1200px, but the in-game 3-column layout-grid wants
+     ~240 + 1100 + 240 + gaps (~1660px) — at 1200px the sidebars (sized
+     in vw, see .layout-grid) grew on wide screens and crushed the center
+     board to a sliver, leaving the UI as three thin strips floating over
+     the poster carousel on ultrawide. Raised so the game screen can
+     actually reach its intended width. Hero (.hero-body max-width 1100)
+     and lobby (.lobby-panel max-width 380) self-center, so a wider shell
+     does not stretch them. */
+  max-width: 1800px;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -872,12 +880,15 @@ input:disabled {
 /* GAME LAYOUT */
 .layout-grid {
   display: grid;
-  /* Cap the center column at 1100px so the chain feed and input stay
-     ergonomic on ultrawide displays (3440px+). On 1920px the math is
-     220 + 1100 + 220 + gaps = ~1580px, leaving the rest of the screen
-     centered around the layout via justify-content. Sidebars use
-     minmax so they hold a comfortable width without sprawling. */
-  grid-template-columns: minmax(220px, 18vw) minmax(0, 1100px) minmax(220px, 18vw);
+  /* Center column caps at 1100px so the chain feed + input stay
+     ergonomic on ultrawide. The sidebars are now a BOUNDED pixel range
+     (240–300px) instead of 18vw: a vw width grew unbounded on wide
+     monitors and stole space from the center, which is the bug that
+     made the game board collapse to a sliver. Pixel-bounded sidebars
+     keep the center column the dominant, priority track at every width;
+     the whole grid is centered via justify-content so any extra
+     ultrawide space becomes symmetric margin, not a stretched sidebar. */
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1100px) minmax(240px, 300px);
   justify-content: center;
   gap: 1.5rem;
   flex: 1;
