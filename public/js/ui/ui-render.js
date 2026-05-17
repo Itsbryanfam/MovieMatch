@@ -7,7 +7,10 @@
 import { playSuccess } from '../utils.js';
 // Import socket helpers — renderLobby emits kickPlayer via the live socket.
 import { getSocket, getCurrentLobbyId } from '../state.js';
-// Import DOM refs — all live bindings assigned by initUIElements() in ui-dom.js.
+// Import DOM refs and shared helpers — live bindings assigned by
+// initUIElements() in ui-dom.js; attachPosterFallback lives in ui-dom
+// (leaf module) so both render and autocomplete can import it without
+// creating a sideways ui-autocomplete → ui-render coupling.
 import {
   modeChips, modeDescription, waitingRoom, teamScreen,
   lobbyCodeDisplay, lobbyPlayersList, lobbySettings,
@@ -17,6 +20,7 @@ import {
   gameScreen, gamePlayersList, chainDisplay,
   movieInput, submitBtn, inputArea, turnIndicator, hintText,
   MODE_DESCRIPTIONS,
+  attachPosterFallback,
 } from './ui-dom.js';
 // Import clearGhostAttempt — renderChainItems removes the ghost card when a
 // new chain entry arrives, which lives in the notifications module.
@@ -234,24 +238,6 @@ function renderPlayerSidebar(gameState, mode) {
     const activeLi = gamePlayersList.querySelector('.active-turn');
     if (activeLi) activeLi.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, 50);
-}
-
-// Audit #3: poster <img> error fallback. TMDB images can 404, be blocked
-// by strict networks, or simply fail to load — without this the browser
-// paints its native broken-image glyph + alt text inside the polished
-// card. The app already styles a `.placeholder` block for the
-// no-poster-URL case; on load failure we swap the dead <img> for that
-// same designed placeholder so the board never looks broken. posterClass
-// is the base class the placeholder shares with the image it replaces
-// (e.g. 'chain-poster' or 'mini-poster').
-function attachPosterFallback(img, posterClass) {
-  img.onerror = () => {
-    // Guard against re-entrancy: once swapped there's no <img> to error again.
-    if (!img.parentNode) return;
-    const placeholder = document.createElement('div');
-    placeholder.className = posterClass + ' placeholder';
-    img.replaceWith(placeholder);
-  };
 }
 
 // Appends only NEW chain items to the board (incremental — does not re-render existing ones).
@@ -633,8 +619,3 @@ export function showGameOverBanner(state, myPlayerId) {
   chainDisplay.appendChild(banner);
   chainDisplay.scrollTop = chainDisplay.scrollHeight;
 }
-
-// Re-export attachPosterFallback so ui-autocomplete.js can use it without
-// triggering a circular import (autocomplete → render → dom is fine;
-// it's only render → autocomplete that would be circular).
-export { attachPosterFallback };

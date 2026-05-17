@@ -3,11 +3,11 @@
 // socket-emit-on-click plumbing out of the general rendering functions and
 // makes it straightforward to swap or extend the dropdown behaviour.
 
-// Import DOM refs — live bindings written by initUIElements() in ui-dom.js.
-import { autocompleteContainer, mobileAcDropdown, movieInput, submitBtn, hintText } from './ui-dom.js';
-// Import attachPosterFallback — autocomplete item nodes use the same poster
-// fallback as the main chain board; it lives in ui-render.js (sole owner).
-import { attachPosterFallback } from './ui-render.js';
+// Import DOM refs and shared helpers — live bindings written by
+// initUIElements() in ui-dom.js; attachPosterFallback is a shared DOM
+// primitive that also lives here (leaf module) so this module has no
+// dependency on ui-render.js.
+import { autocompleteContainer, mobileAcDropdown, movieInput, submitBtn, hintText, attachPosterFallback } from './ui-dom.js';
 // Import socket helpers — click handler emits submitMovie via the live socket.
 import { getSocket, getCurrentLobbyId } from '../state.js';
 

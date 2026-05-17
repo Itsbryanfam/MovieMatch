@@ -105,3 +105,21 @@ export function initUIElements() {
   closeLeaderboard = document.getElementById('close-leaderboard');
   leaderboardList = document.getElementById('leaderboard-list');
 }
+
+// Shared low-level DOM helper used by ui-render (chain board) and
+// ui-autocomplete (suggestion items) — and available to any future ui-*
+// module. Lives here (the DOM-primitives leaf) so neither render nor
+// autocomplete depends on the other.
+// WHY: attaching a poster fallback is a pure DOM operation with no
+// game-state or render dependency; placing it in ui-render would force
+// ui-autocomplete to pull in render's whole transitive closure for a
+// 10-line helper, creating a bad sideways coupling.
+export function attachPosterFallback(img, posterClass) {
+  img.onerror = () => {
+    // Guard against re-entrancy: once swapped there's no <img> to error again.
+    if (!img.parentNode) return;
+    const placeholder = document.createElement('div');
+    placeholder.className = posterClass + ' placeholder';
+    img.replaceWith(placeholder);
+  };
+}
