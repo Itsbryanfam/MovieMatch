@@ -76,9 +76,14 @@ describe('createAdminLimiter (M3 — Redis-backed, fail-open)', () => {
     // increment call — proves the limiter doesn't propagate store errors as 500.
     RedisStore.lastInstance.__failNext = true;
     const res = await request(app).post('/api/admin/redis-stats').set('x-admin-secret', 'wrong');
-    // The request must NEVER be a 500 when the store errors. 403 means it
-    // fell through to the handler (fail-open); 429 would mean a previous
-    // count somehow triggered the limit before the error fired — also acceptable.
+    // The real guarantee here is "never 500 when the store throws". Each
+    // makeApp() builds a fresh createAdminLimiter() → a fresh FakeRedisStore
+    // with an empty hits map, so in this test 429 cannot actually occur (no
+    // prior hits exist to trigger the limit). The [403,429] assertion is kept
+    // intentionally broad so a future refactor that pre-seeds hits or reuses
+    // the app instance doesn't accidentally break this test; what we're
+    // proving is that a store error is handled gracefully (fail-open → 403
+    // from the route handler) and never propagated as a 500.
     expect([403, 429]).toContain(res.status); // never 500
   });
 });

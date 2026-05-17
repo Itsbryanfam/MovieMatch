@@ -17,21 +17,31 @@ const { RedisStore } = require('rate-limit-redis');
 function failOpen(store) {
   // Wraps each Store method so that any throw is caught and replaced with a
   // safe "allow" fallback value instead of propagating to a 500 error page.
+  // If `fallback` is a function (thunk) it is called at catch time so the
+  // returned value is freshly computed per fail-open call — not frozen at
+  // factory/boot time.
   const safe = (name, fallback) => async (...args) => {
     try { return await store[name](...args); }
-    catch { return fallback; }
+    catch { return typeof fallback === 'function' ? fallback() : fallback; }
   };
   const wrapped = {
-    // init is optional in the Store interface; call through only if present.
+    // init intentionally NOT wrapped by safe — if store.init() throws at
+    // factory time we WANT startup to crash loudly (a misconfiguration should
+    // never silently fail-open at request time). Only per-request store
+    // methods need the fail-open safety net.
     init: (opts) => { if (typeof store.init === 'function') store.init(opts); },
-    // increment: return totalHits: 1 (a valid positive integer below max:5) so
-    // the rateLimit check (totalHits > max) evaluates to false — every request
-    // is allowed through. Returning 0 triggers a validation warning from
-    // express-rate-limit v8 (must be positive integer); 1 is both valid and
-    // clearly below the ceiling, so the request passes cleanly.
-    increment: safe('increment', { totalHits: 1, resetTime: new Date(Date.now() + 15 * 60 * 1000) }),
+    // increment: the fallback is a THUNK so resetTime is computed fresh on
+    // each fail-open call. If it were a plain object literal the Date would be
+    // frozen at factory/boot time; after the first 15-min window the
+    // RateLimit-Reset header would report a time in the past (effectively 0),
+    // misleading clients about when they may retry. Thunking ensures the reset
+    // window is always 15 min from *now*. totalHits: 1 is a valid positive
+    // integer below max:5, so the rateLimit check (totalHits > max) is false —
+    // every fail-open request passes cleanly without a v8 validation warning.
+    increment: safe('increment', () => ({ totalHits: 1, resetTime: new Date(Date.now() + 15 * 60 * 1000) })),
     // decrement/resetKey: swallowing errors is correct — if they fail we
     // just leave a stale counter, which is harmless given fail-open mode.
+    // Fallback is `undefined` (not a thunk) — no timestamp to go stale.
     decrement: safe('decrement', undefined),
     resetKey: safe('resetKey', undefined),
   };
