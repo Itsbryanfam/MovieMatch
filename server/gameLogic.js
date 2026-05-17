@@ -21,27 +21,86 @@ function clearTurnTimeout(id) {
   }
 }
 
-function broadcastState(io, id, state) {
-  // L3: Roll the spectator-predictions map up into a tally before
-  // broadcasting. The raw map keys are socket ids — broadcasting them
-  // would let an observer correlate which spectator voted which way,
-  // which is needless surveillance. The tally is the only thing the
-  // client UI needs, and it's a tiny derived value.
+// Audit finding #2: true iff this lobby currently has a server-side turn
+// watchdog armed. Exported so the boot-recovery sweep (finding #6) and the
+// disconnect/rejoin paths can reason about enforcement without reaching
+// into the in-process map.
+function hasActiveTurnTimeout(id) {
+  return activeTurnTimeouts.has(id);
+}
+
+// Audit finding #2: the single place a turn watchdog is armed. Extracted
+// verbatim from nextTurn so startGame and rejoin can reuse the identical
+// lock-guarded behavior (no duplicated, drift-prone timeout logic).
+//
+// The watchdog eliminates the current player if the turn deadline passes
+// with no submit/forceNextTurn. It takes the submit lock first so it can't
+// double-eliminate or skip a turn racing submitMovie/forceNextTurn; if the
+// lock is held a submit is in flight and will advance the turn naturally.
+// The +4s over the client timer gives the client's forceNextTurn emit time
+// to land first, so the server only acts when the client is truly silent.
+function armTurnTimeout(io, pubClient, id, state) {
+  // Never stack two watchdogs for one lobby — replacing means clearing.
+  clearTurnTimeout(id);
+  const turnTimeMs = state.turnTime || 45000;
+  const timeoutId = setTimeout(async () => {
+    const lockToken = await redisUtils.acquireSubmitLock(pubClient, id);
+    if (!lockToken) {
+      activeTurnTimeouts.delete(id);
+      return;
+    }
+    try {
+      const liveRoom = await redisUtils.getLobby(pubClient, id);
+      // Re-check expiry on the FRESH state — another lock holder may have
+      // already advanced the turn, in which case turnExpiresAt is now in
+      // the future and we no-op.
+      if (liveRoom && liveRoom.status === 'playing' &&
+          liveRoom.turnExpiresAt && Date.now() > liveRoom.turnExpiresAt) {
+        await eliminateCurrentPlayer(io, pubClient, id, liveRoom, "Turn timed out");
+      }
+    } catch (err) {
+      logger.error(err, 'Timeout handler error');
+    } finally {
+      activeTurnTimeouts.delete(id);
+      await redisUtils.releaseSubmitLock(pubClient, id, lockToken).catch(() => {});
+    }
+  }, turnTimeMs + 4000);
+
+  activeTurnTimeouts.set(id, timeoutId);
+}
+
+// SECURITY (audit finding #1): the single source of truth for the
+// client-safe projection of a lobby. Extracted from broadcastState so the
+// rejoin path can reuse the EXACT same shape — previously rejoinSuccess
+// shipped the raw Redis room object, leaking every player's stableId (the
+// bearer secret that authenticates a rejoin) and the raw spectator list /
+// predictions map. Pure: it must not mutate `state` (the one-shot-flag
+// clearing stays in broadcastState, because a rejoin snapshot must not
+// consume another player's pending celebration).
+function toClientState(state) {
+  // L3: Roll the spectator-predictions map up into a tally. The raw map
+  // keys are socket ids — exposing them would let an observer correlate
+  // which spectator voted which way, which is needless surveillance. The
+  // tally is the only thing the client UI needs, and it's a tiny derived value.
   const rawPreds = state.spectatorPredictions || {};
   let tallyYes = 0, tallyNo = 0;
   for (const v of Object.values(rawPreds)) {
     if (v === 'yes') tallyYes++;
     else if (v === 'no') tallyNo++;
   }
-  const clientState = {
+  return {
     ...state,
+    // Strip stableId from every player — it's the rejoin bearer secret and
+    // must never leave the server in any client-bound payload.
     players: state.players.map(({ stableId, ...rest }) => rest),
+    // Never ship the raw spectator list (carries stableId + socket ids);
+    // only the connected count is needed by the UI.
     spectators: undefined,
     spectatorCount: (state.spectators || []).filter(s => s.connected).length,
     // Strip the raw predictions map; ship just the tally.
     spectatorPredictions: undefined,
     predictionTally: { yes: tallyYes, no: tallyNo },
-    chain: state.chain.map(item => ({
+    chain: (state.chain || []).map(item => ({
       playerId: item.playerId,
       playerName: item.playerName,
       movie: item.movie,
@@ -49,11 +108,19 @@ function broadcastState(io, id, state) {
     })),
     winner: state.winner || null
   };
+}
+
+function broadcastState(io, id, state) {
+  // Single client-safe projection — see toClientState for why this is the
+  // only place a lobby is allowed to be serialized toward a client.
+  const clientState = toClientState(state);
   io.to(id).emit('stateUpdate', clientState);
   // M5: One-shot solo flags are sent in this broadcast and then cleared
   // on the room so the NEXT broadcast (chat, reaction, etc.) doesn't
   // re-fire the same celebration. The client sees the flag exactly once,
   // animates it, and ignores subsequent state updates that don't carry it.
+  // Intentionally NOT inside toClientState: a rejoin snapshot must not
+  // consume the flag out from under the live broadcast.
   if (state.streakMilestone || state.objectiveJustHit) {
     state.streakMilestone = null;
     state.objectiveJustHit = false;
@@ -202,42 +269,45 @@ async function nextTurn(io, pubClient, id, state) {
 
   resetTimer(state);
 
-  // Server-side hard timeout: eliminates the current player if they haven't
-  // submitted by the time the client-side timer expires. The +4s grace period
-  // gives the client's forceNextTurn emit time to arrive and be processed first,
-  // so the server timeout only fires when the client is genuinely unreachable.
-  const turnTimeMs = state.turnTime || 45000;
-  const timeoutId = setTimeout(async () => {
-    // Take the submit lock before acting — without this, the watchdog races
-    // with submitMovie and forceNextTurn, which can double-eliminate or skip
-    // turns. If the lock is held, a submit is in flight and will advance the
-    // turn naturally; we should bail out and let it.
-    const lockToken = await redisUtils.acquireSubmitLock(pubClient, id);
-    if (!lockToken) {
-      activeTurnTimeouts.delete(id);
-      return;
-    }
-    try {
-      const liveRoom = await redisUtils.getLobby(pubClient, id);
-      // Re-check expiry on the FRESH state — another lock holder may have
-      // already advanced the turn, in which case turnExpiresAt is now in
-      // the future and we no-op.
-      if (liveRoom && liveRoom.status === 'playing' &&
-          liveRoom.turnExpiresAt && Date.now() > liveRoom.turnExpiresAt) {
-        await eliminateCurrentPlayer(io, pubClient, id, liveRoom, "Turn timed out");
-      }
-    } catch (err) {
-      logger.error(err, 'Timeout handler error');
-    } finally {
-      activeTurnTimeouts.delete(id);
-      await redisUtils.releaseSubmitLock(pubClient, id, lockToken).catch(() => {});
-    }
-  }, turnTimeMs + 4000);
-
-  activeTurnTimeouts.set(id, timeoutId);
+  // Audit finding #2: arm the server watchdog through the shared helper so
+  // startGame (first turn) and rejoin (current player returning within
+  // grace) get the exact same enforcement nextTurn does. Previously this
+  // block was inline here only, so the first turn of every game — and any
+  // turn after a bystander disconnect cleared the timer — had no server
+  // backstop and could be stalled forever by withholding forceNextTurn.
+  armTurnTimeout(io, pubClient, id, state);
 
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
+}
+
+// Audit finding #6: turn watchdogs (and reconnect-grace timers) live in an
+// in-process Map — game STATE is in Redis and survives a restart, but the
+// timers don't. After a deploy/crash/scale event an in-flight game would
+// sit in Redis with an expired turnExpiresAt and no process scheduled to
+// act on it (a soft-lock, same family as finding #2).
+//
+// This boot sweep re-arms a server watchdog for every still-playing lobby.
+// armTurnTimeout's watchdog re-reads fresh state and only eliminates if the
+// deadline has actually passed, so:
+//   - a turn that expired during the downtime resolves within one watchdog
+//     cycle instead of hanging forever,
+//   - a turn still within its timer keeps ticking normally.
+// Best-effort and idempotent — safe to call once at boot; a Redis hiccup
+// here must never prevent the server from starting.
+async function recoverActiveTurns(io, pubClient) {
+  let rearmed = 0;
+  try {
+    const lobbies = await redisUtils.getAllLobbies(pubClient);
+    for (const room of lobbies) {
+      if (!room || room.status !== 'playing') continue;
+      armTurnTimeout(io, pubClient, room.id, room);
+      rearmed++;
+    }
+  } catch (err) {
+    logger.error(err, 'recoverActiveTurns sweep failed');
+  }
+  return rearmed;
 }
 
 function promoteSpectators(state) {
@@ -619,6 +689,13 @@ async function startGame(io, pubClient, id, state) {
       .map(p => statsSystem.recordGamePlayed(pubClient, p.stableId, mode))
   ).catch(() => {});
 
+  // Audit finding #2: arm the server watchdog for the FIRST turn. Without
+  // this the opening turn had no server enforcement — the active client
+  // could stall the entire table indefinitely by never sending
+  // forceNextTurn. nextTurn arms every subsequent turn; this closes the
+  // first-turn hole with the identical helper.
+  armTurnTimeout(io, pubClient, id, state);
+
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
 }
@@ -694,6 +771,9 @@ function validateConnection(lastNodeCast, candidateCast, hardcoreMode, previousS
 
 module.exports = {
   broadcastState,
+  // Exported so the rejoin path emits the identical client-safe shape
+  // (audit finding #1 — no stableId / raw-spectator leak).
+  toClientState,
   eliminateTeam,
   eliminateCurrentPlayer,
   nextTurn,
@@ -702,6 +782,13 @@ module.exports = {
   startGame,
   validateConnection,
   clearTurnTimeout,
+  // Audit finding #2: shared watchdog arming + introspection, reused by
+  // startGame, nextTurn, rejoin, and the boot-recovery sweep (#6).
+  armTurnTimeout,
+  hasActiveTurnTimeout,
+  // Audit finding #6: boot-time re-arm of watchdogs for in-flight games
+  // (in-process timers don't survive a restart; Redis state does).
+  recoverActiveTurns,
   promoteSpectators,
   // L3: Exposed for matchSystem.commitPlay's success path. Internal
   // detail otherwise — kept underscore-prefixed in the implementation

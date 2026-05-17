@@ -54,6 +54,23 @@ const RATE_LIMITS = {
   // intent ("vote yes, then change to no, then back") through while still
   // rejecting any kind of automated tally manipulation.
   spectatorPredict: { limit: 3, windowMs: 30000 },
+  // Audit finding #5: events that previously had NO limiter. The README
+  // claimed "rate limiting on all events" — these close that gap.
+  //   rejoinLobby      — legit on flaky networks / refresh, but unthrottled
+  //                       it makes the finding-#1 leak/takeover surface
+  //                       loopable; 10/10s tolerates real reconnects.
+  //   publicLobbies    — each call fans into sMembers(activeLobbies)+mGet of
+  //                       every active lobby; the cheapest amplification
+  //                       lever in the app. 12/10s covers browser refreshes.
+  //   lobbyConfig      — shared bucket for all host settings + start/restart
+  //                       lifecycle events. Generous (30/10s) so a host
+  //                       clicking through options is never blocked, but a
+  //                       toggle-flood across any mix of them is still capped.
+  //   requestPosters   — pure cache read, but still a free socket round-trip.
+  rejoinLobby:   { limit: 10, windowMs: 10000 },
+  publicLobbies: { limit: 12, windowMs: 10000 },
+  lobbyConfig:   { limit: 30, windowMs: 10000 },
+  requestPosters:{ limit: 10, windowMs: 10000 },
 };
 
 // ---------------------------------------------------------------------------
@@ -141,7 +158,10 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // POSTERS
     // -----------------------------------------------------------------------
 
-    on('requestPosters', () => {
+    on('requestPosters', async () => {
+      // Audit finding #5: previously unthrottled. Cheap (cache read) but
+      // still a free server round-trip a client could spin on.
+      if (await rateLimit(socket.id, 'requestPosters', RATE_LIMITS.requestPosters.limit, RATE_LIMITS.requestPosters.windowMs)) return;
       const cached = posterCache.getPosters();
       if (cached.length > 0) socket.emit('posters', cached);
     });
@@ -160,41 +180,59 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       await lobbySystem.joinLobby(ctx, socket, { name, lobbyId, stableId });
     });
 
+    // Audit finding #5: lobbyConfig is a shared per-socket bucket for the
+    // rejoin + all host settings + start/restart lifecycle events. One
+    // helper keeps the gate uniform so no handler can silently ship
+    // unthrottled again.
+    const lobbyConfigLimited = async () =>
+      rateLimit(socket.id, 'lobbyConfig', RATE_LIMITS.lobbyConfig.limit, RATE_LIMITS.lobbyConfig.windowMs);
+
     on('rejoinLobby', async (data) => {
+      // Dedicated bucket (not lobbyConfig): reconnects have a different
+      // legitimate cadence, and this is the loop guard for finding #1.
+      if (await rateLimit(socket.id, 'rejoinLobby', RATE_LIMITS.rejoinLobby.limit, RATE_LIMITS.rejoinLobby.windowMs)) return;
       await lobbySystem.rejoinLobby(ctx, socket, data);
     });
 
     on('setGameMode', async (data) => {
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.setGameMode(ctx, socket, data);
     });
 
     on('setTheme', async (data) => {
       // L1: Host-only setter; lobbySystem validates the theme id against
       // the whitelist so a buggy/malicious client can't write garbage.
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.setTheme(ctx, socket, data);
     });
 
     on('assignTeam', async (data) => {
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.assignTeam(ctx, socket, data);
     });
 
     on('togglePublic', async (data) => {
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.toggleSetting(ctx, socket, data, 'isPublic');
     });
 
     on('toggleHardcore', async (data) => {
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.toggleSetting(ctx, socket, data, 'hardcoreMode');
     });
 
     on('toggleTvShows', async (data) => {
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.toggleSetting(ctx, socket, data, 'allowTvShows');
     });
 
     on('startLobby', async (lobbyId) => {
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.startLobby(ctx, socket, lobbyId);
     });
 
     on('restartLobby', async (lobbyId) => {
+      if (await lobbyConfigLimited()) return;
       await lobbySystem.restartLobby(ctx, socket, lobbyId);
     });
 
@@ -253,6 +291,10 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     });
 
     on('requestPublicLobbies', async () => {
+      // Audit finding #5: this fans into sMembers(activeLobbies) + mGet of
+      // every active lobby — the cheapest Redis amplification lever in the
+      // app, so it must be throttled.
+      if (await rateLimit(socket.id, 'publicLobbies', RATE_LIMITS.publicLobbies.limit, RATE_LIMITS.publicLobbies.windowMs)) return;
       await lobbySystem.requestPublicLobbies(ctx, socket);
     });
 
@@ -300,15 +342,15 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (!sender) return;
       const isSpectator = !room.players.find(p => p.id === socket.id);
       io.to(lobbyId).emit('receiveChat', { playerName: sender.name, msg, isSpectator });
-      // M4: bump the per-lobby chat counter so the public-lobby browser
-      // can render a "chatty / casual / quiet" vibe tag. Cheap field
-      // mutation — one extra Redis write per chat message, batched into
-      // a single saveLobby. Fire-and-forget so a Redis blip during chat
-      // doesn't propagate to the broadcast above.
-      try {
-        room.chatCount = (room.chatCount | 0) + 1;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
-      } catch {}
+      // M4: bump the per-lobby chat counter so the public-lobby browser can
+      // render a "chatty / casual / quiet" vibe tag. Audit finding #4: do
+      // the increment under the per-lobby lock so two chats in the same
+      // window don't both read the same count and lose one (the vibe tag
+      // would under-report). Still fire-and-forget — a Redis blip on the
+      // counter must not affect the chat broadcast above.
+      redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+        r.chatCount = (r.chatCount | 0) + 1;
+      }).catch(() => {});
     });
 
     on('sendReaction', async ({ lobbyId, emoji }) => {
@@ -331,23 +373,29 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     on('spectatorPredict', async ({ lobbyId, prediction }) => {
       if (await rateLimit(socket.id, 'spectatorPredict', RATE_LIMITS.spectatorPredict.limit, RATE_LIMITS.spectatorPredict.windowMs)) return;
       if (prediction !== 'yes' && prediction !== 'no') return;
-      const room = await redisUtils.getLobby(pubClient, lobbyId);
-      if (!room || room.status !== 'playing') return;
-      // Spectator-only — players can't vote on their own table since they
-      // know what they're going to play. Limits the spectator-prediction
-      // game to actual observers and keeps the tally meaningful.
-      const isPlayer = room.players.some(p => p.id === socket.id);
-      const isSpectator = !isPlayer && (room.spectators || []).some(s => s.id === socket.id);
-      if (!isSpectator) return;
-      // Allow vote-changing within the rate limit — overwrite the prior
-      // vote rather than reject. Spectators reading the tally evolve their
-      // confidence through the turn and shouldn't be locked to a first guess.
-      if (!room.spectatorPredictions || typeof room.spectatorPredictions !== 'object') {
-        room.spectatorPredictions = {};
-      }
-      room.spectatorPredictions[socket.id] = prediction;
-      await redisUtils.saveLobby(pubClient, lobbyId, room);
-      gameLogic.broadcastState(io, lobbyId, room);
+      // Audit finding #4: the predictions map is a read-modify-write on the
+      // lobby blob — concurrent votes from different spectators would lose
+      // entries (the tally would under-count). Serialize under the lock.
+      // The mutator returns false (no save/broadcast) for the not-playing /
+      // not-a-spectator cases, matching the old early-returns.
+      let voted = false;
+      const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+        if (r.status !== 'playing') return false;
+        // Spectator-only — players can't vote on their own table since they
+        // know what they're going to play. Keeps the tally meaningful.
+        const isPlayer = r.players.some(p => p.id === socket.id);
+        const isSpectator = !isPlayer && (r.spectators || []).some(s => s.id === socket.id);
+        if (!isSpectator) return false;
+        // Allow vote-changing within the rate limit — overwrite the prior
+        // vote rather than reject. Spectators reading the tally evolve their
+        // confidence through the turn and shouldn't be locked to a first guess.
+        if (!r.spectatorPredictions || typeof r.spectatorPredictions !== 'object') {
+          r.spectatorPredictions = {};
+        }
+        r.spectatorPredictions[socket.id] = prediction;
+        voted = true;
+      });
+      if (voted && room) gameLogic.broadcastState(io, lobbyId, room);
     });
 
     // -----------------------------------------------------------------------

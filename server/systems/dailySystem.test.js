@@ -176,3 +176,66 @@ describe('dailySystem.finalizeDailyAttempt', () => {
     expect(mockPubClient.multi).not.toHaveBeenCalled();
   });
 });
+
+// Audit finding #7: startDailyChallenge NX-claims the attempt BEFORE the
+// TMDB seed bootstrap. If TMDB is briefly unreachable the claim used to be
+// left as 'in_progress', locking the player out of that whole UTC day even
+// though they never actually got to play. releaseInProgressAttempt is the
+// rollback: delete the just-claimed slot iff it's still in_progress and is
+// the same attempt we created (startedAt match), so a transient outage is
+// retryable but a real finished run is never destroyed.
+describe('dailySystem.releaseInProgressAttempt', () => {
+  test('deletes the attempt when it is still in_progress and startedAt matches', async () => {
+    const attempt = {
+      date: '2026-05-04', stableId: 'p_test', name: 'Tester',
+      status: 'in_progress', chainLength: 0, startedAt: 1700000000000, seedMovieId: 27205,
+    };
+    const mockPubClient = {
+      get: jest.fn().mockResolvedValue(JSON.stringify(attempt)),
+      del: jest.fn().mockResolvedValue(1),
+    };
+
+    const released = await dailySystem.releaseInProgressAttempt(
+      mockPubClient, 'p_test', '2026-05-04', 1700000000000
+    );
+
+    expect(released).toBe(true);
+    expect(mockPubClient.del).toHaveBeenCalledWith('daily:attempt:2026-05-04:p_test');
+  });
+
+  test('never deletes a finished (done) attempt', async () => {
+    const done = {
+      date: '2026-05-04', stableId: 'p_test', name: 'Tester',
+      status: 'done', chainLength: 9, startedAt: 1700000000000, endedAt: 1700000300000,
+    };
+    const mockPubClient = {
+      get: jest.fn().mockResolvedValue(JSON.stringify(done)),
+      del: jest.fn().mockResolvedValue(1),
+    };
+
+    const released = await dailySystem.releaseInProgressAttempt(
+      mockPubClient, 'p_test', '2026-05-04', 1700000000000
+    );
+
+    expect(released).toBe(false);
+    expect(mockPubClient.del).not.toHaveBeenCalled();
+  });
+
+  test('does not delete when startedAt differs (a newer attempt replaced it)', async () => {
+    const newer = {
+      date: '2026-05-04', stableId: 'p_test', name: 'Tester',
+      status: 'in_progress', chainLength: 0, startedAt: 1700009999999,
+    };
+    const mockPubClient = {
+      get: jest.fn().mockResolvedValue(JSON.stringify(newer)),
+      del: jest.fn().mockResolvedValue(1),
+    };
+
+    const released = await dailySystem.releaseInProgressAttempt(
+      mockPubClient, 'p_test', '2026-05-04', 1700000000000
+    );
+
+    expect(released).toBe(false);
+    expect(mockPubClient.del).not.toHaveBeenCalled();
+  });
+});

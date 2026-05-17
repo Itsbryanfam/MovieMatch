@@ -78,66 +78,69 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
   );
   const isNewLobby = wonCreateRace === 'OK';
 
-  // If we just created the lobby, use our in-memory copy directly — no point
-  // re-fetching what we just wrote. If another caller won the race, fetch
-  // their canonical state.
-  let room = isNewLobby ? initialRoom : await redisUtils.getLobby(pubClient, id);
-  if (!room) {
-    // The key existed during NX (we lost the race) but expired before we
-    // could re-fetch. Extremely rare; bail rather than silently retry.
+  // Audit finding #4: the NX-create above only prevents double-CREATION.
+  // A second player joining the SAME id still did getLobby→push→saveLobby
+  // and the two saves raced — one player silently dropped from the array
+  // (Codex's headline lost-update example). Do the whole
+  // read→decide→append→save inside the per-lobby lock so concurrent joins
+  // compose. getPlayerWins (one GET) runs inside the lock; the section is
+  // still far shorter than the submit lock's TMDB round-trips.
+  let outcome = 'unavailable'; // 'player' | 'spectator' | 'full' | 'unavailable'
+  const room = await redisUtils.withLobbyLock(pubClient, id, async (r) => {
+    // Spectator path: game already in progress — join as a watcher.
+    if (r.status !== 'waiting') {
+      if (!r.spectators) r.spectators = [];
+      const wins = await redisUtils.getPlayerWins(pubClient, stableId);
+      r.spectators.push({ id: socket.id, name, stableId, connected: true, wins });
+      outcome = 'spectator';
+      return;
+    }
+    // 8-player hard cap. (A brand-new lobby has 0 players, so this never
+    // wrongly rejects the creator — the old !isNewLobby guard was just an
+    // optimization for that always-false case.)
+    if (r.players.length >= 8) { outcome = 'full'; return false; }
+    const isHost = r.players.length === 0;
+    const teamId = r.players.length % 2;
+    const wins = await redisUtils.getPlayerWins(pubClient, stableId);
+    r.players.push({
+      id: socket.id, name, isHost, isAlive: true, connected: true,
+      score: 0, wins, teamId, stableId,
+    });
+    outcome = 'player';
+  }, { seedRoom: isNewLobby ? initialRoom : undefined });
+
+  if (!room || outcome === 'unavailable') {
+    // Lost the NX race and the key expired before the lock read it.
+    // Extremely rare; bail rather than silently retry.
     return socket.emit('error', 'Lobby unavailable — please try again.');
   }
-
-  // Spectator path: join as watcher if game is in progress
-  if (room.status !== 'waiting') {
-    if (!room.spectators) room.spectators = [];
-    const existingWins = await redisUtils.getPlayerWins(pubClient, stableId);
-    room.spectators.push({ id: socket.id, name, stableId, connected: true, wins: existingWins });
-
-    await redisUtils.setSocketLobby(pubClient, socket.id, id);
-    await redisUtils.saveLobby(pubClient, id, room);
-    socket.join(id);
-    socket.emit('joined', { lobbyId: id, playerId: socket.id, isSpectator: true });
-
-    const cached = posterCache.getPosters();
-    if (cached.length > 0) socket.emit('posters', cached);
-
-    gameLogic.broadcastState(io, id, room);
-    return;
-  }
-
-  if (!isNewLobby && room.players.length >= 8) {
+  if (outcome === 'full') {
     return socket.emit('error', 'Lobby is full (8 player maximum).');
   }
 
-  const isHost = room.players.length === 0;
-  const teamId = room.players.length % 2;
-  room.players.push({
-    id: socket.id, name, isHost, isAlive: true, connected: true, score: 0, wins: 0, teamId, stableId
-  });
-  const existingWins = await redisUtils.getPlayerWins(pubClient, stableId);
-  room.players[room.players.length - 1].wins = existingWins;
-
+  // Side-effects AFTER the lock — none of these touch lobby state, so they
+  // must not extend the critical section.
   await redisUtils.setSocketLobby(pubClient, socket.id, id);
   if (isNewLobby) await redisUtils.addToActiveLobbies(pubClient, id);
-
-  await redisUtils.saveLobby(pubClient, id, room);
   socket.join(id);
-  socket.emit('joined', { lobbyId: id, playerId: socket.id });
 
-  // H6: Telemetry — only fires on the first join (which created the lobby),
-  // not on subsequent joins to an existing lobby. The `mode` field is the
-  // initial mode at creation time; if the host changes it later we'll see
-  // the change reflected in the `game_started` event.
-  if (isNewLobby) {
-    telemetry.track(pubClient, 'lobby_created', {
-      mode: room.gameMode,
-      isPublic: !!room.isPublic,
-    });
+  if (outcome === 'spectator') {
+    socket.emit('joined', { lobbyId: id, playerId: socket.id, isSpectator: true });
+  } else {
+    socket.emit('joined', { lobbyId: id, playerId: socket.id });
+    // H6: Telemetry — only on the first join (the one that created the
+    // lobby). A new lobby is always 'waiting', so this is unreachable on
+    // the spectator path by construction.
+    if (isNewLobby) {
+      telemetry.track(pubClient, 'lobby_created', {
+        mode: room.gameMode,
+        isPublic: !!room.isPublic,
+      });
+    }
   }
 
-  const playerPosters = posterCache.getPosters();
-  if (playerPosters.length > 0) socket.emit('posters', playerPosters);
+  const cached = posterCache.getPosters();
+  if (cached.length > 0) socket.emit('posters', cached);
 
   gameLogic.broadcastState(io, id, room);
 }
@@ -191,8 +194,26 @@ async function rejoinLobby(ctx, socket, { lobbyId, playerId, stableId }) {
     await redisUtils.deleteSocketLobby(pubClient, oldSocketId);
   }
 
+  // Audit finding #2: if THIS player is the current turn holder and the
+  // game is live, re-arm the server watchdog. handleDisconnect cleared it
+  // when they dropped (so it couldn't double-eliminate with the grace
+  // timer); without re-arming here, a player who disconnects and reconnects
+  // within the 15s grace would resume their turn with no server backstop —
+  // the same soft-lock this finding is about. armTurnTimeout self-clears
+  // any stale handle, so this is safe even if one somehow survived.
+  if (room.status === 'playing' && room.players[room.currentTurnIndex]?.id === socket.id) {
+    gameLogic.armTurnTimeout(io, pubClient, lobbyId, room);
+  }
+
   socket.join(lobbyId);
-  socket.emit('rejoinSuccess', { lobbyId, playerId: socket.id, state: room });
+  // SECURITY (audit finding #1): emit the client-safe projection, NOT the
+  // raw Redis room. The raw object carries every player's stableId (the
+  // rejoin bearer secret) plus the raw spectator list; sending it let any
+  // participant harvest all stableIds and then take over any slot — host
+  // included. toClientState is the same shape broadcastState uses, so the
+  // client (which already consumes that shape on every stateUpdate) needs
+  // no changes.
+  socket.emit('rejoinSuccess', { lobbyId, playerId: socket.id, state: gameLogic.toClientState(room) });
   gameLogic.broadcastState(io, lobbyId, room);
 }
 
@@ -204,12 +225,18 @@ async function setGameMode(ctx, socket, { lobbyId, mode }) {
   const { io, pubClient } = ctx;
   const validModes = ['classic', 'team', 'solo', 'speed'];
   if (!validModes.includes(mode)) return;
-  const room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (!room || room.status !== 'waiting') return;
-  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
-  room.gameMode = mode;
-  await redisUtils.saveLobby(pubClient, lobbyId, room);
-  gameLogic.broadcastState(io, lobbyId, room);
+  // Audit finding #4: do the read-check-mutate-save under the per-lobby
+  // lock so a simultaneous join / other settings change can't clobber it.
+  // The mutator returns false (→ no save, no broadcast) for the not-waiting
+  // / not-host cases, exactly matching the old early-return behavior.
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    r.gameMode = mode;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
 // L1: Host-only setter for the lobby theme. Validated against the
@@ -220,34 +247,43 @@ async function setTheme(ctx, socket, { lobbyId, theme }) {
   const { io, pubClient } = ctx;
   const themesSystem = require('./themesSystem');
   if (!themesSystem.isValidTheme(theme)) return;
-  const room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (!room || room.status !== 'waiting') return;
-  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
-  room.theme = theme;
-  await redisUtils.saveLobby(pubClient, lobbyId, room);
-  gameLogic.broadcastState(io, lobbyId, room);
+  // Audit finding #4: serialized read-modify-write (see setGameMode).
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    r.theme = theme;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
 async function assignTeam(ctx, socket, { lobbyId, teamId }) {
   const { io, pubClient } = ctx;
   if (teamId !== 0 && teamId !== 1) return;
-  const room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (!room || room.status !== 'waiting') return;
-  const player = room.players.find(p => p.id === socket.id);
-  if (!player) return;
-  player.teamId = teamId;
-  await redisUtils.saveLobby(pubClient, lobbyId, room);
-  gameLogic.broadcastState(io, lobbyId, room);
+  // Audit finding #4: serialized read-modify-write (see setGameMode).
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    const player = r.players.find(p => p.id === socket.id);
+    if (!player) return false;
+    player.teamId = teamId;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
 async function toggleSetting(ctx, socket, { lobbyId, state: enabled }, field) {
   const { io, pubClient } = ctx;
-  const room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (!room || room.status !== 'waiting') return;
-  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
-  room[field] = !!enabled;
-  await redisUtils.saveLobby(pubClient, lobbyId, room);
-  gameLogic.broadcastState(io, lobbyId, room);
+  // Audit finding #4: serialized read-modify-write (see setGameMode).
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    r[field] = !!enabled;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
 // ---------------------------------------------------------------------------
@@ -256,24 +292,28 @@ async function toggleSetting(ctx, socket, { lobbyId, state: enabled }, field) {
 
 async function kickPlayer(ctx, socket, { lobbyId, targetId }) {
   const { io, pubClient } = ctx;
-  const room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (!room || room.status !== 'waiting') return;
-  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
   if (targetId === socket.id) return; // can't kick yourself
+  // Audit finding #4: removing a player from the array is a read-modify-
+  // write; under the lock so a concurrent join/settings change can't
+  // resurrect the kicked player by saving a stale snapshot on top.
+  let kicked = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    if (!r.players.find(p => p.id === targetId)) return false;
+    r.players = r.players.filter(p => p.id !== targetId);
+    kicked = true;
+  });
+  if (!kicked || !room) return;
 
-  const target = room.players.find(p => p.id === targetId);
-  if (!target) return;
-
-  room.players = room.players.filter(p => p.id !== targetId);
-  await redisUtils.saveLobby(pubClient, lobbyId, room);
+  // Socket-side effects happen AFTER the lock is released — they don't
+  // touch lobby state and shouldn't extend the critical section.
   await redisUtils.deleteSocketLobby(pubClient, targetId);
-
   const targetSocket = io.sockets.sockets.get(targetId);
   if (targetSocket) {
     targetSocket.emit('kicked', 'You were removed from the lobby.');
     targetSocket.leave(lobbyId);
   }
-
   gameLogic.broadcastState(io, lobbyId, room);
 }
 
@@ -284,9 +324,16 @@ async function kickPlayer(ctx, socket, { lobbyId, targetId }) {
 async function startLobby(ctx, socket, lobbyId) {
   const { io, pubClient } = ctx;
   const room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (room && room.players.find(p => p.id === socket.id)?.isHost) {
-    await gameLogic.startGame(io, pubClient, lobbyId, room);
-  }
+  if (!room) return;
+  // SECURITY (audit finding #3): only the host may start, and ONLY from the
+  // waiting room. Without the status gate a stray/duplicate startLobby (or a
+  // malicious client that took the host slot) re-runs startGame on a live or
+  // finished match, wiping chain/usedMovies, reviving the dead, and zeroing
+  // scores. Mirrors the room.status checks every other host-only mutator
+  // (setGameMode/kickPlayer/restartLobby) already enforces.
+  if (room.status !== 'waiting') return;
+  if (!room.players.find(p => p.id === socket.id)?.isHost) return;
+  await gameLogic.startGame(io, pubClient, lobbyId, room);
 }
 
 // ---------------------------------------------------------------------------
@@ -359,10 +406,14 @@ async function startDailyChallenge(ctx, socket, { name, stableId }) {
     };
   } catch {
     // TMDB unreachable on the bootstrap call — bail rather than start a
-    // broken daily run. The attempt key was claimed via NX, so leave it as
-    // in_progress (it'll auto-expire) and let the player retry tomorrow or
-    // contact support. Note: NOT idempotent if TMDB recovers in the next
-    // few hours — they'd be locked out of today's puzzle.
+    // broken daily run. Audit finding #7: the attempt was NX-claimed BEFORE
+    // this fetch, so without a rollback a transient TMDB blip would lock the
+    // player out of today's puzzle entirely. Release the in-progress claim
+    // (compare-and-delete: only if still in_progress AND the same attempt we
+    // just created) so a retry can start cleanly once TMDB recovers.
+    await dailySystem.releaseInProgressAttempt(
+      pubClient, stableId, date, claim.attempt && claim.attempt.startedAt
+    );
     return socket.emit('error', "Couldn't reach the movie database. Please try again later.");
   }
 
@@ -465,22 +516,23 @@ async function finalizeDailyOnGameEnd(pubClient, room) {
 
 async function restartLobby(ctx, socket, lobbyId) {
   const { io, pubClient } = ctx;
-  const room = await redisUtils.getLobby(pubClient, lobbyId);
-  if (!room) return;
-  const player = room.players.find(p => p.id === socket.id);
-  if (!player?.isHost) return;
-  if (room.status !== 'finished') return;
-
-  room.status = 'waiting';
-  room.chain = [];
-  room.usedMovies = [];
-  room.winner = null;
-  room.timerMultiplier = 0;
-  room.previousSharedActors = [];
-  room.players.forEach(p => { p.isAlive = true; p.score = 0; });
-  gameLogic.promoteSpectators(room);
-  await redisUtils.saveLobby(pubClient, lobbyId, room);
-  gameLogic.broadcastState(io, lobbyId, room);
+  // Audit finding #4: serialized so a late join / disconnect landing during
+  // the reset can't be lost (or resurrect cleared game state).
+  let restarted = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    if (r.status !== 'finished') return false;
+    r.status = 'waiting';
+    r.chain = [];
+    r.usedMovies = [];
+    r.winner = null;
+    r.timerMultiplier = 0;
+    r.previousSharedActors = [];
+    r.players.forEach(p => { p.isAlive = true; p.score = 0; });
+    gameLogic.promoteSpectators(r);
+    restarted = true;
+  });
+  if (restarted && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
 // ---------------------------------------------------------------------------
@@ -619,8 +671,21 @@ async function handleDisconnect(ctx, socketId) {
       return;
     }
 
-    // Stop the turn timer so a disconnecting player doesn't trigger a double-elimination
-    gameLogic.clearTurnTimeout(lobbyId);
+    // Audit finding #2: only clear the turn watchdog if the disconnecting
+    // socket is the CURRENT turn holder. Clearing it unconditionally (the
+    // old behavior) meant a bystander dropping their connection wiped the
+    // active player's only server-side timer, leaving that turn advanceable
+    // solely by the active client's forceNextTurn — a soft-lock lever.
+    // When the current player is the one leaving we DO clear it: the 15s
+    // grace timer below owns their elimination, and a live watchdog would
+    // double-eliminate. (The grace→eliminate→nextTurn path re-arms for the
+    // next player; rejoinLobby re-arms if they return within grace.)
+    const disconnectingIsCurrentTurn =
+      room.status === 'playing' &&
+      room.players[room.currentTurnIndex]?.id === socketId;
+    if (room.status !== 'playing' || disconnectingIsCurrentTurn) {
+      gameLogic.clearTurnTimeout(lobbyId);
+    }
 
     // In playing state we use a grace period — keep the player alive while they try to reconnect.
     // In all other states, mark them dead immediately.

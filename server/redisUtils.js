@@ -240,6 +240,74 @@ async function recordPlayerWinAtomic(pubClient, stableId, name) {
     .exec();
 }
 
+// ============================================================================
+// Audit finding #4: per-lobby mutation mutex.
+// ============================================================================
+// Every lobby write is a full-blob read-modify-write on lobby:${id}. Two
+// events that interleave inside the get→mutate→setEx window silently drop
+// one update — the canonical symptom being two players joining the same
+// lobby simultaneously and only one landing in the players array. The
+// submit pipeline already serializes via acquireSubmitLock; this is the
+// same primitive (SET NX + Lua compare-and-delete, reusing
+// SUBMIT_LOCK_RELEASE_SCRIPT) generalized for the OTHER mutators.
+//
+// withLobbyLock(pubClient, id, mutator):
+//   - acquires lock:lobbymut:${id} (PX TTL so a crashed holder self-frees —
+//     no permanent deadlock),
+//   - re-reads the lobby INSIDE the lock (the read must be inside, or the
+//     mutation is based on a pre-lock snapshot and the race is back),
+//   - runs `await mutator(room)` (mutate `room` in place),
+//   - persists unless the mutator returns exactly false (the uniform "I
+//     decided not to change anything — e.g. caller wasn't the host" signal),
+//   - returns the (possibly mutated) room so the caller can broadcast it,
+//     or null if the lobby was gone.
+const LOBBY_MUTEX_PREFIX = 'lock:lobbymut:';
+const LOBBY_MUTEX_TTL_MS = 5000;
+
+// opts.seedRoom: used ONLY when getLobby returns null. joinLobby just
+// NX-created the key, so in production the in-lock read finds it; the seed
+// preserves the old `isNewLobby ? initialRoom : getLobby` semantic (and
+// keeps a brand-new lobby working if a read-after-write is briefly empty).
+// Without a seed, a null read means "lobby gone" → return null (callers
+// surface "unavailable"), exactly the pre-fix behavior for existing lobbies.
+async function withLobbyLock(pubClient, id, mutator, opts = {}) {
+  const token = require('crypto').randomBytes(16).toString('hex');
+  const lockKey = `${LOBBY_MUTEX_PREFIX}${id}`;
+
+  // Bounded spin-acquire. Lobby critical sections are sub-millisecond, so a
+  // contended caller normally gets in within a spin or two. If we exhaust
+  // the budget (a holder is pathologically slow, or died and we're waiting
+  // on the PX TTL) we proceed UNLOCKED rather than drop the user's action
+  // entirely — same best-effort tradeoff getOrFetchCredits makes for its
+  // stampede lock. The PX TTL bounds worst-case staleness.
+  let acquired = false;
+  for (let i = 0; i < 25; i++) {
+    const res = await pubClient.set(lockKey, token, { NX: true, PX: LOBBY_MUTEX_TTL_MS });
+    if (res === 'OK') { acquired = true; break; }
+    await new Promise(r => setTimeout(r, 20));
+  }
+
+  try {
+    const room = await getLobby(pubClient, id) || opts.seedRoom || null;
+    if (!room) return null;
+    const result = await mutator(room);
+    if (result !== false) {
+      await saveLobby(pubClient, id, room);
+    }
+    return room;
+  } finally {
+    if (acquired) {
+      // Compare-and-delete: only release if WE still hold it. If our section
+      // overran the PX TTL and someone else acquired, this is a no-op — we
+      // must never delete a successor's lock.
+      await pubClient.eval(SUBMIT_LOCK_RELEASE_SCRIPT, {
+        keys: [lockKey],
+        arguments: [token],
+      }).catch(() => {});
+    }
+  }
+}
+
 async function getLeaderboard(pubClient, limit = 20) {
   // Top-N by score, descending (REV: true).
   const results = await pubClient.zRangeWithScores('leaderboard', 0, limit - 1, { REV: true });
@@ -270,6 +338,34 @@ async function getLeaderboard(pubClient, limit = 20) {
   return live;
 }
 
+// Audit finding #10: full-ZSET prune for the global leaderboard. The ZSET
+// itself has no TTL, and getLeaderboard only lazy-prunes the top-N slice it
+// reads — so a winner who never re-enters the top-N and then goes inactive
+// >30d (their playerName:* key expires) is orphaned in the ZSET forever.
+// This walks the WHOLE set with ZSCAN (cursor-paged, COUNT-bounded so it
+// never blocks Redis) and removes any member whose name key is gone — the
+// same "name expired ⇒ inactive" signal getLeaderboard already trusts.
+// Called on a slow timer + via an admin endpoint; safe to run repeatedly.
+async function pruneLeaderboard(pubClient) {
+  let cursor = 0;
+  let removedTotal = 0;
+  do {
+    const res = await pubClient.zScan('leaderboard', cursor, { COUNT: 200 });
+    cursor = Number(res.cursor);
+    const members = res.members || [];
+    if (members.length > 0) {
+      const ids = members.map(m => m.value);
+      const names = await pubClient.mGet(ids.map(v => `playerName:${v}`));
+      const stale = ids.filter((_, i) => names[i] === null || names[i] === undefined);
+      if (stale.length > 0) {
+        await pubClient.zRem('leaderboard', stale).catch(() => {});
+        removedTotal += stale.length;
+      }
+    }
+  } while (cursor !== 0);
+  return removedTotal;
+}
+
 module.exports = {
   getLobby,
   saveLobby,
@@ -286,6 +382,10 @@ module.exports = {
   getOrFetchCredits,
   acquireSubmitLock,
   releaseSubmitLock,
+  // Audit finding #4: per-lobby mutation mutex for all non-submit RMW paths.
+  withLobbyLock,
   recordPlayerWinAtomic,
-  getLeaderboard
+  getLeaderboard,
+  // Audit finding #10: full-ZSET sweep to bound unbounded leaderboard growth.
+  pruneLeaderboard
 };

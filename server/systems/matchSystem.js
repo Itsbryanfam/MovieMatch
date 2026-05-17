@@ -322,18 +322,37 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
 // SUBMIT HELPERS (private — not exported)
 // ---------------------------------------------------------------------------
 
+// Audit finding #8: the direct-ID path used to interpolate the raw client
+// mediaType/tmdbId into the TMDB URL and the credits cache key with zero
+// validation, and never checked room.allowTvShows. Whitelist both:
+//   - tmdbId must be a positive integer (rejects "7 OR 1=1", floats, paths).
+//   - mediaType must be exactly 'movie', or 'tv' only when the lobby allows
+//     TV (closes the movie-only-room bypass; the fuzzy path already gates on
+//     allowTvShows). Anything else → no direct candidate (caller falls back
+//     to fuzzy text search, which is itself movie-only when TV is disabled).
+function _validatedDirectLookup(room, tmdbId, mediaType) {
+  const idNum = Number(tmdbId);
+  if (!Number.isInteger(idNum) || idNum <= 0) return null;
+  if (mediaType !== 'movie' && mediaType !== 'tv') return null;
+  if (mediaType === 'tv' && !room.allowTvShows) return null;
+  return { id: idNum, mediaType };
+}
+
 async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
   let topCandidates = [];
 
-  // Direct TMDB ID lookup (from autocomplete selection)
-  if (tmdbId && mediaType) {
-    const lookupUrl = `${TMDB_API_BASE}/${mediaType}/${tmdbId}?language=en-US`;
+  // Direct TMDB ID lookup (from autocomplete selection) — only on a
+  // server-validated (id, mediaType) pair. See _validatedDirectLookup.
+  const direct = _validatedDirectLookup(room, tmdbId, mediaType);
+  if (direct) {
+    const lookupUrl = `${TMDB_API_BASE}/${direct.mediaType}/${direct.id}?language=en-US`;
     const detailsRes = await fetch(lookupUrl, { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) });
     const detailsData = await detailsRes.json();
     if (detailsData && detailsData.id) {
       topCandidates = [{
         id: detailsData.id,
-        media_type: mediaType,
+        // Use the validated mediaType, never the raw client string.
+        media_type: direct.mediaType,
         name: detailsData.name,
         title: detailsData.title || detailsData.name,
         release_date: detailsData.release_date,

@@ -1,5 +1,8 @@
 // ====================== UI.JS ======================
-import { escapeHtml, playSuccess, playFail, playTick, playSfx, prepareAudio } from './utils.js';
+// Audit finding #9: escapeHtml import removed — all former call sites now
+// build user-controlled content with createElement/textContent (structural
+// DOM), so the manual-escaping helper is no longer needed in this module.
+import { playSuccess, playFail, playTick, playSfx, prepareAudio } from './utils.js';
 import { getSocket, getCurrentLobbyId } from './state.js';
 
 export const MODE_DESCRIPTIONS = {
@@ -265,7 +268,17 @@ function renderPlayerSidebar(gameState, mode) {
       gamePlayersList.appendChild(header);
       gameState.players.filter(p => p.teamId === teamId).forEach((p) => {
         const li = document.createElement('li');
-        li.innerHTML = `<span>${escapeHtml(p.name)}</span> <span>${p.score}</span>`;
+        // Audit finding #9: build the row with createElement + textContent
+        // instead of innerHTML interpolation. The value was already
+        // escaped, so this isn't a vuln fix — it removes the reliance on
+        // manual escapeHtml discipline and makes the row structurally
+        // XSS-safe, matching the project's stated no-innerHTML-for-user-
+        // content posture (the README claim is corrected to match).
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = p.name;
+        const scoreSpan = document.createElement('span');
+        scoreSpan.textContent = p.score;
+        li.append(nameSpan, document.createTextNode(' '), scoreSpan);
         if (!p.isAlive) li.classList.add('eliminated');
         if (gameState.players.indexOf(p) === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
         gamePlayersList.appendChild(li);
@@ -276,7 +289,13 @@ function renderPlayerSidebar(gameState, mode) {
   } else {
     gameState.players.forEach((p, index) => {
       const li = document.createElement('li');
-      li.innerHTML = `<span>${escapeHtml(p.name)}</span> <span>${p.score}</span>`;
+      // Audit finding #9: structural DOM (createElement + textContent),
+      // see the team-mode branch above for rationale.
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = p.name;
+      const scoreSpan = document.createElement('span');
+      scoreSpan.textContent = p.score;
+      li.append(nameSpan, document.createTextNode(' '), scoreSpan);
       if (!p.isAlive) li.classList.add('eliminated');
       if (index === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
       gamePlayersList.appendChild(li);
@@ -817,7 +836,15 @@ export function showGhostAttempt({ playerName, movieTitle, reason }) {
 
   const title = document.createElement('div');
   title.className = 'ghost-attempt-title';
-  title.innerHTML = escapeHtml(playerName) + ' tried <em>' + escapeHtml(movieTitle) + '</em>';
+  // Audit finding #9: structural DOM instead of innerHTML interpolation.
+  // "<playerName> tried <em><movieTitle></em>" built from text nodes + a
+  // real <em> element — no HTML string assembled from user-controlled data.
+  const emTitle = document.createElement('em');
+  emTitle.textContent = movieTitle;
+  title.append(
+    document.createTextNode(playerName + ' tried '),
+    emTitle
+  );
 
   const reasonEl = document.createElement('div');
   reasonEl.className = 'ghost-attempt-reason';

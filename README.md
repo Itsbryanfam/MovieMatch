@@ -6,7 +6,7 @@
 [![Express](https://img.shields.io/badge/Express-5-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
-[![Tests](https://img.shields.io/badge/tests-153%20passing-brightgreen?style=flat-square)](/)
+[![Tests](https://img.shields.io/badge/tests-177%20passing-brightgreen?style=flat-square)](/)
 [![Release](https://img.shields.io/badge/release-v1.0.0-blue?style=flat-square)](https://github.com/Itsbryanfam/MovieMatch/releases)
 
 **Real-time multiplayer trivia game — chain movies and TV shows through shared cast members. Last player standing wins. Or play the Daily Challenge solo and chase the leaderboard.**
@@ -104,14 +104,14 @@ A **Daily Challenge** runs alongside the multiplayer modes — every player on a
 
 **Infrastructure**
 
-- Redis-backed distributed lock (`SET NX PX`) prevents race conditions during concurrent move submissions
-- Per-socket Redis rate limiting on all events (join, submit, chat, reactions, typing, predictions, daily, etc.)
-- XSS protection — all user content written via DOM APIs, never `innerHTML`
+- Redis-backed distributed locks prevent race conditions: a `SET NX` submit lock around move validation, and a per-lobby `SET NX PX` mutex serializing every other lobby read-modify-write (joins, settings, kicks, votes) so concurrent events can't drop updates
+- Per-socket Redis rate limiting on every client event (join, rejoin, submit, chat, reactions, typing, predictions, settings, lobby browser, daily, etc.)
+- XSS protection — user-controlled content is rendered with structural DOM APIs (`textContent` / `createElement`), never interpolated into `innerHTML`; `innerHTML` is used only for static, non-user-data templates
 - Graceful shutdown with Redis drain on `SIGTERM`/`SIGINT`
 - In-memory poster cache with 30-minute background refresh
 - **Lightweight telemetry** — Redis sorted-set sink, 7 instrumented events, admin endpoint at `/api/admin/stats`
 - Versioned credits cache key (`credits:v2:`) for safe schema migrations
-- 153 tests across 15 suites covering game logic, socket integration, reconnection, validation, telemetry, daily system, stats, themes, solo objectives, and client-side DOM rendering
+- 177 tests across 18 suites covering game logic, socket integration, reconnection, identity/rejoin security, the per-lobby concurrency lock, turn-watchdog authority, validation, telemetry, daily system, stats, themes, solo objectives, leaderboard pruning, and client-side DOM rendering
 
 ---
 
@@ -144,7 +144,7 @@ data/
   └── dailyMovies.json    — curated daily-challenge starter list (49 entries)
 ```
 
-State lives entirely in Redis as serialized lobby objects, daily attempts, leaderboards, and stats hashes — enabling stateless server processes and straightforward horizontal scaling behind a Socket.io Redis adapter.
+All game *state* lives in Redis (serialized lobby objects, daily attempts, leaderboards, stats hashes) behind a Socket.io Redis adapter, so server processes are effectively stateless and scale horizontally. The one exception is timers: turn watchdogs and the 15s reconnect-grace timers are in-process (`setTimeout` handles aren't serializable). Turn watchdogs are re-armed for every in-flight lobby on boot, so a restart can't soft-lock a game; the reconnect-grace window is best-effort and a restart inside it may eliminate a disconnected player early (an accepted trade-off).
 
 ---
 

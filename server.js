@@ -154,6 +154,27 @@ app.get('/api/admin/redis-stats', async (req, res) => {
   }
 });
 
+// Audit finding #10: manual trigger for the full leaderboard ZSET prune
+// (also runs on a slow timer in startApp). Same x-admin-secret +
+// constant-time compare + structured-log pattern as the other admin
+// endpoints. Returns how many orphaned members were removed.
+app.post('/api/admin/prune-leaderboard', async (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (!safeEqual(secret, process.env.ADMIN_SECRET)) {
+    logger.warn({ ip: req.ip, path: req.path }, 'Admin auth failed');
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  logger.info({ ip: req.ip, action: 'prune-leaderboard' }, 'Admin action');
+  try {
+    const removed = await redisUtils.pruneLeaderboard(pubClient);
+    logger.info(`Pruned ${removed} stale leaderboard entries`);
+    res.json({ removed });
+  } catch (err) {
+    logger.error(err, 'Failed to prune leaderboard');
+    res.status(500).json({ error: 'Prune failed' });
+  }
+});
+
 app.get('/api/leaderboard', async (req, res) => {
   try {
     const entries = await redisUtils.getLeaderboard(pubClient);
@@ -254,8 +275,15 @@ const { setupSocketHandlers } = require('./server/socketHandlers');
 const redisUtils = require('./server/redisUtils');
 const posterCache = require('./server/posterCache');
 const telemetry = require('./server/telemetry');
+// Audit finding #6: needed for the boot-time turn-watchdog recovery sweep.
+const gameLogic = require('./server/gameLogic');
 
 const POSTER_REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+// Audit finding #10: the leaderboard ZSET only ever shed entries via the
+// top-N lazy prune. A slow full sweep (once a day) bounds total growth on a
+// long-lived public deployment without adding meaningful load — ZSCAN is
+// cursor-paged and the whole set is tiny relative to lobby traffic.
+const LEADERBOARD_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 async function startApp() {
   try {
@@ -266,6 +294,14 @@ async function startApp() {
     // an io.emit, and io is only ready after this function runs.
     fetchBackgroundPosters();
     setInterval(fetchBackgroundPosters, POSTER_REFRESH_INTERVAL_MS);
+    // Audit finding #10: periodic full leaderboard prune. Best-effort —
+    // a failed sweep just means stale entries linger until the next run or
+    // an admin POST /api/admin/prune-leaderboard; it must never crash boot.
+    setInterval(() => {
+      redisUtils.pruneLeaderboard(pubClient)
+        .then(n => { if (n > 0) logger.info(`Leaderboard prune removed ${n} stale entries`); })
+        .catch(err => logger.error(err, 'Periodic leaderboard prune failed'));
+    }, LEADERBOARD_PRUNE_INTERVAL_MS);
   } catch (err) {
     logger.error(err, 'Redis connection failed');
   }
@@ -276,6 +312,14 @@ async function startApp() {
   });
 
   setupSocketHandlers(io, pubClient, TMDB_HEADERS);
+
+  // Audit finding #6: in-process turn watchdogs don't survive a restart but
+  // the games (in Redis) do. Re-arm a server watchdog for every in-flight
+  // lobby so a deploy/crash can't leave a game soft-locked with no
+  // enforcement. Best-effort — never blocks server start.
+  gameLogic.recoverActiveTurns(io, pubClient)
+    .then(n => { if (n > 0) logger.info(`Recovered turn watchdogs for ${n} in-flight lobbies`); })
+    .catch(err => logger.error(err, 'Turn-watchdog recovery sweep failed'));
 
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => logger.info(`Server listening on port ${PORT}`));

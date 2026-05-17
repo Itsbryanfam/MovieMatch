@@ -361,3 +361,90 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     expect(payload.reason.length).toBeGreaterThan(0);
   });
 });
+
+// ============================================================================
+// Audit finding #8 — submitMovie must not trust client mediaType/tmdbId.
+// ============================================================================
+// The direct-ID path interpolated client-supplied mediaType/tmdbId straight
+// into the TMDB URL and the credits cache key, and (unlike the fuzzy-search
+// path) never consulted room.allowTvShows. A modified client could submit a
+// TV title in a movie-only lobby (game-integrity bypass) or push junk path
+// segments that burn TMDB quota and pollute Redis with garbage cache keys.
+describe('matchSystem.submitMovie — client mediaType/tmdbId validation (#8)', () => {
+  let mockIo, mockSocket, ctx, logger, room;
+
+  function buildRoom(overrides = {}) {
+    return {
+      id: 'TEST', status: 'playing',
+      players: [{ id: 'sock-1', name: 'Tester', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1' }],
+      spectators: [], chain: [], usedMovies: [], hardcoreMode: false,
+      previousSharedActors: [], allowTvShows: false, isPublic: false,
+      timerMultiplier: 0, turnExpiresAt: Date.now() + 60000, isValidating: false,
+      gameMode: 'classic', currentTurnIndex: 0, currentTurnRetries: 0,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIo = { to: jest.fn().mockReturnThis(), emit: jest.fn() };
+    mockSocket = { id: 'sock-1', emit: jest.fn() };
+    logger = { error: jest.fn(), info: jest.fn(), warn: jest.fn() };
+    ctx = { io: mockIo, pubClient: {}, TMDB_HEADERS: { Authorization: 'Bearer test', accept: 'application/json' }, logger };
+    redisUtils.acquireSubmitLock.mockResolvedValue('token-abc');
+    redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+    redisUtils.saveLobby.mockResolvedValue(undefined);
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+    global.fetch = jest.fn();
+  });
+
+  afterEach(() => gameLogic.clearTurnTimeout('TEST'));
+
+  function tvFetchCalls() {
+    return global.fetch.mock.calls.filter(([url]) => typeof url === 'string' && url.includes('/tv/'));
+  }
+
+  test('does NOT hit a /tv/ endpoint for a tv tmdbId when allowTvShows is false', async () => {
+    room = buildRoom({ allowTvShows: false });
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    await matchSystem.submitMovie(ctx, mockSocket, {
+      lobbyId: 'TEST', tmdbId: 1396, mediaType: 'tv', // Breaking Bad — TV
+    });
+
+    // The TV bypass: server must never fetch TV data in a movie-only room.
+    expect(tvFetchCalls()).toHaveLength(0);
+    // And the player isn't penalised by the rejection of an illegal payload
+    // beyond the normal not-found retry (must still be alive).
+    expect(room.players[0].isAlive).toBe(true);
+  });
+
+  test('ignores a non-integer tmdbId instead of interpolating it into a URL', async () => {
+    room = buildRoom({ allowTvShows: true });
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    await matchSystem.submitMovie(ctx, mockSocket, {
+      lobbyId: 'TEST', tmdbId: '7 OR 1=1', mediaType: 'movie',
+    });
+
+    // No fetch URL may contain the raw injected token.
+    const badCalls = global.fetch.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.includes('7 OR 1=1')
+    );
+    expect(badCalls).toHaveLength(0);
+  });
+
+  test('still allows a tv tmdbId when the lobby permits TV shows', async () => {
+    room = buildRoom({ allowTvShows: true });
+    redisUtils.getLobby.mockResolvedValue(room);
+    // Direct-ID lookup succeeds → details payload for the TV id.
+    global.fetch.mockResolvedValue({ ok: true, json: async () => ({ id: 1396, name: 'Breaking Bad', first_air_date: '2008-01-20' }) });
+
+    await matchSystem.submitMovie(ctx, mockSocket, {
+      lobbyId: 'TEST', tmdbId: 1396, mediaType: 'tv',
+    });
+
+    // TV is allowed here, so the direct /tv/ lookup is expected to run.
+    expect(tvFetchCalls().length).toBeGreaterThan(0);
+  });
+});

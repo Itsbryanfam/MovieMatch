@@ -183,6 +183,33 @@ async function claimDailyAttempt(pubClient, stableId, name, date = getTodayDate(
   }
 }
 
+// Audit finding #7: roll back a just-claimed attempt when the caller
+// couldn't actually start the run (e.g. TMDB was unreachable during the
+// seed bootstrap in startDailyChallenge). claimDailyAttempt NX-writes the
+// slot BEFORE the seed fetch, so a transient external failure used to leave
+// the attempt 'in_progress' and lock the player out of that entire UTC day.
+//
+// Guards (compare-and-delete, not a blind del):
+//   - only delete a status === 'in_progress' attempt — a 'done' run is a
+//     real result and must never be destroyed.
+//   - when startedAt is supplied, only delete if it matches the attempt we
+//     created, so a concurrent fresh claim that replaced ours is left alone.
+async function releaseInProgressAttempt(pubClient, stableId, date = getTodayDate(), startedAt = null) {
+  if (!pubClient || !stableId) return false;
+  try {
+    const existing = await getDailyAttempt(pubClient, stableId, date);
+    if (!existing || existing.status !== 'in_progress') return false;
+    if (startedAt != null && existing.startedAt !== startedAt) return false;
+    await pubClient.del(_attemptKey(date, stableId));
+    return true;
+  } catch {
+    // A failed rollback is non-fatal — the attempt key's TTL still cleans
+    // it up eventually; we just couldn't make today retryable. Swallow so
+    // this never masks the original bootstrap error the caller is handling.
+    return false;
+  }
+}
+
 // Mark the attempt as done and record the chain length on the daily
 // leaderboard ZSET. Idempotent — a re-call with the same chainLength just
 // overwrites the same record.
@@ -247,6 +274,7 @@ module.exports = {
   // Attempt records
   getDailyAttempt,
   claimDailyAttempt,
+  releaseInProgressAttempt,
   finalizeDailyAttempt,
   // Leaderboard
   getDailyLeaderboard,

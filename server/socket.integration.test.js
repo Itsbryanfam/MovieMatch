@@ -68,6 +68,17 @@ describe('Socket.io Integration', () => {
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
     redisUtils.acquireSubmitLock.mockResolvedValue(true);
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+    // Audit finding #4: redisUtils is auto-mocked, so withLobbyLock would
+    // return undefined and break every wrapped mutator. Faithfully simulate
+    // the real contract against the existing getLobby/saveLobby mocks:
+    // read → run mutator → persist unless it returned false → return room.
+    redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+      const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+      if (!r) return null;
+      const res = await fn(r);
+      if (res !== false) await redisUtils.saveLobby(pub, id, r);
+      return r;
+    });
     // recordWin mock removed — function was deleted in favor of recordPlayerWinAtomic.
     redisUtils.getLeaderboard.mockResolvedValue([]);
     // Reset pubClient mocks — including the new set() that joinLobby uses for NX create.
@@ -262,6 +273,50 @@ describe('Socket.io Integration', () => {
     expect(redisUtils.setSocketLobby).toHaveBeenCalledWith(mockPubClient, client.id, 'REJN01');
   });
 
+  // SECURITY (audit finding #1): rejoinSuccess must NOT leak other players'
+  // stableId. stableId is the bearer secret used to authenticate a rejoin —
+  // broadcastState already strips it, but the rejoin path historically sent
+  // the raw Redis room object, exposing every player's stableId to any
+  // participant (who could then take over any slot, including the host).
+  // The payload must still deliver usable state (players present, scores
+  // intact) so the rejoining client can rebuild its view.
+  test('rejoinSuccess does not leak any player stableId but keeps usable state', async () => {
+    const stableId = 's_me';
+    const room = {
+      id: 'LEAK01', status: 'playing',
+      players: [
+        { id: 'me-old', name: 'Me', isHost: false, isAlive: true, connected: false, score: 30, wins: 0, teamId: 0, stableId },
+        { id: 'victim-sock', name: 'Victim', isHost: true, isAlive: true, connected: true, score: 90, wins: 2, teamId: 1, stableId: 's_victim_secret' },
+      ],
+      spectators: [{ id: 'spec1', name: 'Watcher', connected: true, stableId: 's_spec_secret' }],
+      chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
+      isValidating: false, gameMode: 'classic'
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    await connect();
+    client.emit('rejoinLobby', { lobbyId: 'LEAK01', playerId: 'me-old', stableId });
+
+    const data = await waitFor(client, 'rejoinSuccess');
+
+    // State must still be usable for the rejoining client.
+    expect(Array.isArray(data.state.players)).toBe(true);
+    expect(data.state.players).toHaveLength(2);
+    expect(data.state.players.find(p => p.name === 'Victim').score).toBe(90);
+
+    // No player object may carry stableId — not the caller's, not anyone's.
+    for (const p of data.state.players) {
+      expect(p.stableId).toBeUndefined();
+    }
+    // The serialized payload must not contain any secret stableId substring,
+    // including the spectator secret (raw spectators were also being sent).
+    const wire = JSON.stringify(data);
+    expect(wire).not.toContain('s_victim_secret');
+    expect(wire).not.toContain('s_spec_secret');
+    expect(wire).not.toContain('s_me');
+  });
+
   // Negative test: an attacker who has guessed/observed another player's
   // socket id should NOT be able to take over their slot. Pre-fix, this
   // call would have hijacked the victim's slot silently.
@@ -341,6 +396,49 @@ describe('Socket.io Integration', () => {
     expect(lobbies[0].hostName).toBe('HostA');
   });
 
+  // SECURITY (audit finding #5): the README claims "per-socket rate limiting
+  // on all events", but rejoinLobby / requestPublicLobbies / settings /
+  // lifecycle events had none. requestPublicLobbies is the worst — it fans
+  // into sMembers(activeLobbies)+mGet(all), a cheap amplification lever. With
+  // the limiter reporting "exceeded", these handlers must bail BEFORE doing
+  // any Redis work. The shared mock returns count=1 by default, so for these
+  // tests we force the limiter over its threshold.
+  function forceRateLimitExceeded() {
+    mockPubClient.multi.mockReturnValue({
+      incr: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([999, 1]), // count=999 ≫ any limit
+    });
+  }
+
+  test('requestPublicLobbies is rate-limited (no Redis fan-out when over limit)', async () => {
+    await connect();
+    forceRateLimitExceeded();
+
+    client.emit('requestPublicLobbies');
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // The expensive getAllLobbies fan-out must not run when over the limit.
+    expect(redisUtils.getAllLobbies).not.toHaveBeenCalled();
+  });
+
+  test('rejoinLobby is rate-limited (no lobby lookup when over limit)', async () => {
+    await connect();
+    forceRateLimitExceeded();
+
+    let responded = false;
+    client.on('rejoinSuccess', () => { responded = true; });
+    client.on('rejoinFailed', () => { responded = true; });
+
+    client.emit('rejoinLobby', { lobbyId: 'ANY01', playerId: 'x', stableId: 's_x' });
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // Handler must return at the limiter, before any room lookup or reply —
+    // otherwise the leak/takeover surface (finding #1) is trivially loopable.
+    expect(redisUtils.getLobby).not.toHaveBeenCalled();
+    expect(responded).toBe(false);
+  });
+
   // ========================
   // LOBBY SETTINGS (host-only)
   // ========================
@@ -368,6 +466,37 @@ describe('Socket.io Integration', () => {
 
     // setGameMode saves the lobby if accepted. Since we're not the host, it should NOT have saved.
     // saveLobby might have been called 0 times, or if the error boundary swallows it, also 0 times.
+    expect(redisUtils.saveLobby).not.toHaveBeenCalled();
+  });
+
+  // SECURITY (audit finding #3): startLobby had no status guard, so a host
+  // (or any player who took over the host slot) could emit it mid-game and
+  // startGame would wipe chain/usedMovies, revive everyone, and reset scores.
+  // startLobby must be a no-op unless the lobby is in 'waiting'.
+  test('startLobby is a no-op when the game is already playing', async () => {
+    await connect();
+    const room = {
+      id: 'RESET1', status: 'playing',
+      players: [
+        { id: client.id, name: 'Host', isHost: true, isAlive: true, connected: true, score: 300, wins: 0, teamId: 0, stableId: 's_h' },
+        { id: 'p2', name: 'P2', isHost: false, isAlive: false, connected: true, score: 0, wins: 0, teamId: 1, stableId: 's_2' },
+      ],
+      spectators: [],
+      chain: [{ playerId: 'p2', playerName: 'P2', movie: { id: 1, title: 'Seed', cast: [] }, matchedActors: [] }],
+      usedMovies: ['movie:1'], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 4, turnExpiresAt: Date.now() + 10000,
+      isValidating: false, gameMode: 'classic', currentTurnIndex: 0,
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('startLobby', 'RESET1');
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // startGame (if wrongly invoked) clears chain/usedMovies and revives
+    // players. None of that may happen on an already-playing lobby.
+    expect(room.chain).toHaveLength(1);
+    expect(room.usedMovies).toEqual(['movie:1']);
+    expect(room.players[1].isAlive).toBe(false);
     expect(redisUtils.saveLobby).not.toHaveBeenCalled();
   });
 
