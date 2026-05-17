@@ -78,4 +78,92 @@ function createBot(existingPlayers, difficulty) {
   };
 }
 
-module.exports = { BOT_DIFFICULTIES, BOT_NAMES, createBot };
+// Deterministic shuffle driven by the injected rng so tests can force an
+// order. Fisher–Yates; rng() ∈ [0,1).
+function _shuffled(arr, rng) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Same person-equality rule the engine uses (gameLogic._sameActor): prefer
+// id-equality, fall back to lowercase name. Local copy keeps botSystem from
+// depending on a gameLogic internal (it isn't exported).
+function _sameActor(a, b) {
+  if (a && b && a.id != null && b.id != null) return a.id === b.id;
+  if (!a || !b || !a.name || !b.name) return false;
+  return a.name.toLowerCase() === b.name.toLowerCase();
+}
+
+/**
+ * Decide the bot's move. Returns { tmdbId, mediaType:'movie' } or null.
+ * null means "no move" — the caller (scheduleBotMove) turns that into a
+ * graceful elimination via the existing engine path. Validity is by
+ * construction (the chosen actor is in both the last film and the pick), so
+ * the existing submit pipeline will accept it; we still pre-filter
+ * used/hardcore so we don't propose a move the engine would reject.
+ *
+ * deps = { pubClient, headers, rng, getOrFetchPersonCredits, dailySeed }
+ */
+async function generateBotMove(room, profile, deps) {
+  const { pubClient, headers, rng, getOrFetchPersonCredits, dailySeed } = deps;
+
+  // Primary beatability lever: a deliberate per-turn blank. Checked before
+  // any TMDB work so a whiff is cheap and the bot is genuinely beatable.
+  if (rng() < profile.whiff) return null;
+
+  const chain = room.chain || [];
+  // First move: no connection constraint (the engine accepts any first
+  // movie). Reuse the curated daily pool — valid, popular by construction,
+  // zero new data. Empty pool → null (caller eliminates; never fabricate).
+  if (chain.length === 0) {
+    const seed = dailySeed || [];
+    if (seed.length === 0) return null;
+    const pick = seed[Math.floor(rng() * seed.length)];
+    return { tmdbId: pick.id, mediaType: 'movie' };
+  }
+
+  const lastNode = chain[chain.length - 1];
+  const lastMovieId = lastNode && lastNode.movie ? lastNode.movie.id : null;
+  const lastCast = (lastNode && lastNode.movie && lastNode.movie.cast) || [];
+  const used = new Set(room.usedMovies || []);
+  const prevConnectors = room.previousSharedActors || [];
+
+  // Only actors with a TMDB id are queryable (person-credits needs an id);
+  // in hardcore, an actor already used as a connector anywhere in the chain
+  // is locked out, so picking via them would be rejected — skip up front.
+  let actors = lastCast.filter(a => a && a.id != null);
+  if (room.hardcoreMode) {
+    actors = actors.filter(a => !prevConnectors.some(p => _sameActor(p, a)));
+  }
+  actors = _shuffled(actors, rng).slice(0, Math.max(1, profile.retryCap));
+
+  for (const actor of actors) {
+    let credits;
+    try {
+      credits = await getOrFetchPersonCredits(pubClient, actor.id, headers);
+    } catch (e) {
+      // TMDB blip on this actor — try the next one rather than whiff the
+      // whole turn (graceful degradation; 5b's fallback DB will harden this).
+      continue;
+    }
+    const candidates = (credits.movies || []).filter(m =>
+      m.id !== lastMovieId &&
+      !used.has(`movie:${m.id}`) &&
+      (m.popularity || 0) >= profile.popularityFloor
+    );
+    if (candidates.length === 0) continue;
+    // Prefer recognizable films: sort by popularity desc, then rng-pick from
+    // the top slice so it's not robotically always the single most-popular.
+    candidates.sort((x, y) => (y.popularity || 0) - (x.popularity || 0));
+    const topN = candidates.slice(0, Math.min(5, candidates.length));
+    const pick = topN[Math.floor(rng() * topN.length)];
+    return { tmdbId: pick.id, mediaType: 'movie' };
+  }
+  return null;
+}
+
+module.exports = { BOT_DIFFICULTIES, BOT_NAMES, createBot, generateBotMove };
