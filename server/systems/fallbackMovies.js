@@ -25,6 +25,9 @@ function _load() {
     all = [];
   }
   const byId = new Map();
+  // Index by id, skipping entries with a missing/non-integer id: TMDB ids are
+  // always positive integers, so a non-integer id means corrupt data that
+  // must not be indexed (a bad entry could otherwise be returned mid-outage).
   for (const e of all) if (e && Number.isInteger(e.id)) byId.set(e.id, e);
   _cache = { byId, all };
   return _cache;
@@ -33,7 +36,11 @@ function _load() {
 // Entry for a TMDB movie id (number-coerced), or null. Used by the
 // getOrFetchCredits + resolveCandidates direct-ID failure branches.
 function getFallbackById(id) {
+  // Coerce: callers (the Tasks 2/3 failure branches) may pass an id as a
+  // string (e.g. from a TMDB url segment) — accept those.
   const n = Number(id);
+  // Reject NaN/floats/non-integers: only a true integer TMDB id can match,
+  // and a silent cache miss on a bad input would be hard to diagnose.
   if (!Number.isInteger(n)) return null;
   return _load().byId.get(n) || null;
 }
