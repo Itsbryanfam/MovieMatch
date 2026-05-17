@@ -228,7 +228,12 @@ document.addEventListener('DOMContentLoaded', () => {
       lobbyId: lobbyIdInput ? lobbyIdInput.value.trim() : '',
       stableId: getStableId()
     });
-    showScreen('join');                           // normalise entry-panel group (success path)
+    // NOTE: not migrated — lone partial toggle, no behaviour-preserving
+    // canonical equivalent. showScreen('join') would reveal the
+    // player-setup panel during the joinLobby round-trip; the original
+    // hides only the private panel (blank area) until the 'joined'
+    // handler hides all panels on the server response.
+    if (privatePanel) privatePanel.classList.add('hidden');
   }
 
   joinBtn?.addEventListener('click', handleJoinRoomSubmit);
