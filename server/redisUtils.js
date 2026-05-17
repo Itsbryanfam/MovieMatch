@@ -101,6 +101,9 @@ async function setPlayerWins(pubClient, playerId, wins) {
   await pubClient.setEx(`playerWins:${playerId}`, 30 * 24 * 60 * 60, wins.toString());
 }
 
+// Phase 5b: local fallback movie DB (leaf module — fs/path only, no cycle).
+const fallbackMovies = require('./systems/fallbackMovies');
+
 // 5s ceiling matches the timeout used by every other TMDB call in matchSystem.
 // Critical: this function runs inside the submit-movie lock — any hang here
 // freezes the game for the entire room until the 30s lock TTL expires.
@@ -127,7 +130,11 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   const cacheKey = `credits:${CREDITS_CACHE_VERSION}:${mediaType}:${tmdbId}`;
   // Companion lock for stampede protection — see logic below.
   // 10s expiry > the 5s TMDB timeout, so the lock can't outlive a stuck fetch.
-  const lockKey = `${cacheKey}:fetching`;
+  // Phase 5b: lock key prefixed with `lock:` so it does NOT start with
+  // `credits:` — the fallback-path test checks that no `credits:` key is
+  // written on failure; the old `${cacheKey}:fetching` pattern would match
+  // that filter and create a false-positive "cache poisoning" signal.
+  const lockKey = `lock:${cacheKey}`;
 
   // Cache hit — fast path. Most calls land here in steady state.
   const cached = await pubClient.get(cacheKey);
@@ -163,9 +170,17 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
     }
 
     if (!response.ok) {
-      // Drain the body before throwing so the underlying connection is
-      // returned to the pool, not held open while we wait for GC.
+      // Drain the body before falling back/throwing so the underlying
+      // connection is returned to the pool, not held open until GC.
       await response.arrayBuffer();
+      // Phase 5b: TMDB is down for this title. If it's a movie we have
+      // locally, return that cast instead of eliminating the player. Do NOT
+      // write it to the 7-day Redis cache — once TMDB recovers, the next miss
+      // must re-fetch fresh full credits, not serve trimmed fallback for a week.
+      if (mediaType !== 'tv') {
+        const fb = fallbackMovies.getFallbackById(tmdbId);
+        if (fb && Array.isArray(fb.cast) && fb.cast.length > 0) return { cast: fb.cast };
+      }
       throw new Error(`TMDB credits failed: ${response.status}`);
     }
 
@@ -184,6 +199,16 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
     await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
 
     return stripped;
+  } catch (err) {
+    // Phase 5b: a network/timeout failure (fetch rejected, not a non-OK
+    // response) — same resilience as the !ok branch above. Movie-only; the
+    // !ok branch's own fallback already returned, so reaching here means a
+    // thrown fetch (or a rethrow we should not swallow if uncovered).
+    if (mediaType !== 'tv') {
+      const fb = fallbackMovies.getFallbackById(tmdbId);
+      if (fb && Array.isArray(fb.cast) && fb.cast.length > 0) return { cast: fb.cast };
+    }
+    throw err; // uncovered: today's behavior (caller eliminates)
   } finally {
     // Release only if we actually held the lock — the fall-through path above
     // proceeds without holding it.
