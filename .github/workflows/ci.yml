@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      # --coverage enforces the jest.config.js ratchet floor (Phase 2 CI2).
+      # --runInBand keeps Redis-double/timer behavior deterministic in the
+      # CI container and makes the Phase 2 R3 clean-exit guarantee a real gate.
+      - run: npm test -- --coverage --runInBand
