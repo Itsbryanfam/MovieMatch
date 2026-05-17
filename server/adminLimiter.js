@@ -51,26 +51,52 @@ function failOpen(store) {
 }
 
 function createAdminLimiter(redisClient) {
-  const store = new RedisStore({
-    // node-redis v5's sendCommand(array) API is wrapped here into the spread
-    // signature that rate-limit-redis expects: (...args: string[]) => Promise.
-    // The spread collects the variadic args back into a single array for
-    // the underlying client.
-    sendCommand: (...args) => redisClient.sendCommand(args),
-    prefix: 'rl:admin:',
-  });
-  return rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    // Wrap the store so any Redis error fails open rather than propagating
-    // as a 500. passOnStoreError is also set true as a belt-and-suspenders
-    // guard: if a throw somehow escapes the failOpen wrapper, express-rate-limit
-    // itself will call next() instead of next(error).
-    store: failOpen(store),
-    passOnStoreError: true,
-  });
+  // LAZY: build the limiter (and thus the RedisStore) on the FIRST request,
+  // not at factory/mount time.
+  //
+  // WHY (prod incident 2026-05-17, deploys dep-d84ouuho + dep-d8504cho →
+  // `ClientClosedError: The client is closed`, exit 1, two failed deploys):
+  // server.js mounts this middleware at module load via
+  // `app.use('/api/admin', createAdminLimiter(pubClient))` — which runs
+  // BEFORE startApp() awaits `pubClient.connect()`. rate-limit-redis's
+  // RedisStore constructor eagerly issues a Redis command
+  // (loadIncrementScript → SCRIPT LOAD). Constructed at mount time that
+  // command hit a not-yet-connected client; the unhandled rejection killed
+  // boot, so Render kept the previous deploy live. The failOpen wrapper
+  // only guards per-request store methods — it can't catch a throw from
+  // inside `new RedisStore(...)`.
+  //
+  // Deferring construction to the first /api/admin request guarantees Redis
+  // is connected by then: requests can only arrive after server.listen(),
+  // and startApp() calls listen() *after* connect() resolves. The Express
+  // mount stays exactly where it is (correct middleware order, before the
+  // route defs) — only the store construction moves later.
+  let limiter = null;
+  const build = () => {
+    const store = new RedisStore({
+      // node-redis v5's sendCommand(array) API is wrapped here into the
+      // spread signature rate-limit-redis expects: (...args) => Promise.
+      sendCommand: (...args) => redisClient.sendCommand(args),
+      prefix: 'rl:admin:',
+    });
+    return rateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 5,
+      standardHeaders: true,
+      legacyHeaders: false,
+      // Wrap the store so any Redis error fails open rather than 500ing.
+      // passOnStoreError is belt-and-suspenders: if a throw escapes the
+      // failOpen wrapper, express-rate-limit calls next() not next(error).
+      store: failOpen(store),
+      passOnStoreError: true,
+    });
+  };
+  // Stable middleware identity; constructs the real limiter once, on first
+  // use, then delegates to it for every subsequent request.
+  return (req, res, next) => {
+    if (!limiter) limiter = build();
+    return limiter(req, res, next);
+  };
 }
 
 module.exports = createAdminLimiter;
