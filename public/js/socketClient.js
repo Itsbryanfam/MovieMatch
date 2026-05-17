@@ -828,6 +828,12 @@ export function initSocket() {
     sessionStorage.removeItem('mm_playerId');
     // Restore hero screen (was hidden optimistically on connect)
     showScreen('hero');                                   // normalise top-level group: lobby+game→off, hero→on
+    // Returning to hero — reset the lobby sub-panels (waiting + team) so a
+    // failed rejoin from a team-mode lobby doesn't leave #team-screen
+    // visible-stale for the next lobby entry. getElementById is the
+    // defensive panel-hide idiom already used elsewhere in this file.
+    document.getElementById('waiting-room')?.classList.add('hidden');
+    document.getElementById('team-screen')?.classList.add('hidden');
     const banner = document.getElementById('offline-banner'); // keep: non-visibility side-effect
     // Only show error if there was an active disconnect (banner visible)
     if (banner && !banner.classList.contains('hidden')) {
@@ -841,6 +847,9 @@ export function initSocket() {
     resetSession();
     showScreen('hero');                                   // normalise top-level group: game+lobby→off, hero→on
     if (waitingRoom) waitingRoom.classList.add('hidden'); // keep: not part of top-level group
+    // teamScreen is the sibling lobby sub-panel — hide it too so a kick
+    // from a team-mode lobby doesn't leave #team-screen visible-stale.
+    document.getElementById('team-screen')?.classList.add('hidden');
   });
 
   return socket;
