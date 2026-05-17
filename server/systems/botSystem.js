@@ -60,6 +60,7 @@ function createBot(existingPlayers, difficulty) {
   // Pick a themed name not already taken in this lobby; cycle with a numeric
   // suffix if (improbably) all 8 base names are in use.
   const taken = new Set(players.map(p => p && p.name));
+  // n is 1-indexed (bot_1, bot_2…) but BOT_NAMES is 0-indexed — hence (n-1).
   let name = BOT_NAMES[(n - 1) % BOT_NAMES.length];
   if (taken.has(name)) name = `${name} ${n}`;
   return {
