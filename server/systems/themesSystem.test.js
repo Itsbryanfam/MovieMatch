@@ -139,7 +139,7 @@ describe('themesSystem — Phase 7.4 authored copy', () => {
     horror: { label: '🎃 After Dark', description: 'The midnight horror block — only scary movies connect.' },
     comedy: { label: '😂 Comedy Night', description: 'Bring the laughs — only comedies count.' },
     action: { label: '💥 Blockbuster Night', description: 'Big, loud, explosive — only action movies count.' },
-    scifi: { label: '🚀 Future Features', description: 'Speculative cinema only — science fiction counts.' },
+    scifi: { label: '🚀 Future Features', description: 'Beyond the possible — only science fiction counts.' },
     romance: { label: '💘 Date Night', description: 'Hearts on screen — only romance counts.' },
     animation: { label: '🎨 Animation Showcase', description: 'Hand-drawn to pixel-perfect — only animated films count.' },
     decade_1980s: { label: '📺 The ’80s Retro Reel', description: 'Neon and VHS — only films released 1980–1989.' },

@@ -78,7 +78,7 @@ const THEMES = {
   scifi: {
     id: 'scifi',
     label: '🚀 Future Features',
-    description: 'Speculative cinema only — science fiction counts.',
+    description: 'Beyond the possible — only science fiction counts.',
     match: (r) => Array.isArray(r && r.genre_ids) && r.genre_ids.includes(GENRE_SCIFI),
   },
   romance: {
