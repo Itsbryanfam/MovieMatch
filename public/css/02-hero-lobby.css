@@ -780,6 +780,20 @@ input:disabled {
   min-width: 0;
   overflow-wrap: anywhere; /* long names wrap inside the fixed-width panel */
 }
+/* Phase 7.5 follow-up (user eyeball, PR #30): in the flex row the BOT badge
+   and the kick ✕ are fixed trailing chips — they must NEVER absorb the flex
+   squeeze. Without flex-shrink:0 a longer name ("Bot Hitchcock") shrank the
+   badge ("BOT · Normal" wrapped to two lines) and the 44px kick target. The
+   .entrance-card descendant scope (0,2,0) just adds these properties over the
+   base .bot-badge / .btn-kick rules (0,1,0) — no pre-existing rule edited;
+   only the name flexes/wraps now, so every row is a uniform single line. */
+.entrance-card .bot-badge {
+  flex-shrink: 0;
+  white-space: nowrap; /* keep "BOT · Normal" as one unbroken chip */
+}
+.entrance-card .btn-kick {
+  flex-shrink: 0; /* preserve the 44px Apple-HIG tap target */
+}
 /* WHY the #lobby-players li prefix: the base #lobby-players li.entrance-card
    border-left rule carries an id (specificity 1,1,1); this override must
    match that id (→ 1,2,1) or the "you" identity highlight is a dead rule. */
@@ -787,15 +801,20 @@ input:disabled {
   border-left-color: var(--accent-primary);
 }
 .entrance-card.is-entering {
-  /* Under the global prefers-reduced-motion block animation-duration is
-     forced to ~0 so the card simply appears at its natural end-state —
-     fully legible, zero motion. `both` keeps the from-state only while the
-     (near-instant under RM) animation runs. */
-  animation: cardEntrance 0.34s ease-out both;
+  /* Phase 7.5 follow-up (user eyeball, PR #30): the original 0.34s /
+     translateY(8px) / scale(0.97) read as a barely-there "pop". Tuned to a
+     clearer rise-and-settle premiere — STILL opacity + transform ONLY
+     (compositor-safe; the vanilla perf budget; zero layout/reflow since
+     transform never reflows). Under the global prefers-reduced-motion block
+     animation-duration is forced to ~0 so the card simply appears at its
+     natural end-state — fully legible, zero motion. `both` holds the
+     from-state only while the (near-instant under RM) animation runs. */
+  animation: cardEntrance 0.5s cubic-bezier(0.2, 0.75, 0.25, 1) both;
 }
 @keyframes cardEntrance {
-  from { opacity: 0; transform: translateY(8px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0)   scale(1); }
+  0%   { opacity: 0; transform: translateY(16px) scale(0.92); }
+  60%  { opacity: 1; transform: translateY(-3px) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0)    scale(1); }
 }
 
 /* Director panel — presentational grouping of the EXISTING host controls.
@@ -838,12 +857,19 @@ input:disabled {
   font-size: 0.85rem;
 }
 
-/* Public-room toggle — migrated VERBATIM from the index.html inline style
-   (same element, no competing rule → identical computed position). */
+/* Public-room toggle. Phase 7.5 follow-up (user eyeball, PR #30): the
+   pre-7.5 inline was position:absolute;top:0;right:0 — correct over the OLD
+   short left-aligned <h2>, but the 7.5 marquee is a WIDE centred title so the
+   absolute toggle clipped the room code. It now FLOWS as a right-aligned row
+   above the marquee instead (.setting-toggle base supplies display:flex/gap;
+   we only right-align + space + lighten it). No pre-existing rule edited; the
+   pre-existing mobile `#waiting-room .panel-header label.setting-toggle{
+   position:static}` (05-responsive.css) now simply agrees rather than
+   overriding an absolute. */
 .waiting-public-toggle {
-  position: absolute;
-  top: 0;
-  right: 0;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem; /* secondary to the marquee — matches its prior weight */
 }
 
 /* Roll Camera — the re-voiced Start button. WHY display:block here: the
