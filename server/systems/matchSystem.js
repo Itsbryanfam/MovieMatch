@@ -428,10 +428,13 @@ async function _computeCouldHavePlayed(room, pubClient, headers) {
         rng: () => 0, // deterministic most-popular-first
         getOrFetchPersonCredits: redisUtils.getOrFetchPersonCredits,
         popularityFloor: SUGGESTION_BOT_PROFILE.popularityFloor,
-        dailySeed: [],
+        dailySeed: [], // unused by enumerateConnectingMoves (only generateBotMove consults it); passed for deps-shape parity
       }, { limit: 3 });
       if (!moves || moves.length === 0) return null;
       const outs = [];
+      // Dedupe by display title (not tmdbId) because the enumerator already
+      // deduped by tmdbId; two distinct tmdbIds sharing the same on-card title
+      // string are indistinguishable to the player — showing both is confusing.
       const seenTitles = new Set();
       for (const mv of moves) {
         // Resolve each candidate id → title/year via the same direct-ID path
