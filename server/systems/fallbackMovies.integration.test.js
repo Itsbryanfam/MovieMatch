@@ -6,6 +6,7 @@ const matchSystem = require('./matchSystem');
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
 const fallbackMovies = require('./fallbackMovies');
+const botSystem = require('./botSystem');
 
 jest.mock('../redisUtils');
 global.fetch = jest.fn();
@@ -38,7 +39,13 @@ beforeEach(() => {
   redisUtils.getOrFetchCredits.mockImplementation((...a) => jest.requireActual('../redisUtils').getOrFetchCredits(...a));
   global.fetch.mockRejectedValue(new Error('TMDB DOWN')); // full outage
 });
-afterEach(() => gameLogic.clearTurnTimeout('TEST'));
+afterEach(() => {
+  // submitMovie→nextTurn arms BOTH the turn watchdog and (room has a bot)
+  // botSystem's scheduleBotMove timer — clear both so no setTimeout leaks
+  // past the Jest worker (same hygiene pattern as botSystem.schedule.test.js).
+  gameLogic.clearTurnTimeout('TEST');
+  botSystem.clearBotTimeout('TEST');
+});
 
 test('covered connecting movie survives a full TMDB outage (not eliminated)', async () => {
   const room = buildRoom();
@@ -76,6 +83,9 @@ test('uncovered movie during the same outage still eliminates (unchanged)', asyn
 });
 
 test('covered bot move survives the outage (direct-ID, connecting)', async () => {
+  // currentTurnIndex 1 = bot_1 (players[1]); submitBotMove gates on
+  // room.players[room.currentTurnIndex].id === botId, so the bot must be the
+  // active player for its move to be accepted.
   const room = buildRoom({ currentTurnIndex: 1 });
   redisUtils.getLobby.mockResolvedValue(room);
   jest.spyOn(fallbackMovies, 'getFallbackById').mockImplementation(id =>
@@ -86,4 +96,26 @@ test('covered bot move survives the outage (direct-ID, connecting)', async () =>
 
   expect(room.chain.length).toBe(2);
   expect(room.players.find(p => p.id === 'bot_1').isAlive).toBe(true);
+});
+
+test('covered typed-title movie survives the outage via the fuzzy fallback', async () => {
+  // The other resolveCandidates branch: no tmdbId, a typed `movie` string →
+  // TMDB /search fetch rejects → Task 3's fuzzy fallback ranks the local DB
+  // by levenshtein. End-to-end proof (the direct-ID tests above don't cover
+  // the fuzzy branch through the full submit→enrich→validate→commit pipeline).
+  const room = buildRoom();
+  redisUtils.getLobby.mockResolvedValue(room);
+  // allFallback() feeds the fuzzy ranking; getFallbackById feeds the real
+  // getOrFetchCredits credits-fallback for the chosen candidate's id. Both
+  // must agree on id 2 (title fuzzily matches 'Second', cast shares actor 42
+  // with chain node 0 so the connection validates).
+  const covered = { id: 2, title: 'Second', year: 2005, mediaType: 'movie', cast: [{ id: 42, name: 'Shared' }] };
+  jest.spyOn(fallbackMovies, 'allFallback').mockReturnValue([covered]);
+  jest.spyOn(fallbackMovies, 'getFallbackById').mockImplementation(id => (id === 2 ? covered : null));
+  ctx.pubClient = { get: async () => null, set: async () => 'OK', del: async () => 1 };
+
+  await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Second' });
+
+  expect(room.chain.length).toBe(2);
+  expect(room.players.find(p => p.id === 's1').isAlive).toBe(true);
 });
