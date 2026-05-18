@@ -1079,19 +1079,6 @@ a:focus-visible,
   }
 }
 
-/* Phase 6a: the "you could have played X" line on the detailed
-   self-elimination card. Additive only — no existing self-elim rule is
-   modified. Sits between the cast comparison grid and the generic hint. */
-.self-elim-could {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  background: rgba(52, 211, 153, 0.12);
-  color: #34d399;
-  font-weight: 600;
-  text-align: center;
-}
-
 /* =============================================
    Phase 7.2 (CG-03) SUBMISSION PILL
    Mirrors .peer-typing (06-states-anim.css:452) — deliberately subtle so it
@@ -1121,3 +1108,59 @@ a:focus-visible,
    ============================================= */
 .copy-toast--error { border-left: 3px solid var(--timer-red, #f43f5e); }
 .copy-toast--success { border-left: 3px solid var(--timer-green, #34d399); }
+
+/* =============================================================
+   Phase 7.3 (CSS hygiene) — self-elim "you had outs" block
+   WHY: 7.1 emits .self-elim-outs/-label/-row + .self-elim-bridge
+   (ui-notifications.js) but no rule was ever added, so the most
+   actionable line on the card ("You had outs… you were one bridge
+   away") rendered as unstyled body text. This finishes 7.1's own
+   deferred styling — additive on currently-unstyled elements, not a
+   change to already-correct UI. Palette matches the green "could have
+   played" accent the (now-deleted) .self-elim-could rule used, so the
+   card reads consistently. No animation — the detailed card is read
+   material and prefers-reduced-motion must stay a no-op here (we add
+   no motion to honour it).
+   ============================================================= */
+.self-elim-outs {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(52, 211, 153, 0.10);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  text-align: left;
+}
+.self-elim-outs-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #34d399;
+  margin-bottom: 0.35rem;
+}
+.self-elim-outs-row {
+  font-size: 0.9rem;
+  color: var(--text-main, #f8fafc);
+  padding: 0.15rem 0;
+}
+.self-elim-bridge {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-style: italic;
+  color: #34d399;
+  text-align: center;
+}
+
+/* =============================================================
+   Phase 7.3 (CSS hygiene) — single-column self-elim grid
+   WHY: .self-elim-grid is `1fr 1fr`, but the timeout card adds only
+   the "Needed a connection to" column (ui-notifications.js adds "You
+   played" only `if (!timedOut && yourGuess)`). One child in a 2-col
+   track renders left-aligned with an empty right half — a visible
+   asymmetry. Pure-CSS fix: when the grid has a single column child,
+   let it span the full track so it's centered. Two-column case and
+   the @media max-width:540px 1fr collapse are untouched. :only-child
+   is universally supported (no :has() dependency).
+   ============================================================= */
+.self-elim-col:only-child { grid-column: 1 / -1; }
