@@ -199,6 +199,46 @@ async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
       chainLength: (state.chain || []).length,
     });
   }
+  // Phase 7.1 (2): Timeout aftercare. The invalid-connection path already
+  // sends a private youWereEliminated (matchSystem); the timeout/freeze path
+  // only had a room-wide notification. Give a HUMAN (stableId truthy — bots
+  // are null), non-team (team eliminations returned above), still-connected
+  // player who ran out the clock the same learning card so they know what
+  // move they missed. Bounded + fail-closed: a missing suggestion or a slow
+  // TMDB must never delay nextTurn beyond _computeCouldHavePlayed's own
+  // timeout, and must never throw out of the elimination path.
+  if (player && player.stableId && player.connected && _categorizeReason(reason) === 'timeout') {
+    try {
+      // Lazy require — cycle-safe. matchSystem→gameLogic is the existing
+      // require edge; adding a top-level require here would create a cycle.
+      const ms = require('./systems/matchSystem');
+      const botSystem = require('./systems/botSystem');
+      const last = (state.chain || [])[(state.chain || []).length - 1];
+      if (last && last.movie) {
+        // eliminateCurrentPlayer has no ctx TMDB headers (same situation as
+        // the bot-turn hook). Reuse botSystem._tmdbHeaders() — the exact
+        // env-derived builder the no-ctx bot path already uses — rather than
+        // reading process.env a second time here.
+        const outs = await ms._computeCouldHavePlayed(state, pubClient, botSystem._tmdbHeaders());
+        io.to(player.id).emit('youWereEliminated', {
+          lastChainEntry: {
+            title: last.movie.title,
+            year: last.movie.year,
+            cast: ms.topCastNames(last.movie.cast),
+          },
+          reason,
+          timedOut: true,
+          // Only include `outs` when the suggestion lookup returned results;
+          // omit the key entirely when null so the client can distinguish
+          // "no suggestions available" from an empty array.
+          ...(outs && outs.length ? { outs } : {}),
+        });
+      }
+    } catch (e) {
+      // Aftercare is best-effort — never let it break the elimination path.
+      logger.error(e, 'timeout aftercare failed');
+    }
+  }
   await checkWinCondition(io, pubClient, id, state);
   if (state.status === 'playing') {
     await nextTurn(io, pubClient, id, state);
