@@ -241,6 +241,18 @@
 
       <div id="waiting-room" class="panel hidden lobby-panel">
         <div class="panel-header">
+          <!-- Phase 7.5 follow-up (user eyeball, PR #30): the Public-Room
+               toggle is now emitted BEFORE the marquee so it flows as a
+               right-aligned row ABOVE the room code. Pre-7.5 it was absolutely
+               positioned top/right over a SHORT left-aligned <h2>; the 7.5
+               marquee is a WIDE, centred, letter-spaced title, so the absolute
+               toggle overran ("clipped") the room code. Flowing it here fixes
+               the collision with zero pre-existing-rule edits; the disabled
+               stub's behaviour/id are unchanged. -->
+          <label class="setting-toggle waiting-public-toggle" title="List this room on the Public Matchmaking viewer">
+            <input type="checkbox" id="public-room-toggle" disabled>
+            <span>Public Room</span>
+          </label>
           <!-- Phase 7.5 Red Carpet: marquee treatment is CSS on this
                wrapper; #lobby-code-display keeps its id + .accent-text so
                the socketClient 'joined' handler's innerText write is
@@ -249,13 +261,6 @@
             <h2 class="marquee__title">Room: <span id="lobby-code-display" class="accent-text"></span></h2>
           </div>
           <p>The cast is arriving — take your seats.</p>
-          <!-- Phase 7.5 (bounded DS-01): the absolute-position inline style
-               moves verbatim to .waiting-public-toggle (same element, no
-               competing rule → identical computed position). -->
-          <label class="setting-toggle waiting-public-toggle" title="List this room on the Public Matchmaking viewer">
-            <input type="checkbox" id="public-room-toggle" disabled>
-            <span>Public Room</span>
-          </label>
         </div>
         <div class="players-list-container">
           <ul id="lobby-players"></ul>
