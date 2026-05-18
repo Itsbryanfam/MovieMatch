@@ -38,8 +38,7 @@ describe('feedback router — toast + gameEvent', () => {
     const overlay = document.getElementById('notification-overlay');
     expect(overlay.classList.contains('hidden')).toBe(false);
     expect(overlay.classList.contains('notification--elimination')).toBe(true);
-    // textContent is layout-independent in jsdom (innerText is fragile there)
-    expect(document.getElementById('notification-text').textContent).toBe('Alice was eliminated');
+    expect(document.getElementById('notification-text').innerText).toBe('Alice was eliminated');
     expect(document.querySelector('.elimination-flash')).not.toBeNull();
   });
 

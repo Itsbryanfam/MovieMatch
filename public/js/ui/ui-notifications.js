@@ -9,9 +9,7 @@ import { notificationOverlay, notificationText, chainDisplay } from './ui-dom.js
 
 let notificationTimeout = null;
 export function showNotification(msg) {
-  // textContent is safe here (msg is server-controlled, not user-HTML) and
-  // works reliably in jsdom tests (innerText is layout-dependent in jsdom).
-  notificationText.textContent = msg;
+  notificationText.innerText = msg;
   notificationOverlay.classList.remove('hidden', 'is-exiting');
 
   if (notificationTimeout) clearTimeout(notificationTimeout);
