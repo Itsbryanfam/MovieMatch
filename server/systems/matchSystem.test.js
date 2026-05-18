@@ -15,6 +15,9 @@
 const matchSystem = require('./matchSystem');
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
+// Phase 6a: botSystem is spied in the H3 couldHavePlayed tests to verify that
+// generateBotMove is called and that its result shapes the payload correctly.
+const botSystem = require('./botSystem');
 
 jest.mock('../redisUtils');
 
@@ -274,6 +277,7 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
 
   afterEach(() => {
     gameLogic.clearTurnTimeout('TEST');
+    jest.restoreAllMocks(); // failure-safe: restore generateBotMove spy even if a test threw before its inline restore
   });
 
   test('emits youWereEliminated to the failing socket on invalid connection', async () => {
@@ -359,6 +363,129 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     // Reason text propagates through so the client UI can show it.
     expect(typeof payload.reason).toBe('string');
     expect(payload.reason.length).toBeGreaterThan(0);
+  });
+
+  // ----- Phase 6a: couldHavePlayed suggestion -----------------------------
+  // Shared helper: build the same Inception room the existing H3 test uses,
+  // plus a fetch mock that branches by URL so the player's failed guess
+  // (36557) and the bot-suggested movie (99999) resolve independently.
+  function makeInceptionRoom() {
+    return {
+      id: 'TEST', status: 'playing',
+      players: [
+        { id: 'sock-1', name: 'Tester', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's1' },
+        { id: 'sock-other', name: 'Other', isHost: false, isAlive: true, connected: true, score: 0, wins: 0, teamId: 1, stableId: 's2' },
+      ],
+      spectators: [],
+      chain: [{
+        playerId: 'sock-other', playerName: 'Other',
+        movie: { id: 27205, title: 'Inception', year: '2010',
+          cast: [{ id: 6193, name: 'Leonardo DiCaprio' }, { id: 24045, name: 'Joseph Gordon-Levitt' }],
+          mediaType: 'movie' },
+        matchedActors: [],
+      }],
+      usedMovies: ['movie:27205'], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0,
+      turnExpiresAt: Date.now() + 60000, isValidating: false, gameMode: 'classic',
+      currentTurnIndex: 0, currentTurnRetries: 0,
+    };
+  }
+  function fetchByUrl() {
+    // resolveCandidates does GET ${BASE}/movie/{id}?... — branch on the id.
+    return jest.fn(async (url) => {
+      if (String(url).includes('/movie/36557')) {
+        return { ok: true, json: async () => ({ id: 36557, title: 'Casino Royale', release_date: '2006-11-14', poster_path: null }) };
+      }
+      if (String(url).includes('/movie/99999')) {
+        return { ok: true, json: async () => ({ id: 99999, title: 'The Dark Knight', release_date: '2008-07-18', poster_path: null }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+  }
+
+  test('payload includes couldHavePlayed when the bot pathfinder finds a move', async () => {
+    const room = makeInceptionRoom();
+    redisUtils.getLobby.mockResolvedValue(room);
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }, { id: 1283, name: 'Helen Mirren' }] });
+    global.fetch = fetchByUrl();
+    // Spy the merged Phase 5a pathfinder — read-side reuse, mocked to a move.
+    jest.spyOn(botSystem, 'generateBotMove').mockResolvedValue({ tmdbId: 99999, mediaType: 'movie' });
+
+    await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
+
+    const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
+    expect(payload.couldHavePlayed).toEqual({ title: 'The Dark Knight', year: '2008' });
+    // Existing H3 fields still intact (purely additive).
+    expect(payload.yourGuess.title).toBe('Casino Royale');
+    expect(payload.lastChainEntry.title).toBe('Inception');
+  });
+
+  test('payload omits couldHavePlayed when the pathfinder returns null', async () => {
+    const room = makeInceptionRoom();
+    redisUtils.getLobby.mockResolvedValue(room);
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
+    global.fetch = fetchByUrl();
+    jest.spyOn(botSystem, 'generateBotMove').mockResolvedValue(null);
+
+    await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
+
+    const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
+    expect(payload.couldHavePlayed).toBeUndefined();
+    expect(payload.yourGuess.title).toBe('Casino Royale'); // existing behavior unaffected
+  });
+
+  test('payload omits couldHavePlayed when the pathfinder throws (fail-closed)', async () => {
+    const room = makeInceptionRoom();
+    redisUtils.getLobby.mockResolvedValue(room);
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
+    global.fetch = fetchByUrl();
+    jest.spyOn(botSystem, 'generateBotMove').mockRejectedValue(new Error('TMDB down'));
+
+    await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
+
+    const elim = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated');
+    expect(elim).toBeDefined();                       // still emitted
+    expect(elim[1].couldHavePlayed).toBeUndefined();  // just no suggestion
+    expect(typeof elim[1].reason).toBe('string');     // existing assertions hold
+  });
+
+  test('payload omits couldHavePlayed when the suggestion id will not resolve', async () => {
+    const room = makeInceptionRoom();
+    redisUtils.getLobby.mockResolvedValue(room);
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
+    global.fetch = fetchByUrl();
+    // 12321 is not handled by fetchByUrl → resolveCandidates returns [] → omit.
+    jest.spyOn(botSystem, 'generateBotMove').mockResolvedValue({ tmdbId: 12321, mediaType: 'movie' });
+
+    await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
+
+    const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
+    expect(payload.couldHavePlayed).toBeUndefined();
+  });
+
+  test('payload omits couldHavePlayed when the computation exceeds the timeout', async () => {
+    jest.useFakeTimers();
+    try {
+      const room = makeInceptionRoom();
+      redisUtils.getLobby.mockResolvedValue(room);
+      redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
+      global.fetch = fetchByUrl();
+      // Never resolves → simulates TMDB slower than COULD_HAVE_PLAYED_TIMEOUT_MS (1200ms).
+      jest.spyOn(botSystem, 'generateBotMove').mockReturnValue(new Promise(() => {}));
+
+      const submitPromise = matchSystem.submitMovie(ctx, mockSocket,
+        { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
+      // Fire the 1200ms fail-closed timer (literal 1201 = COULD_HAVE_PLAYED_TIMEOUT_MS + 1).
+      await jest.advanceTimersByTimeAsync(1201);
+      await submitPromise;
+
+      const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
+      expect(payload.couldHavePlayed).toBeUndefined();
+    } finally {
+      // Failure-safe: restore real timers even if an assertion throws above,
+      // so fake timers can never bleed into sibling tests in this describe.
+      jest.useRealTimers();
+    }
   });
 });
 

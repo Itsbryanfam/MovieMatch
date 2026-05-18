@@ -315,7 +315,7 @@ git commit -m "Phase 6a (0): couldHavePlayed enrichment on H3 youWereEliminated"
 // server-computed "you could have played X" suggestion, and must be
 // byte-unchanged when the server omits it (miss/error/timeout) or on the
 // legacy no-details flash.
-import { showSelfEliminationScreen } from '../public/js/ui/ui-notifications.js';
+import { showSelfEliminationScreen } from '../public/js/ui.js'; // use barrel like all sibling client tests
 
 const DETAILS = {
   reason: 'Invalid movie connection.',
