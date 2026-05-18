@@ -21,6 +21,10 @@ describe('timerSeverity', () => {
   });
 
   test('normal band: secondsRemaining > 10', () => {
+    // 10.0001 is the symmetric upper boundary to the 5.0001 lower-boundary
+    // assertion above — pins that the critical band is `<= 10` (exclusive
+    // above 10), completing the band-boundary contract.
+    expect(timerSeverity(10.0001)).toBe('normal');
     expect(timerSeverity(11)).toBe('normal');
     expect(timerSeverity(30)).toBe('normal');
     expect(timerSeverity(999)).toBe('normal');
