@@ -1,0 +1,11 @@
+# WHY: data/*.json are byte-stable artifacts emitted by the one-time
+# generators (scripts/build-fallback-movies.js, scripts/build-daily-movies.js)
+# as exactly `JSON.stringify(list, null, 2) + '\n'` — LF endings, single
+# trailing newline. Without this pin, Windows git core.autocrlf rewrites them
+# to CRLF in the working tree, so fallbackMovies.data.test.js's byte-format
+# assertion (raw.startsWith('[\n  {') / raw.endsWith('\n')) fails on every
+# Windows checkout even though the committed blob is correct LF and CI/Linux
+# is green. eol=lf forces the working copy to match the committed blob (and
+# keeps the generators' trailing-newline convention valid) identically on
+# every OS — a Windows dev-experience fix, no data/runtime change.
+data/*.json text eol=lf
