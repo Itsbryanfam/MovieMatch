@@ -15,8 +15,8 @@
 const matchSystem = require('./matchSystem');
 const redisUtils = require('../redisUtils');
 const gameLogic = require('../gameLogic');
-// Phase 6a: botSystem is spied in the H3 couldHavePlayed tests to verify that
-// generateBotMove is called and that its result shapes the payload correctly.
+// Phase 7.1: botSystem is spied in the H3 outs tests to verify that
+// enumerateConnectingMoves is called and its result shapes the outs payload.
 const botSystem = require('./botSystem');
 
 jest.mock('../redisUtils');
@@ -365,7 +365,7 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     expect(payload.reason.length).toBeGreaterThan(0);
   });
 
-  // ----- Phase 6a: couldHavePlayed suggestion -----------------------------
+  // ----- Phase 7.1: outs suggestion (upgraded from Phase 6a couldHavePlayed) -
   // Shared helper: build the same Inception room the existing H3 test uses,
   // plus a fetch mock that branches by URL so the player's failed guess
   // (36557) and the bot-suggested movie (99999) resolve independently.
@@ -403,75 +403,94 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     });
   }
 
-  test('payload includes couldHavePlayed when the bot pathfinder finds a move', async () => {
+  test('payload includes outs when the enumerator finds moves (Phase 7.1)', async () => {
     const room = makeInceptionRoom();
     redisUtils.getLobby.mockResolvedValue(room);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }, { id: 1283, name: 'Helen Mirren' }] });
     global.fetch = fetchByUrl();
-    // Spy the merged Phase 5a pathfinder — read-side reuse, mocked to a move.
-    jest.spyOn(botSystem, 'generateBotMove').mockResolvedValue({ tmdbId: 99999, mediaType: 'movie' });
+    // Phase 7.1: spy on enumerateConnectingMoves (replaces generateBotMove for
+    // the suggestion path). Returns one move so resolveCandidates can map it
+    // to a title/year/viaActor out.
+    jest.spyOn(botSystem, 'enumerateConnectingMoves').mockResolvedValue([
+      { tmdbId: 99999, mediaType: 'movie', viaActor: { id: 6193, name: 'Leonardo DiCaprio' } },
+    ]);
 
     await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
 
     const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
-    expect(payload.couldHavePlayed).toEqual({ title: 'The Dark Knight', year: '2008' });
+    // Phase 7.1: outs is an array of {title,year,viaActor} rather than the old
+    // single couldHavePlayed object — multi-out shape allows up to 3 suggestions.
+    expect(payload.outs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: 'The Dark Knight', year: '2008', viaActor: 'Leonardo DiCaprio' }),
+    ]));
+    expect(payload.couldHavePlayed).toBeUndefined(); // old key never emitted
     // Existing H3 fields still intact (purely additive).
     expect(payload.yourGuess.title).toBe('Casino Royale');
     expect(payload.lastChainEntry.title).toBe('Inception');
   });
 
-  test('payload omits couldHavePlayed when the pathfinder returns null', async () => {
+  test('payload omits outs when the enumerator returns empty (Phase 7.1)', async () => {
     const room = makeInceptionRoom();
     redisUtils.getLobby.mockResolvedValue(room);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
     global.fetch = fetchByUrl();
-    jest.spyOn(botSystem, 'generateBotMove').mockResolvedValue(null);
+    // Phase 7.1: empty enumerator result → _computeCouldHavePlayed → null → outs omitted.
+    jest.spyOn(botSystem, 'enumerateConnectingMoves').mockResolvedValue([]);
 
     await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
 
     const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
-    expect(payload.couldHavePlayed).toBeUndefined();
+    expect(payload.outs).toBeUndefined();
+    expect(payload.couldHavePlayed).toBeUndefined(); // old key also absent
     expect(payload.yourGuess.title).toBe('Casino Royale'); // existing behavior unaffected
   });
 
-  test('payload omits couldHavePlayed when the pathfinder throws (fail-closed)', async () => {
+  test('payload omits outs when the enumerator throws (fail-closed, Phase 7.1)', async () => {
     const room = makeInceptionRoom();
     redisUtils.getLobby.mockResolvedValue(room);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
     global.fetch = fetchByUrl();
-    jest.spyOn(botSystem, 'generateBotMove').mockRejectedValue(new Error('TMDB down'));
+    // Phase 7.1: enumerator rejection is swallowed by _computeCouldHavePlayed's
+    // outer try/catch → null → outs key omitted. Elimination still fires.
+    jest.spyOn(botSystem, 'enumerateConnectingMoves').mockRejectedValue(new Error('TMDB down'));
 
     await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
 
     const elim = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated');
-    expect(elim).toBeDefined();                       // still emitted
-    expect(elim[1].couldHavePlayed).toBeUndefined();  // just no suggestion
-    expect(typeof elim[1].reason).toBe('string');     // existing assertions hold
+    expect(elim).toBeDefined();                        // still emitted
+    expect(elim[1].outs).toBeUndefined();              // just no suggestion
+    expect(elim[1].couldHavePlayed).toBeUndefined();   // old key also absent
+    expect(typeof elim[1].reason).toBe('string');      // existing assertions hold
   });
 
-  test('payload omits couldHavePlayed when the suggestion id will not resolve', async () => {
+  test('payload omits outs when the candidate id will not resolve (Phase 7.1)', async () => {
     const room = makeInceptionRoom();
     redisUtils.getLobby.mockResolvedValue(room);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
     global.fetch = fetchByUrl();
-    // 12321 is not handled by fetchByUrl → resolveCandidates returns [] → omit.
-    jest.spyOn(botSystem, 'generateBotMove').mockResolvedValue({ tmdbId: 12321, mediaType: 'movie' });
+    // Phase 7.1: 12321 is not handled by fetchByUrl → resolveCandidates returns
+    // [] → no candidate → _computeCouldHavePlayed returns null → outs omitted.
+    jest.spyOn(botSystem, 'enumerateConnectingMoves').mockResolvedValue([
+      { tmdbId: 12321, mediaType: 'movie', viaActor: { id: 1, name: 'Actor' } },
+    ]);
 
     await matchSystem.submitMovie(ctx, mockSocket, { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
 
     const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
-    expect(payload.couldHavePlayed).toBeUndefined();
+    expect(payload.outs).toBeUndefined();
+    expect(payload.couldHavePlayed).toBeUndefined(); // old key also absent
   });
 
-  test('payload omits couldHavePlayed when the computation exceeds the timeout', async () => {
+  test('payload omits outs when the computation exceeds the timeout (Phase 7.1)', async () => {
     jest.useFakeTimers();
     try {
       const room = makeInceptionRoom();
       redisUtils.getLobby.mockResolvedValue(room);
       redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 8784, name: 'Daniel Craig' }] });
       global.fetch = fetchByUrl();
-      // Never resolves → simulates TMDB slower than COULD_HAVE_PLAYED_TIMEOUT_MS (1200ms).
-      jest.spyOn(botSystem, 'generateBotMove').mockReturnValue(new Promise(() => {}));
+      // Phase 7.1: never-resolving enumerator simulates TMDB slower than
+      // COULD_HAVE_PLAYED_TIMEOUT_MS (1200ms). Timeout wins the race → null → outs omitted.
+      jest.spyOn(botSystem, 'enumerateConnectingMoves').mockReturnValue(new Promise(() => {}));
 
       const submitPromise = matchSystem.submitMovie(ctx, mockSocket,
         { lobbyId: 'TEST', movie: 'Casino Royale', tmdbId: 36557, mediaType: 'movie' });
@@ -480,7 +499,8 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
       await submitPromise;
 
       const payload = mockSocket.emit.mock.calls.find(([e]) => e === 'youWereEliminated')[1];
-      expect(payload.couldHavePlayed).toBeUndefined();
+      expect(payload.outs).toBeUndefined();
+      expect(payload.couldHavePlayed).toBeUndefined(); // old key also absent
     } finally {
       // Failure-safe: restore real timers even if an assertion throws above,
       // so fake timers can never bleed into sibling tests in this describe.
