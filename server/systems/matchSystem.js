@@ -383,10 +383,14 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
     const lookupUrl = `${TMDB_API_BASE}/${direct.mediaType}/${direct.id}?language=en-US`;
     try {
       const detailsRes = await fetch(lookupUrl, { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) });
-      // A non-OK response carries a junk body — treat it like a network
-      // failure so the same fallback path is taken (not silently parsed).
-      // ok===false (not !ok) so a mock/response with no ok property (undefined)
-      // is treated as success — preserving pre-existing test compatibility.
+      // .ok === false (NOT !ok): in standard Node/undici a real Response.ok is
+      // always a boolean, so in production this is exactly equivalent to !ok
+      // for a non-OK HTTP response (network/timeout rejects are caught below
+      // regardless). The stricter check is DELIBERATE — a resolved object with
+      // no `ok` property (undefined), as in the pre-existing fetch mocks in
+      // matchSystem.botmove.test.js, must be treated as success, not routed to
+      // fallback. Do NOT change to !ok (it would break those mocks / alter
+      // healthy-path behavior under them).
       if (detailsRes.ok === false) throw new Error(`TMDB details ${detailsRes.status}`);
       const detailsData = await detailsRes.json();
       if (detailsData && detailsData.id) {
@@ -402,6 +406,14 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
         }];
       }
     } catch (e) {
+      // Deliberately broad: this is a FAILURE-ONLY path. A genuine TMDB
+      // network/timeout/non-OK lands here and we serve local data instead of
+      // eliminating the player. A programming error in the healthy block would
+      // also land here → fallback-or-[] → the existing eliminate path (same net
+      // outcome the pre-catch code had via submit's outer catch). Narrowing
+      // (instanceof checks) was considered and deferred — not worth the risk on
+      // a failure-only path; revisit only if prod monitoring shows fallback
+      // hits during healthy TMDB uptime.
       // Phase 5b: TMDB details unreachable. If we have this movie locally,
       // resolve from it so the player isn't eliminated by an outage. Movies
       // only (direct.mediaType may be 'tv' — the fallback DB has no TV);
@@ -421,9 +433,14 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
         `${TMDB_API_BASE}/search/${searchType}?query=${encodeURIComponent(movie)}&include_adult=false&language=en-US&page=1`,
         { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
       );
-      // Non-OK → take the fallback path, don't parse a junk body.
-      // ok===false (not !ok) so a mock/response with no ok property (undefined)
-      // is treated as success — preserving pre-existing test compatibility.
+      // .ok === false (NOT !ok): in standard Node/undici a real Response.ok is
+      // always a boolean, so in production this is exactly equivalent to !ok
+      // for a non-OK HTTP response (network/timeout rejects are caught below
+      // regardless). The stricter check is DELIBERATE — a resolved object with
+      // no `ok` property (undefined), as in the pre-existing fetch mocks in
+      // matchSystem.botmove.test.js, must be treated as success, not routed to
+      // fallback. Do NOT change to !ok (it would break those mocks / alter
+      // healthy-path behavior under them).
       if (searchRes.ok === false) throw new Error(`TMDB search ${searchRes.status}`);
       const searchData = await searchRes.json();
       let results = (searchData.results || []).filter(r => r.media_type !== 'person');
@@ -446,22 +463,34 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
 
       topCandidates = results.slice(0, 5);
     } catch (e) {
+      // Deliberately broad: this is a FAILURE-ONLY path. A genuine TMDB
+      // network/timeout/non-OK lands here and we serve local data instead of
+      // eliminating the player. A programming error in the healthy block would
+      // also land here → fallback-or-[] → the existing eliminate path (same net
+      // outcome the pre-catch code had via submit's outer catch). Narrowing
+      // (instanceof checks) was considered and deferred — not worth the risk on
+      // a failure-only path; revisit only if prod monitoring shows fallback
+      // hits during healthy TMDB uptime.
       // Phase 5b: TMDB search unreachable. Rank the LOCAL DB by title with
       // the SAME levenshtein + theme filter the live path uses. Map to a NEW
       // array first (allFallback() returns the loader cache BY REFERENCE —
       // sorting it in place would corrupt the cache for every later lookup).
       const target = movie.toLowerCase();
+      // Intermediate projection: carry the raw entry (`raw`) through the theme
+      // filter + levenshtein sort so _fallbackCandidate runs only on the
+      // sliced top 5 — not on all ~1060 entries. (Also: .map() makes a NEW
+      // array so the sort never mutates allFallback()'s by-reference cache.)
       let local = fallbackMovies.allFallback().map(entry => ({
         // TMDB-shaped just enough for matchesTheme + the sort key.
         id: entry.id, title: entry.title, media_type: 'movie',
-        release_date: `${entry.year}-01-01`, _entry: entry,
+        release_date: `${entry.year}-01-01`, raw: entry,
       }));
       if (room.theme && room.theme !== 'any') {
         local = local.filter(r => themesSystem.matchesTheme(room.theme, r));
       }
       local.sort((a, b) =>
         levenshtein(a.title.toLowerCase(), target) - levenshtein(b.title.toLowerCase(), target));
-      topCandidates = local.slice(0, 5).map(r => _fallbackCandidate(r._entry));
+      topCandidates = local.slice(0, 5).map(r => _fallbackCandidate(r.raw));
     }
   }
 
