@@ -275,6 +275,23 @@
                        .modal-close child, so static = legacy parity */
   animation: none;
 }
+/* WHY (Phase 7.3 parity — holistic-review C1): legacy prompts used inline
+   cssText, which is immune to @media stylesheet rules. On .modal-card they
+   now inherit 05-responsive.css's @media(max-width:767px) .modal-card
+   override (padding/border-radius/max-height/overflow). .modal-card--prompt
+   ties that rule on specificity but loses on source order (05 loads after
+   04), so mobile prompts would regress. A two-class selector
+   (.modal-card.modal-card--prompt, specificity 0,0,2,0) beats BOTH
+   single-class rules at every viewport regardless of file order and
+   re-asserts the EXACT legacy inline values — zero pixel change vs the old
+   cssText (legacy card had padding:2rem, border-radius:1rem, and no
+   max-height/overflow, i.e. the defaults none/visible). */
+.modal-card.modal-card--prompt {
+  padding: 2rem;
+  border-radius: 1rem;
+  max-height: none;
+  overflow-y: visible;
+}
 .modal-prompt-title {
   margin: 0 0 0.25rem;
   font-size: 1.25rem;
