@@ -47,4 +47,19 @@ describe('data/dailyMovies.json — structural integrity', () => {
     const ids = new Set(list.map((m) => m.id));
     for (const id of CORE_IDS) expect(ids.has(id)).toBe(true);
   });
+
+  // WHY: MovieMatch is a cast-chain game — every move is validated by a
+  // shared cast member. These 4 ids are animated shorts/films for which TMDB
+  // returns ZERO cast (Piper/Kitbull/Far from the Tree are Pixar/wordless
+  // shorts; Flow has no voice cast), so when pickDailyMovie's deterministic
+  // date-seed lands on one the puzzle is literally unsolvable (no cast = no
+  // valid connection can ever be formed). They are excluded from the
+  // cast-based fallback DB for the same reason; this guard keeps them out of
+  // the daily pool so a future regeneration that re-adds them fails CI.
+  const CASTLESS_SHORT_IDS = [399106, 574074, 823219, 831827];
+
+  test('excludes known cast-less shorts (unsolvable daily puzzles)', () => {
+    const ids = new Set(list.map((m) => m.id));
+    for (const id of CASTLESS_SHORT_IDS) expect(ids.has(id)).toBe(false);
+  });
 });
