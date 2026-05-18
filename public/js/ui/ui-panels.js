@@ -18,6 +18,15 @@ import { attachPosterFallback } from './ui-dom.js';
 // no barrel cycle (same discipline as 7.2's feedback.js).
 import { createPromptModal } from './modal.js';
 import { buildDailyPromptConfig } from './name-prompts.js';
+// Phase 7.4 (Daily ritual): direct sibling import — daily-ritual.js imports
+// nothing, so this keeps the one-way module DAG (no ./ui.js barrel cycle),
+// the same discipline as the 7.3 modal imports above.
+import { formatResetCountdown, computeDailyStreak, readDailyStreak, writeDailyStreak } from './daily-ritual.js';
+
+// Phase 7.4: the single live daily-reset countdown interval id (see
+// renderDailyResult). Module-scoped so a re-open can hard-clear any prior
+// one — bounding the app to at most ONE such interval, ever.
+let _dailyCountdownTimer = null;
 
 // =========================================================================
 // ANIMATED CHAIN REPLAY (L2)
@@ -303,6 +312,12 @@ export function renderDailyResult(data) {
   const shareBtn = document.getElementById('daily-result-share-btn');
   if (!titleEl || !subEl || !bodyEl || !shareBtn) return;
 
+  // Phase 7.4: a previous open may have left the countdown interval running
+  // (e.g. closed via the ✕ global handler). Hard-clear it here so re-opening
+  // never stacks intervals — at most one is ever live.
+  clearInterval(_dailyCountdownTimer);
+  _dailyCountdownTimer = null;
+
   const isAlreadyPlayed = !!data.alreadyPlayed;
   const puzzleNumber = data.puzzleNumber || 1;
   const date = data.date || '';
@@ -428,6 +443,46 @@ export function renderDailyResult(data) {
     closeBtn.parentNode.replaceChild(fresh, closeBtn);
     fresh.addEventListener('click', () => modal.classList.add('hidden'));
   }
+
+  // Phase 7.4 (Daily ritual): append a single additive block (device-local
+  // streak + live reset countdown) as the LAST child of the rebuilt body.
+  // WHY append + rebuilt-body: bodyEl.textContent was cleared at the top of
+  // this function and fully rebuilt, so adding one trailing child touches no
+  // existing node and is idempotent across re-opens. No stableId is read;
+  // nothing here is sent to the server (Phase-1 security + no-accounts).
+  const ritual = document.createElement('div');
+  ritual.className = 'daily-ritual';
+
+  const prevStreak = readDailyStreak();
+  const { streak, next } = computeDailyStreak(puzzleNumber, prevStreak);
+  writeDailyStreak(next);
+
+  const streakEl = document.createElement('div');
+  streakEl.className = 'daily-streak';
+  streakEl.textContent = `Day ${streak} 🔥`;
+
+  const countdownEl = document.createElement('div');
+  countdownEl.className = 'daily-countdown';
+  countdownEl.textContent = `Resets in ${formatResetCountdown()}`;
+
+  ritual.appendChild(streakEl);
+  ritual.appendChild(countdownEl);
+  bodyEl.appendChild(ritual);
+
+  // Phase 7.4: keep the countdown live (minute cadence — h/m granularity
+  // never needs faster). Self-clearing: the first tick that observes the
+  // modal hidden clears itself, so EVERY close path (Done button, the ✕
+  // global .modal-close handler, any programmatic .hidden) stops it without
+  // touching that global handler. Combined with the top-of-render hard-clear
+  // this bounds the app to ≤1 live interval, ever.
+  _dailyCountdownTimer = setInterval(() => {
+    if (modal.classList.contains('hidden')) {
+      clearInterval(_dailyCountdownTimer);
+      _dailyCountdownTimer = null;
+      return;
+    }
+    countdownEl.textContent = `Resets in ${formatResetCountdown()}`;
+  }, 60000);
 
   modal.classList.remove('hidden');
 }

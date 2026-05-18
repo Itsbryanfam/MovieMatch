@@ -248,6 +248,34 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Phase 7.4 (Daily ritual) — additive only; no existing rule touched. The
+   streak badge + reset countdown sit at the foot of the result body. Static
+   styling only (no animation) so prefers-reduced-motion needs no special
+   case here. */
+.daily-ritual {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.10), rgba(217, 119, 6, 0.05));
+  border: 1px solid rgba(245, 158, 11, 0.22);
+}
+.daily-streak {
+  font-weight: 800;
+  color: #fbbf24;
+  font-size: 1rem;
+}
+.daily-countdown {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* =============================================
    H5: MY STATS MODAL
    =============================================

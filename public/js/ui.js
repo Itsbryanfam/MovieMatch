@@ -10,6 +10,7 @@ export * from './ui/feedback.js';   // Phase 7.2: feedback router (toast/gameEve
 export * from './ui/modal.js';   // Phase 7.3: shared prompt-modal factory (MI-02)
 export * from './ui/name-prompts.js';   // Phase 7.3: per-prompt config builders (MI-02)
 export * from './ui/timer-panic.js';   // Phase 7.4: pure timer-severity seam (Panic Timer)
+export * from './ui/daily-ritual.js';   // Phase 7.4: pure daily-ritual seams (countdown + streak)
 export * from './ui/ui-autocomplete.js';
 export * from './ui/ui-sharecard.js';
 export * from './ui/ui-panels.js';
