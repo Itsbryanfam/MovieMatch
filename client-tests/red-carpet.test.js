@@ -44,6 +44,15 @@ describe('diffArrivals', () => {
     expect(diffArrivals(new Set(), [{ id: 'a' }, {}, { id: null }, { id: 'b' }]).seen)
       .toEqual(['a', 'b']);
   });
+  test('id guard: defined non-null id (0 or empty string) is a valid id (not skipped)', () => {
+    // WHY: the guard is `=== undefined || === null`, NOT falsy. A defined id of
+    // `0` or `''` is treated as valid. Socket ids are always non-empty strings;
+    // this test pins the chosen semantics so a future change to a falsy check
+    // would be a visible, deliberate decision.
+    // id:0 is a DEFINED, non-null id → treated as valid (not skipped). Socket
+    // ids are always non-empty strings; this pins the chosen guard semantics.
+    expect(diffArrivals(new Set(), [{ id: 0 }, { id: 'b' }]).seen).toEqual([0, 'b']);
+  });
   test('does not mutate inputs (purity)', () => {
     const seen = new Set(['a']);
     const players = [{ id: 'a' }, { id: 'b' }];
@@ -69,6 +78,8 @@ describe('playerCardModel', () => {
     expect(ACCENT_EMOJI).toContain(m.accentEmoji);
   });
   test('different identity → different accent (hue or emoji differs)', () => {
+    // WHY disjunction: fixtures were chosen so BOTH hue AND emoji differ for
+    // these two inputs, so the test is not vacuously satisfied by one component.
     const a = playerCardModel({ id: 's1', name: 'Ada' }, {});
     const b = playerCardModel({ id: 's2', name: 'Bo' }, {});
     expect(a.accentHue !== b.accentHue || a.accentEmoji !== b.accentEmoji).toBe(true);
@@ -95,6 +106,17 @@ describe('playerCardModel', () => {
     expect(() => playerCardModel({}, {})).not.toThrow();
     expect(() => playerCardModel(null, null)).not.toThrow();
     expect(playerCardModel({}, {}).name).toBe('');
+  });
+  test('label: wins badge only for a positive finite count (defensive)', () => {
+    // WHY: pins the intentional Number.isFinite guard — no trophy badge for
+    // 0 / negative / NaN / Infinity; badge only for a positive finite integer.
+    // Byte-identical to pre-7.5 for the always-non-negative-integer the
+    // server emits; a deliberate strict superset for malformed values.
+    expect(playerCardModel({ id: 'a', name: 'A', wins: 0 }, {}).label).toBe('A');
+    expect(playerCardModel({ id: 'b', name: 'B', wins: -4 }, {}).label).toBe('B');
+    expect(playerCardModel({ id: 'c', name: 'C', wins: NaN }, {}).label).toBe('C');
+    expect(playerCardModel({ id: 'd', name: 'D', wins: Infinity }, {}).label).toBe('D');
+    expect(playerCardModel({ id: 'e', name: 'E', wins: 3 }, {}).label).toBe('E • 3 🏆');
   });
 });
 

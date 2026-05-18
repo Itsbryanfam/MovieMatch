@@ -41,6 +41,10 @@ export function diffArrivals(seenIds, players) {
   const entering = [];
   const seen = [];
   for (const p of list) {
+    // WHY `=== undefined || === null` (NOT a falsy check): a defined non-null
+    // id of `0` or `''` is treated as a VALID id and is NOT skipped. Socket
+    // ids are always non-empty strings in this codebase; this comment pins the
+    // chosen guard semantics so a future reader doesn't "fix" it to falsy.
     if (!p || p.id === undefined || p.id === null) continue;
     const id = p.id;
     seen.push(id);
@@ -71,10 +75,16 @@ function _djb2(str) {
  * structurally absent here — passing an object that happens to carry a
  * stableId must not change the output (sentinel-tested).
  *
- * `label` mirrors the EXACT pre-7.5 ui-render.js suffix semantics
- * (name, ' (You)', ' 👑', ' • N 🏆') so the card's textual identity line is
- * behaviour-equivalent to today (zero copy regression); the emoji/accent
- * are an additive visual layer on top.
+ * `label` is byte-identical to pre-7.5 ui-render.js for the only `wins`
+ * values the server ever emits — always a non-negative integer — so the
+ * card's textual identity line is behaviour-equivalent today (zero copy
+ * regression). The `Number.isFinite(p.wins) && p.wins > 0` guard is a
+ * deliberate defensive hardening (NOT a Math.floor — pre-7.5 renders a float
+ * like 2.7 verbatim, flooring would diverge): it maps malformed wins
+ * (NaN / Infinity / negative / non-numeric) to "no trophy badge" instead of
+ * mirroring pre-7.5's implicit coercion. For real server data the two are
+ * byte-identical; this is a strict intentional superset, not an oversight.
+ * The emoji/accent are an additive visual layer on top.
  */
 export function playerCardModel(player, opts) {
   const p = player || {};
