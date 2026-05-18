@@ -304,9 +304,16 @@ export function clearGhostAttempt() {
   chainDisplay?.querySelectorAll('.ghost-attempt').forEach(el => el.remove());
 }
 
-export function showToast(msg) {
+// Phase 7.2 (MI-01): showToast gains an optional variant so the feedback
+// router can colour validation errors / successes differently from neutral
+// info, WITHOUT changing the call shape for existing string-only callers
+// (default 'info' = today's neutral look). `toast.className = 'copy-toast'`
+// already wipes any prior variant/visible class on the reused element, so
+// re-adding the variant below can never leak across consecutive toasts.
+export function showToast(msg, { variant = 'info' } = {}) {
   const toast = document.querySelector('.copy-toast') || document.createElement('div');
   toast.className = 'copy-toast';
+  toast.classList.add('copy-toast--' + variant);
   toast.textContent = msg;
   if (!toast.parentElement) document.body.appendChild(toast);
   toast.classList.add('visible');
