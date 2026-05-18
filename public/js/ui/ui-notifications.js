@@ -45,7 +45,9 @@ export function showSelfEliminationScreen(details) {
   el.className = 'self-elim-screen';
 
   // Simple/legacy path — no details, brief auto-dismiss flash.
-  if (!details || !details.lastChainEntry || !details.yourGuess) {
+  // 7.1: a timeout payload has lastChainEntry + timedOut but no yourGuess —
+  // it must take the detailed path, not the legacy flash.
+  if (!details || !details.lastChainEntry || (!details.yourGuess && !details.timedOut)) {
     el.innerHTML = `
       <div class="self-elim-icon">💀</div>
       <div class="self-elim-title">You've Been Eliminated</div>
@@ -74,10 +76,12 @@ export function showSelfEliminationScreen(details) {
   icon.textContent = '💀';
   const title = document.createElement('div');
   title.className = 'self-elim-title';
-  title.textContent = "You've Been Eliminated";
+  // 7.1: timeout payloads get a distinct head so the player knows why they
+  // were eliminated (froze vs. bad connection) without reading the sub-line.
+  title.textContent = details.timedOut ? "Time's up — you froze" : "You've Been Eliminated";
   const sub = document.createElement('div');
   sub.className = 'self-elim-sub';
-  sub.textContent = details.reason || 'Invalid connection';
+  sub.textContent = details.reason || (details.timedOut ? 'You ran out of time' : 'Invalid connection');
   head.appendChild(icon);
   head.appendChild(title);
   head.appendChild(sub);
@@ -112,28 +116,49 @@ export function showSelfEliminationScreen(details) {
   };
 
   grid.appendChild(buildColumn('Needed a connection to', details.lastChainEntry, 'self-elim-col--needed'));
-  grid.appendChild(buildColumn('You played', details.yourGuess, 'self-elim-col--played'));
-
-  // Phase 6a: when the server computed a move that WOULD have connected,
-  // surface it beneath the comparison — turns "you were wrong" into "here's
-  // what right looked like". Optional + additive: absent ⇒ this block (and
-  // the .self-elim-could node) simply does not exist, so the card is
-  // byte-identical to the pre-6a card. textContent (not innerHTML) keeps the
-  // file's no-innerHTML XSS posture; titles are TMDB-sourced but we stay
-  // consistent with the rest of this renderer.
-  let couldEl = null;
-  if (details.couldHavePlayed && details.couldHavePlayed.title) {
-    couldEl = document.createElement('div');
-    couldEl.className = 'self-elim-could';
-    const y = details.couldHavePlayed.year;
-    couldEl.textContent = `You could have played: ${details.couldHavePlayed.title}${y ? ` (${y})` : ''}`;
+  // 7.1: no guess on a timeout — render only the needed column so we don't
+  // try to render an empty/undefined yourGuess as a movie card.
+  if (!details.timedOut && details.yourGuess) {
+    grid.appendChild(buildColumn('You played', details.yourGuess, 'self-elim-col--played'));
   }
 
-  // Hint line — small, encouraging, generic (we don't compute the literal
-  // "best next move" here; that's a Week 4+ stretch).
-  const hint = document.createElement('div');
-  hint.className = 'self-elim-hint';
-  hint.textContent = 'No actor appears in both casts above. Look for shared names next time.';
+  // Phase 7.1: surface up to 3 outs (movies that would have connected via a
+  // shared actor) so the player learns the concrete missed opportunity. Each
+  // out is {title, year, viaActor} — all rendered via textContent (no
+  // innerHTML) to preserve the file's XSS posture; titles/actors are
+  // TMDB-sourced but we stay consistent. The bridge line replaces the generic
+  // hint when outs are present — a specific lesson is more actionable.
+  let outsEl = null;
+  if (Array.isArray(details.outs) && details.outs.length) {
+    outsEl = document.createElement('div');
+    outsEl.className = 'self-elim-outs';
+    const lbl = document.createElement('div');
+    lbl.className = 'self-elim-outs-label';
+    lbl.textContent = 'You had outs:';
+    outsEl.appendChild(lbl);
+    details.outs.slice(0, 3).forEach(o => {
+      const row = document.createElement('div');
+      row.className = 'self-elim-outs-row';
+      const y = o && o.year ? ` (${o.year})` : '';
+      const via = o && o.viaActor ? ` — via ${o.viaActor}` : '';
+      // textContent only — titles/actors are TMDB-sourced; no innerHTML.
+      row.textContent = `${(o && o.title) || 'Unknown'}${y}${via}`;
+      outsEl.appendChild(row);
+    });
+    const bridge = document.createElement('div');
+    bridge.className = 'self-elim-bridge';
+    bridge.textContent = 'You were one bridge away.';
+    outsEl.appendChild(bridge);
+  }
+
+  // Generic hint is the no-outs fallback only — when we have concrete outs the
+  // bridge line above carries the lesson.
+  let hint = null;
+  if (!outsEl) {
+    hint = document.createElement('div');
+    hint.className = 'self-elim-hint';
+    hint.textContent = 'No actor appears in both casts above. Look for shared names next time.';
+  }
 
   // Dismiss button — explicit close so screen-reader users have a clear
   // exit. Pressing Escape also dismisses (handled via the close path).
@@ -151,9 +176,10 @@ export function showSelfEliminationScreen(details) {
 
   card.appendChild(head);
   card.appendChild(grid);
-  // Phase 6a: only present when the server supplied a suggestion (above).
-  if (couldEl) card.appendChild(couldEl);
-  card.appendChild(hint);
+  // 7.1: outs block (if present) replaces the generic hint; hint is null when
+  // outsEl is set, so exactly one of these appends a non-null element.
+  if (outsEl) card.appendChild(outsEl);
+  if (hint) card.appendChild(hint);
   card.appendChild(close);
   el.appendChild(card);
 

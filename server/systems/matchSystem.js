@@ -267,33 +267,33 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
         const triedCandidate = candidateMovies[0];
         const lastChainEntry = room.chain.length > 0 ? room.chain[room.chain.length - 1] : null;
         if (triedCandidate && lastChainEntry) {
-          // Cast may be {id, name} objects (post-H4) or bare strings on
-          // legacy in-flight rooms — normalize to plain names for the
-          // wire format so the client doesn't have to handle both shapes.
-          const namesOnly = (cast) =>
-            (cast || []).slice(0, 10).map(a => typeof a === 'string' ? a : (a && a.name) || '');
+          // Phase 7.1 Task 1: use topCastNames (shared helper) so both the
+          // invalid-connection path here and the timeout path (Task 2) produce
+          // the same wire shape without duplicating the slice+map logic.
           // Phase 6a: best-effort, fail-closed "what would have worked".
           // Awaited before the private emit so it rides the existing single
           // youWereEliminated event (no new event by design). Bounded by
           // COULD_HAVE_PLAYED_TIMEOUT_MS; worst case (TMDB cache miss) this
           // delays the room-wide elimination by that bound — acceptable and
           // bounded; the common path is a cache hit (tens of ms).
-          const couldHavePlayed = await _computeCouldHavePlayed(room, pubClient, TMDB_HEADERS);
+          // Phase 7.1 Task 1: result is now an array of {title,year,viaActor}
+          // outs (up to 3) rather than a single couldHavePlayed object.
+          const outs = await _computeCouldHavePlayed(room, pubClient, TMDB_HEADERS);
           socket.emit('youWereEliminated', {
             yourGuess: {
               title: triedCandidate.title,
               year: triedCandidate.year,
-              cast: namesOnly(triedCandidate.cast),
+              cast: topCastNames(triedCandidate.cast),
             },
             lastChainEntry: {
               title: lastChainEntry.movie.title,
               year: lastChainEntry.movie.year,
-              cast: namesOnly(lastChainEntry.movie.cast),
+              cast: topCastNames(lastChainEntry.movie.cast),
             },
             reason: result.reason,
             // Additive + optional: omitted entirely on miss/error/timeout so
             // the client (and every existing H3 assertion) sees no change.
-            ...(couldHavePlayed ? { couldHavePlayed } : {}),
+            ...(outs && outs.length ? { outs } : {}),
           });
         }
 
@@ -399,8 +399,17 @@ function _fallbackCandidate(entry) {
   };
 }
 
-// Phase 6a: compute one valid "you could have played X" suggestion for the
-// eliminated player, reusing the merged Phase 5a bot pathfinder READ-ONLY.
+// Top-10 cast names — the wire shape both elimination paths send so the
+// self-elim card renders identically. Exported so gameLogic's timeout emit
+// (Task 2) doesn't re-implement the trim.
+function topCastNames(cast) {
+  return (cast || []).slice(0, 10).map(a => typeof a === 'string' ? a : (a && a.name) || '');
+}
+
+// Phase 7.1 Task 1: compute up to 3 "you could have played X" outs for the
+// eliminated player, using enumerateConnectingMoves (the read-side enumerator
+// from Phase 7.1 Task 0) instead of the single-move generateBotMove call.
+// Each out carries viaActor so the self-elim card can show the bridging actor.
 // Contract: NEVER throws, NEVER returns partial data, and never blocks the
 // caller beyond COULD_HAVE_PLAYED_TIMEOUT_MS. Any miss/error/timeout → null
 // (the H3 card degrades gracefully — see ui-notifications legacy path).
@@ -410,26 +419,39 @@ async function _computeCouldHavePlayed(room, pubClient, headers) {
   try {
     const work = (async () => {
       const botSystem = require('./botSystem');
-      // rng:()=>0 ⇒ deterministic pick of the most-popular candidate; with
-      // SUGGESTION_BOT_PROFILE.whiff===0 the pathfinder never blanks.
-      const move = await botSystem.generateBotMove(room, SUGGESTION_BOT_PROFILE, {
+      // enumerateConnectingMoves: read-side, fail-closed, returns [] on error.
+      // rng:()=>0 ⇒ deterministic most-popular-first ordering of actors.
+      // popularityFloor from SUGGESTION_BOT_PROFILE maximises candidate coverage.
+      const moves = await botSystem.enumerateConnectingMoves(room, {
         pubClient,
         headers,
-        rng: () => 0,
+        rng: () => 0, // deterministic most-popular-first
         getOrFetchPersonCredits: redisUtils.getOrFetchPersonCredits,
-        // generateBotMove only reads dailySeed when chain.length===0; the H3 site always has chain.length>=1, so [] is never consulted.
-        dailySeed: [],
-      });
-      if (!move || move.tmdbId == null) return null;
-      // Resolve id → title/year via the SAME direct-ID path submitBotMove
-      // uses (cached). movie arg is null ⇒ no fuzzy search.
-      const cands = await resolveCandidates(room, null, move.tmdbId, move.mediaType, headers);
-      const top = cands && cands[0];
-      if (!top || !top.id) return null;
-      const title = top.title || top.name;
-      if (!title) return null;
-      const year = (`${top.release_date || top.first_air_date || ''}`).split('-')[0] || '';
-      return { title, year };
+        popularityFloor: SUGGESTION_BOT_PROFILE.popularityFloor,
+        dailySeed: [], // unused by enumerateConnectingMoves (only generateBotMove consults it); passed for deps-shape parity
+      }, { limit: 3 });
+      if (!moves || moves.length === 0) return null;
+      const outs = [];
+      // Dedupe by display title (not tmdbId) because the enumerator already
+      // deduped by tmdbId; two distinct tmdbIds sharing the same on-card title
+      // string are indistinguishable to the player — showing both is confusing.
+      const seenTitles = new Set();
+      for (const mv of moves) {
+        // Resolve each candidate id → title/year via the same direct-ID path
+        // submitBotMove uses (cached). movie arg is null ⇒ no fuzzy search.
+        // Call via module.exports so jest.spyOn(matchSystem,'resolveCandidates')
+        // intercepts in tests — same spy-able pattern as botSystem.js line ~333.
+        const cands = await module.exports.resolveCandidates(room, null, mv.tmdbId, mv.mediaType, headers);
+        const top = cands && cands[0];
+        if (!top || !top.id) continue;
+        const title = top.title || top.name;
+        if (!title || seenTitles.has(title)) continue;
+        seenTitles.add(title);
+        const year = (`${top.release_date || top.first_air_date || ''}`).split('-')[0] || '';
+        outs.push({ title, year, viaActor: (mv.viaActor && mv.viaActor.name) || '' });
+        if (outs.length >= 3) break;
+      }
+      return outs.length ? outs : null;
     })();
     // Capture the timer id so we can cancel it once the race settles, and
     // .unref() it so a pending suggestion timer never by itself pins a Jest
@@ -930,4 +952,9 @@ module.exports = {
   validateChainConnection,
   commitPlay,
   submitBotMove,
+  // Phase 7.1 Task 1: exported for unit tests + Task 2 reuse (timeout path).
+  // _computeCouldHavePlayed is the fail-closed outs builder; topCastNames is
+  // the shared cast-trim helper so both elimination paths produce the same shape.
+  _computeCouldHavePlayed,
+  topCastNames,
 };
