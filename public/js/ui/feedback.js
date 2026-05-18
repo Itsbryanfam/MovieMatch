@@ -45,3 +45,39 @@ export function gameEvent(kind, { msg = '', selfElimActive = false } = {}) {
   // (In 7.2 the socket handler routes 'info' to toast() instead and never
   // calls gameEvent for it — this branch stays for any direct caller.)
 }
+
+// CG-03 submission pill. WHY: today submitMovie() clears + disables the input
+// and shows a static "Validating connection..." hint, so the player's typed
+// title vanishes for the whole TMDB round-trip. This keeps the intent visible.
+// A small explicit mode guard prevents a debounced "Searching…" from stomping
+// a "Checking:" pill the player just produced by pressing Enter, and lets a
+// late autocomplete response clear ONLY the searching state. textContent only
+// (titles are user/TMDB input) — preserves the file's no-innerHTML posture.
+let _pillMode = null; // null | 'checking' | 'searching'
+function _pillEl() { return document.getElementById('submission-pill'); }
+
+export const submissionPill = {
+  checking(title) {
+    const el = _pillEl();
+    if (!el) return;
+    _pillMode = 'checking';
+    el.textContent = `Checking: "${title}"`;
+    el.classList.add('visible');
+  },
+  searching() {
+    const el = _pillEl();
+    if (!el) return;
+    if (_pillMode === 'checking') return; // never override a submitted-title pill
+    _pillMode = 'searching';
+    el.textContent = 'Searching…';
+    el.classList.add('visible');
+  },
+  clear(onlyMode) {
+    const el = _pillEl();
+    if (!el) return;
+    if (onlyMode && _pillMode !== onlyMode) return; // scoped clear (e.g. stale ac result)
+    _pillMode = null;
+    el.textContent = '';
+    el.classList.remove('visible');
+  },
+};
