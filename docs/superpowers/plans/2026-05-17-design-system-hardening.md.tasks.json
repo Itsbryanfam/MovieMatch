@@ -24,10 +24,10 @@
     {
       "id": 3,
       "subject": "Task 3: Self-elim CSS hygiene (public/css/06-states-anim.css)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2],
       "description": "**Goal:** Delete orphaned .self-elim-could, style the unstyled 7.1 .self-elim-outs*/.self-elim-bridge classes, fix single-child .self-elim-grid timeout asymmetry — guarded by a DOM-contract test.\n\n**Files:**\n- Modify: public/css/06-states-anim.css (delete :1082-1093; append outs styling + .self-elim-col:only-child)\n- Create: client-tests/self-elim-hygiene.test.js\n\n**Verify:** `npx jest client-tests/self-elim-hygiene.test.js client-tests/self-elim-aftercare.test.js client-tests/learning-breakdown.test.js` pass; `npx jest` full suite green. CSS pixel correctness user-side.\n\n**Steps:** write self-elim-hygiene.test.js (no .self-elim-could emitted; .self-elim-outs*/-bridge emitted; timeout = single .self-elim-col) — characterization guard, passes on current code — -> delete orphan rule+comment :1082-1093 (siblings untouched) -> append outs styling (green #34d399/rgba(52,211,153) palette matching deleted .self-elim-could; no motion) + .self-elim-col:only-child{grid-column:1/-1} -> guard+siblings+full suite green -> verify branch -> commit.\n\n```json:metadata\n{\"files\": [\"public/css/06-states-anim.css\", \"client-tests/self-elim-hygiene.test.js\"], \"verifyCommand\": \"npx jest client-tests/self-elim-hygiene.test.js client-tests/self-elim-aftercare.test.js client-tests/learning-breakdown.test.js\", \"acceptanceCriteria\": [\"orphaned .self-elim-could + its comment (:1082-1093) deleted; no other rule touched\", \".self-elim-outs/-label/-row/.self-elim-bridge styled consistent with the green self-elim palette; legible; no new motion (prefers-reduced-motion safe)\", \"single-child .self-elim-grid centered via .self-elim-col:only-child{grid-column:1/-1}; 2-col + @media 540px 1fr unchanged\", \"no JS change; self-elim-hygiene.test.js passes; self-elim-aftercare + learning-breakdown pass unmodified\", \"WHY comments\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-18T08:00:00Z"
+  "lastUpdated": "2026-05-18T08:45:00Z"
 }
