@@ -12,6 +12,8 @@ const telemetry = require('../telemetry');
 const statsSystem = require('./statsSystem');
 const soloObjectivesSystem = require('./soloObjectivesSystem');
 const themesSystem = require('./themesSystem');
+// Phase 5b: local fallback movie DB (leaf module — fs/path only, no cycle).
+const fallbackMovies = require('./fallbackMovies');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
@@ -356,6 +358,21 @@ function _validatedDirectLookup(room, tmdbId, mediaType) {
   return { id: idNum, mediaType };
 }
 
+// Phase 5b: a fallback entry → the EXACT candidate shape resolveCandidates'
+// live blocks produce, so enrichWithCredits/validateChainConnection stay
+// shape-agnostic. mediaType is always 'movie' (the fallback DB is movies-only).
+function _fallbackCandidate(entry) {
+  return {
+    id: entry.id,
+    media_type: 'movie',
+    name: entry.title,
+    title: entry.title,
+    release_date: `${entry.year}-01-01`,
+    first_air_date: undefined,
+    poster_path: null,
+  };
+}
+
 async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
   let topCandidates = [];
 
@@ -364,49 +381,88 @@ async function resolveCandidates(room, movie, tmdbId, mediaType, headers) {
   const direct = _validatedDirectLookup(room, tmdbId, mediaType);
   if (direct) {
     const lookupUrl = `${TMDB_API_BASE}/${direct.mediaType}/${direct.id}?language=en-US`;
-    const detailsRes = await fetch(lookupUrl, { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) });
-    const detailsData = await detailsRes.json();
-    if (detailsData && detailsData.id) {
-      topCandidates = [{
-        id: detailsData.id,
-        // Use the validated mediaType, never the raw client string.
-        media_type: direct.mediaType,
-        name: detailsData.name,
-        title: detailsData.title || detailsData.name,
-        release_date: detailsData.release_date,
-        first_air_date: detailsData.first_air_date,
-        poster_path: detailsData.poster_path
-      }];
+    try {
+      const detailsRes = await fetch(lookupUrl, { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) });
+      // A non-OK response carries a junk body — treat it like a network
+      // failure so the same fallback path is taken (not silently parsed).
+      // ok===false (not !ok) so a mock/response with no ok property (undefined)
+      // is treated as success — preserving pre-existing test compatibility.
+      if (detailsRes.ok === false) throw new Error(`TMDB details ${detailsRes.status}`);
+      const detailsData = await detailsRes.json();
+      if (detailsData && detailsData.id) {
+        topCandidates = [{
+          id: detailsData.id,
+          // Use the validated mediaType, never the raw client string.
+          media_type: direct.mediaType,
+          name: detailsData.name,
+          title: detailsData.title || detailsData.name,
+          release_date: detailsData.release_date,
+          first_air_date: detailsData.first_air_date,
+          poster_path: detailsData.poster_path
+        }];
+      }
+    } catch (e) {
+      // Phase 5b: TMDB details unreachable. If we have this movie locally,
+      // resolve from it so the player isn't eliminated by an outage. Movies
+      // only (direct.mediaType may be 'tv' — the fallback DB has no TV);
+      // otherwise topCandidates stays [] → the existing typo/eliminate path.
+      if (direct.mediaType === 'movie') {
+        const fb = fallbackMovies.getFallbackById(direct.id);
+        if (fb) topCandidates = [_fallbackCandidate(fb)];
+      }
     }
   }
 
   // Fuzzy text search fallback
   if (topCandidates.length === 0 && movie) {
     const searchType = room.allowTvShows ? 'multi' : 'movie';
-    const searchRes = await fetch(
-      `${TMDB_API_BASE}/search/${searchType}?query=${encodeURIComponent(movie)}&include_adult=false&language=en-US&page=1`,
-      { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
-    );
-    const searchData = await searchRes.json();
-    let results = (searchData.results || []).filter(r => r.media_type !== 'person');
+    try {
+      const searchRes = await fetch(
+        `${TMDB_API_BASE}/search/${searchType}?query=${encodeURIComponent(movie)}&include_adult=false&language=en-US&page=1`,
+        { headers, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
+      );
+      // Non-OK → take the fallback path, don't parse a junk body.
+      // ok===false (not !ok) so a mock/response with no ok property (undefined)
+      // is treated as success — preserving pre-existing test compatibility.
+      if (searchRes.ok === false) throw new Error(`TMDB search ${searchRes.status}`);
+      const searchData = await searchRes.json();
+      let results = (searchData.results || []).filter(r => r.media_type !== 'person');
 
-    // L1: Apply theme filter BEFORE the levenshtein sort — otherwise we
-    // could end up picking the closest-string-match result that doesn't
-    // fit the theme and still letting it through downstream. Filtering
-    // first means the candidates we hand to validation are already
-    // theme-compliant.
-    if (room.theme && room.theme !== 'any') {
-      results = results.filter(r => themesSystem.matchesTheme(room.theme, r));
-    }
+      // L1: Apply theme filter BEFORE the levenshtein sort — otherwise we
+      // could end up picking the closest-string-match result that doesn't
+      // fit the theme and still letting it through downstream. Filtering
+      // first means the candidates we hand to validation are already
+      // theme-compliant.
+      if (room.theme && room.theme !== 'any') {
+        results = results.filter(r => themesSystem.matchesTheme(room.theme, r));
+      }
 
-    results.sort((a, b) => {
-      const titleA = (a.media_type === 'tv' ? a.name : a.title || a.name || '').toLowerCase();
-      const titleB = (b.media_type === 'tv' ? b.name : b.title || b.name || '').toLowerCase();
+      results.sort((a, b) => {
+        const titleA = (a.media_type === 'tv' ? a.name : a.title || a.name || '').toLowerCase();
+        const titleB = (b.media_type === 'tv' ? b.name : b.title || b.name || '').toLowerCase();
+        const target = movie.toLowerCase();
+        return levenshtein(titleA, target) - levenshtein(titleB, target);
+      });
+
+      topCandidates = results.slice(0, 5);
+    } catch (e) {
+      // Phase 5b: TMDB search unreachable. Rank the LOCAL DB by title with
+      // the SAME levenshtein + theme filter the live path uses. Map to a NEW
+      // array first (allFallback() returns the loader cache BY REFERENCE —
+      // sorting it in place would corrupt the cache for every later lookup).
       const target = movie.toLowerCase();
-      return levenshtein(titleA, target) - levenshtein(titleB, target);
-    });
-
-    topCandidates = results.slice(0, 5);
+      let local = fallbackMovies.allFallback().map(entry => ({
+        // TMDB-shaped just enough for matchesTheme + the sort key.
+        id: entry.id, title: entry.title, media_type: 'movie',
+        release_date: `${entry.year}-01-01`, _entry: entry,
+      }));
+      if (room.theme && room.theme !== 'any') {
+        local = local.filter(r => themesSystem.matchesTheme(room.theme, r));
+      }
+      local.sort((a, b) =>
+        levenshtein(a.title.toLowerCase(), target) - levenshtein(b.title.toLowerCase(), target));
+      topCandidates = local.slice(0, 5).map(r => _fallbackCandidate(r._entry));
+    }
   }
 
   return topCandidates;
