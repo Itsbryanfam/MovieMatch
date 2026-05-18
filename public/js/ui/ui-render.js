@@ -13,7 +13,7 @@ import { getSocket, getCurrentLobbyId } from '../state.js';
 // creating a sideways ui-autocomplete → ui-render coupling.
 import {
   modeChips, modeDescription, waitingRoom, teamScreen,
-  lobbyCodeDisplay, lobbyPlayersList, lobbySettings,
+  lobbyCodeDisplay, lobbyPlayersList,
   hardcoreToggle, tvShowsToggle, publicRoomToggle, startBtn,
   teamLobbyCode, teamRedList, teamBlueList, joinRedBtn, joinBlueBtn,
   teamHint, teamStartBtn,
@@ -26,6 +26,18 @@ import {
 // Import clearGhostAttempt — renderChainItems removes the ghost card when a
 // new chain entry arrives, which lives in the notifications module.
 import { clearGhostAttempt } from './ui-notifications.js';
+// Phase 7.5: pure Red Carpet seams. Direct sibling import (NOT via the
+// ./ui.js barrel) — ui-render.js is itself re-exported by that barrel, so a
+// barrel import here would be a cycle (7.3 DAG discipline; mirrors the 7.4
+// ui-panels.js → ./daily-ritual.js precedent).
+import { diffArrivals, playerCardModel, rollCameraLabel } from './red-carpet.js';
+
+// Phase 7.5 Red Carpet: page-session set of player ids whose entrance card
+// has already been shown, so the entrance animation plays ONCE per real
+// arrival (renderLobby re-runs on EVERY stateUpdate/rejoin — idempotent).
+// Module-scoped, NOT persisted, NO stableId: a full page reload resets it,
+// which is the correct first-paint behaviour (everyone "arrives" once).
+let _seenPlayerIds = new Set();
 
 export function renderLobby(gameState, myPlayerId) {
   const amIHost = !!gameState.players.find(p => p.id === myPlayerId && p.isHost);
@@ -53,25 +65,52 @@ export function renderLobby(gameState, myPlayerId) {
   }
 
   lobbyCodeDisplay.innerText = gameState.id || '';
+
+  // Phase 7.5 Red Carpet: which players are *newly arriving* this page
+  // session? diffArrivals is pure; the seen-set is page-session module
+  // state (NOT persisted) so the entrance animation fires once on a real
+  // join — never replayed on the idempotent re-render every settings
+  // toggle / stateUpdate triggers.
+  const { entering, seen } = diffArrivals(_seenPlayerIds, gameState.players);
+  _seenPlayerIds = new Set(seen);
+
   lobbyPlayersList.innerHTML = '';
   gameState.players.forEach(p => {
+    // Phase 7.5: the row is now a Red Carpet "entrance card". The <li> +
+    // #lobby-players container + the textual label + the .bot-badge + the
+    // .btn-kick (same condition, same emit) are PRESERVED byte-for-byte so
+    // the existing render-lobby.test.js zero-regression guard stays green;
+    // the accent/emoji/animation are an ADDITIVE visual layer. The old
+    // inline li.style.cssText is removed — flex/align/justify now lives in
+    // the additive .entrance-card CSS (bounded DS-01, confined to the row
+    // we rewrite here).
+    const card = playerCardModel(p, { myPlayerId });
     const li = document.createElement('li');
-    li.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+    li.className = 'entrance-card'
+      + (card.isYou ? ' is-you' : '')
+      + (card.isHost ? ' is-host' : '')
+      + (card.isBot ? ' is-bot' : '')
+      + (entering.includes(p.id) ? ' is-entering' : '');
+    // WHY a CSS custom property (not a style rule): --card-accent is a
+    // per-player DATA value (the deterministic hue), not style debt — the
+    // same pattern modal.js uses; the .entrance-card rule consumes it via
+    // hsl(var(--card-accent) ...). Room-scoped (name+socket-id), NO stableId.
+    li.style.setProperty('--card-accent', String(card.accentHue));
+
+    const emoji = document.createElement('span');
+    emoji.className = 'entrance-card__emoji';
+    emoji.setAttribute('aria-hidden', 'true'); // decorative — name carries identity
+    emoji.textContent = card.accentEmoji;
+    li.appendChild(emoji);
 
     const nameSpan = document.createElement('span');
-    let label = p.name;
-    if (p.id === myPlayerId) label += ' (You)';
-    // Phase 5a: bots are never host, so no crown for them — only humans get 👑.
-    if (p.isHost) label += ' 👑';
-    if (p.wins > 0) label += ` • ${p.wins} 🏆`;
-    nameSpan.textContent = label;
+    nameSpan.className = 'entrance-card__name';
+    nameSpan.textContent = card.label; // EXACT prior label semantics
     li.appendChild(nameSpan);
 
-    // Phase 5a: a bot is always visibly a bot — name + a BOT badge with
-    // its difficulty. No crown (bots are never host). Separate span so the
-    // additive .bot-badge CSS styles it without touching existing
-    // player-row rules (human rows render byte-identically — Phase 4
-    // additive discipline).
+    // Phase 5a (preserved verbatim): a bot is always visibly a bot — name +
+    // a BOT badge with difficulty. Separate span so the additive .bot-badge
+    // CSS styles it without touching player-row rules.
     if (p.isBot) {
       const badge = document.createElement('span');
       badge.className = 'bot-badge';
@@ -86,8 +125,8 @@ export function renderLobby(gameState, myPlayerId) {
       kickBtn.title = 'Remove from lobby';
       kickBtn.textContent = '✕';
       kickBtn.addEventListener('click', () => {
-        // Phase 5a: bots are removed via removeBot (no socket to 'kick');
-        // humans keep the existing kickPlayer path. Same ✕ affordance.
+        // Phase 5a (preserved verbatim): bots → removeBot, humans →
+        // kickPlayer. Same ✕ affordance, same emit payload.
         if (p.isBot) {
           getSocket().emit('removeBot', { lobbyId: gameState.id, targetId: p.id });
         } else {
@@ -100,7 +139,15 @@ export function renderLobby(gameState, myPlayerId) {
     lobbyPlayersList.appendChild(li);
   });
 
-  lobbySettings.style.display = 'flex';
+  // Phase 7.5 (bounded DS-01): the inline `lobbySettings.style.display =
+  // 'flex'` write + the index.html style="display:none;" are removed (and
+  // the now-unused `lobbySettings` ui-dom import dropped above) — the
+  // existing `.lobby-settings` rule (02-hero-lobby.css) is already
+  // `display:flex`, and the block only needs to be hidden while its
+  // ancestor #waiting-room is `.hidden` (the screen system handles that,
+  // and #waiting-room ships with class="hidden" so there is no FOUC). Net
+  // rendered result is identical; one less inline-style write + one less
+  // dead import.
 
   // L1: Theme picker. Populated from the server-supplied themes list
   // (cached on window.__mmThemes by socketClient on connect). Disabled
@@ -135,21 +182,28 @@ export function renderLobby(gameState, myPlayerId) {
     publicRoomToggle.disabled = !amIHost || mode === 'solo';
   }
 
-  const canStart = mode === 'solo' ? gameState.players.length >= 1 : gameState.players.length >= 2;
-  startBtn.style.display = 'block'; // Always keep the button in the layout
-
-  if (canStart) {
-    if (amIHost) {
-      startBtn.innerText = 'Start Match';
-      startBtn.disabled = false;
-    } else {
-      startBtn.innerText = 'Waiting for host...';
-      startBtn.disabled = true;
-    }
-  } else {
-    startBtn.innerText = 'Waiting for players...';
-    startBtn.disabled = true;
-  }
+  // Phase 7.5 Red Carpet: the Start button becomes "Roll Camera". The
+  // ENABLE/DISABLE truth-table is byte-identical to the pre-7.5 logic
+  // (rollCameraLabel computes canStart = solo ? >=1 : >=2 and enables only
+  // when canStart && amIHost) — ONLY the copy is re-voiced + a variant class
+  // for the Task-2 CSS. The old inline startBtn.style.display='block' write
+  // + the index.html style="display:none;" are removed (bounded DS-01); the
+  // additive .roll-camera rule restores the exact block layout.
+  const roll = rollCameraLabel({
+    amIHost,
+    playerCount: gameState.players.length,
+    mode,
+  });
+  startBtn.classList.add('roll-camera');
+  startBtn.classList.remove('roll-camera--ready', 'roll-camera--waiting-host', 'roll-camera--waiting-cast');
+  startBtn.classList.add('roll-camera--' + roll.variant);
+  // WHY textContent (not innerText): button carries no HTML children — they
+  // are semantically identical for plain-text button labels; textContent is
+  // the DOM-spec setter that jsdom honours in tests (innerText is layout-
+  // dependent and not fully implemented in jsdom 26). The rendered browser
+  // result is identical (single text node either way).
+  startBtn.textContent = roll.text;
+  startBtn.disabled = roll.disabled;
 
   // Phase 5a: host-only "Add Bot" + difficulty selector. Only classic/speed
   // (mirrors the server gate so the UI never offers an action the server

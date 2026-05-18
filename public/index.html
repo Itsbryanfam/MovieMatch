@@ -241,9 +241,18 @@
 
       <div id="waiting-room" class="panel hidden lobby-panel">
         <div class="panel-header">
-          <h2>Room: <span id="lobby-code-display" class="accent-text"></span></h2>
-          <p>Waiting for players...</p>
-          <label class="setting-toggle" style="position:absolute; top:0; right:0;" title="List this room on the Public Matchmaking viewer">
+          <!-- Phase 7.5 Red Carpet: marquee treatment is CSS on this
+               wrapper; #lobby-code-display keeps its id + .accent-text so
+               the socketClient 'joined' handler's innerText write is
+               byte-identical (zero cross-module regression). -->
+          <div class="marquee">
+            <h2 class="marquee__title">Room: <span id="lobby-code-display" class="accent-text"></span></h2>
+          </div>
+          <p>The cast is arriving — take your seats.</p>
+          <!-- Phase 7.5 (bounded DS-01): the absolute-position inline style
+               moves verbatim to .waiting-public-toggle (same element, no
+               competing rule → identical computed position). -->
+          <label class="setting-toggle waiting-public-toggle" title="List this room on the Public Matchmaking viewer">
             <input type="checkbox" id="public-room-toggle" disabled>
             <span>Public Room</span>
           </label>
@@ -252,51 +261,71 @@
           <ul id="lobby-players"></ul>
         </div>
 
-        <!-- MODE SELECTOR -->
-        <div id="mode-selector" class="mode-selector">
-          <p class="mode-selector-label">Game Mode</p>
-          <div class="mode-chips">
-            <!-- Phase 4: .btn additive base (cursor:pointer already on mode-chip); zero visual change. -->
-            <button class="btn mode-chip active" data-mode="classic" id="mode-chip-classic">
-              <span class="mode-chip-icon">⚔️</span>
-              <span class="mode-chip-name">Classic</span>
-            </button>
-            <button class="btn mode-chip" data-mode="team" id="mode-chip-team">
-              <span class="mode-chip-icon">🤝</span>
-              <span class="mode-chip-name">Team</span>
-            </button>
-            <button class="btn mode-chip" data-mode="solo" id="mode-chip-solo">
-              <span class="mode-chip-icon">🎯</span>
-              <span class="mode-chip-name">Solo</span>
-            </button>
-            <button class="btn mode-chip" data-mode="speed" id="mode-chip-speed">
-              <span class="mode-chip-icon">⚡</span>
-              <span class="mode-chip-name">Speed</span>
-            </button>
+        <!-- Phase 7.5 Red Carpet: the host's EXISTING controls grouped into
+             one presentational "Director" panel. PRESENTATIONAL ONLY — every
+             control id, condition and socket.emit is byte-identical; NO new
+             rule/preset/kit mechanic (6c Custom Rule Kits owns that).
+             Everyone sees the panel; controls stay disabled for non-hosts
+             via the unchanged renderLobby JS (zero behaviour change). -->
+        <div class="director-panel">
+          <p class="director-panel__header">🎬 Director</p>
+
+          <!-- MODE SELECTOR -->
+          <div id="mode-selector" class="mode-selector">
+            <p class="mode-selector-label">Game Mode</p>
+            <div class="mode-chips">
+              <!-- Phase 4: .btn additive base (cursor:pointer already on mode-chip); zero visual change. -->
+              <button class="btn mode-chip active" data-mode="classic" id="mode-chip-classic">
+                <span class="mode-chip-icon">⚔️</span>
+                <span class="mode-chip-name">Classic</span>
+              </button>
+              <button class="btn mode-chip" data-mode="team" id="mode-chip-team">
+                <span class="mode-chip-icon">🤝</span>
+                <span class="mode-chip-name">Team</span>
+              </button>
+              <button class="btn mode-chip" data-mode="solo" id="mode-chip-solo">
+                <span class="mode-chip-icon">🎯</span>
+                <span class="mode-chip-name">Solo</span>
+              </button>
+              <button class="btn mode-chip" data-mode="speed" id="mode-chip-speed">
+                <span class="mode-chip-icon">⚡</span>
+                <span class="mode-chip-name">Speed</span>
+              </button>
+            </div>
+            <p class="mode-description" id="mode-description">Last player standing wins. Timer shrinks each round.</p>
           </div>
-          <p class="mode-description" id="mode-description">Last player standing wins. Timer shrinks each round.</p>
-        </div>
 
-        <div class="lobby-settings" id="lobby-settings" style="display:none;">
-          <!-- L1: Theme picker. Host-only — disabled for guests via JS in
-               renderLobby. The select is built dynamically from the server's
-               theme list to stay in sync with the source of truth. -->
-          <label class="setting-toggle">
-            <span>Theme <small style="opacity:0.7;">(Filter the candidate pool)</small></span>
-            <select id="theme-select" disabled style="margin-left:auto; padding:0.3rem 0.5rem; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.12); border-radius:6px; font-size:0.85rem;"></select>
-          </label>
-          <label class="setting-toggle">
-            <input type="checkbox" id="hardcore-toggle" disabled>
-            <span>Hardcore Mode <small style="opacity:0.7;">(No actor reuse anywhere in chain)</small></span>
-          </label>
-          <label class="setting-toggle">
-            <input type="checkbox" id="tv-shows-toggle" disabled>
-            <span>Allow TV Shows <small style="opacity:0.7;">(Include television series)</small></span>
-          </label>
-        </div>
+          <!-- Phase 7.5 (bounded DS-01): style="display:none;" removed — the
+               .lobby-settings rule is already display:flex and the block is
+               hidden with its #waiting-room ancestor by the screen system. -->
+          <div class="lobby-settings" id="lobby-settings">
+            <!-- L1: Theme picker. Host-only — disabled for guests via JS in
+                 renderLobby. The select is built dynamically from the
+                 server's theme list to stay in sync with the source of
+                 truth. -->
+            <label class="setting-toggle">
+              <span>Theme <small style="opacity:0.7;">(Filter the candidate pool)</small></span>
+              <!-- Phase 7.5 (bounded DS-01): the heavy inline style moves
+                   verbatim to .theme-select (same element, no competing rule
+                   → identical computed style). -->
+              <select id="theme-select" class="theme-select" disabled></select>
+            </label>
+            <label class="setting-toggle">
+              <input type="checkbox" id="hardcore-toggle" disabled>
+              <span>Hardcore Mode <small style="opacity:0.7;">(No actor reuse anywhere in chain)</small></span>
+            </label>
+            <label class="setting-toggle">
+              <input type="checkbox" id="tv-shows-toggle" disabled>
+              <span>Allow TV Shows <small style="opacity:0.7;">(Include television series)</small></span>
+            </label>
+          </div>
 
-        <!-- Phase 4: .btn additive base (cursor:pointer already on btn-primary); zero visual change. -->
-        <button id="start-btn" class="btn btn-primary" style="display:none;">Start Match</button>
+          <!-- Phase 4: .btn additive base. Phase 7.5 (bounded DS-01):
+               style="display:none;" removed — the additive .roll-camera rule
+               restores display:block; renderLobby drives text/disabled via
+               the pure rollCameraLabel. -->
+          <button id="start-btn" class="btn btn-primary">Start Match</button>
+        </div>
       </div>
 
       <!-- TEAM ASSIGNMENT SCREEN -->

@@ -11,6 +11,7 @@ export * from './ui/modal.js';   // Phase 7.3: shared prompt-modal factory (MI-0
 export * from './ui/name-prompts.js';   // Phase 7.3: per-prompt config builders (MI-02)
 export * from './ui/timer-panic.js';   // Phase 7.4: pure timer-severity seam (Panic Timer)
 export * from './ui/daily-ritual.js';   // Phase 7.4: pure daily-ritual seams (countdown + streak)
+export * from './ui/red-carpet.js';   // Phase 7.5: pure Red Carpet seams (arrival diff / card model / Roll-Camera gating / marquee)
 export * from './ui/ui-autocomplete.js';
 export * from './ui/ui-sharecard.js';
 export * from './ui/ui-panels.js';
