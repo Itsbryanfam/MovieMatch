@@ -52,12 +52,14 @@ describe('buildNamePromptConfig', () => {
   test('onSubmit side-effects fire in legacy order', () => {
     const { deps, calls, pn } = mkDeps();
     const c = buildNamePromptConfig({ roomCode: 'WXYZ', deps });
-    const close = jest.fn();
+    // Phase 7.3 review-fix (M1): track close() in calls so the legacy-order test pins close()'s POSITION (between setItem and showScreen), not just that it was called.
+    const close = jest.fn(() => calls.push(['close']));
     c.primary.onSubmit(['  Ada  '], { invalid: jest.fn(), close });
     expect(pn.value).toBe('Ada');
     expect(close).toHaveBeenCalledTimes(1);
     expect(calls).toEqual([
       ['setItem', 'mm_playerName', 'Ada'],
+      ['close'],
       ['showScreen', 'lobby'],
       ['emit', 'joinLobby', { name: 'Ada', lobbyId: 'WXYZ', stableId: 'SID' }],
       ['replaceState', {}, '', '/p'],
@@ -99,12 +101,14 @@ describe('buildJoinPromptConfig', () => {
   test('onSubmit uppercases code, fires legacy order incl. prepareAudio', () => {
     const { deps, calls, pn } = mkDeps();
     const c = buildJoinPromptConfig({ deps });
-    const close = jest.fn();
+    // Phase 7.3 review-fix (M1): track close() in calls so the legacy-order test pins close()'s POSITION (between setItem and showScreen), not just that it was called.
+    const close = jest.fn(() => calls.push(['close']));
     c.primary.onSubmit(['Ada', ' rm12 '], { invalid: jest.fn(), close });
     expect(pn.value).toBe('Ada');
     expect(close).toHaveBeenCalledTimes(1);
     expect(calls).toEqual([
       ['setItem', 'mm_playerName', 'Ada'],
+      ['close'],
       ['prepareAudio'],
       ['showScreen', 'lobby'],
       ['emit', 'joinLobby', { name: 'Ada', lobbyId: 'RM12', stableId: 'SID' }],
@@ -127,6 +131,19 @@ describe('buildJoinPromptConfig', () => {
     expect(invalid).toHaveBeenCalledWith(0);
     expect(close).not.toHaveBeenCalled();
     expect(calls).toEqual([]);
+  });
+
+  // Phase 7.3 review-fix (M3): production first-time-visitor path —
+  // #player-name-input may not be on screen, so getPlayerNameInput() returns
+  // null. The `if (pn)` guard must not throw, for BOTH name & join builders.
+  test('getPlayerNameInput() → null is guarded (no #player-name on screen)', () => {
+    const { deps } = mkDeps({ getPlayerNameInput: () => null });
+    const cn = buildNamePromptConfig({ roomCode: 'WX', deps });
+    expect(() => cn.primary.onSubmit(['Ada'], { invalid: jest.fn(), close: jest.fn() }))
+      .not.toThrow();
+    const cj = buildJoinPromptConfig({ deps });
+    expect(() => cj.primary.onSubmit(['Ada', 'rm'], { invalid: jest.fn(), close: jest.fn() }))
+      .not.toThrow();
   });
 });
 
@@ -156,6 +173,17 @@ describe('buildDailyPromptConfig', () => {
     expect(inv).toHaveBeenCalledWith(0);
     expect(close2).not.toHaveBeenCalled();
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  // Phase 7.3 review-fix (M2): the `if (onConfirm)` guard exists because the
+  // caller may omit it (default param) — pin that a valid submit then does
+  // not throw and still closes.
+  test('no onConfirm: a valid submit closes without throwing', () => {
+    const c = buildDailyPromptConfig({});
+    const close = jest.fn();
+    expect(() => c.primary.onSubmit(['Ada'], { invalid: jest.fn(), close }))
+      .not.toThrow();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
 
