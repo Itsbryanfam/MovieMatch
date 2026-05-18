@@ -38,6 +38,12 @@ import { diffArrivals, playerCardModel, rollCameraLabel } from './red-carpet.js'
 // Module-scoped, NOT persisted, NO stableId: a full page reload resets it,
 // which is the correct first-paint behaviour (everyone "arrives" once).
 let _seenPlayerIds = new Set();
+// Phase 7.5 Red Carpet: the lobby id the seen-set belongs to. A NEW lobby
+// (id changed without a full page reload — e.g. leave→join another room on
+// the same socket) is a fresh premiere, so the seen-set must be cleared or
+// carried-over ids (notably the local player's own unchanged socket id)
+// would suppress their entrance animation in the new room.
+let _lastLobbyId = null;
 
 export function renderLobby(gameState, myPlayerId) {
   const amIHost = !!gameState.players.find(p => p.id === myPlayerId && p.isHost);
@@ -66,13 +72,27 @@ export function renderLobby(gameState, myPlayerId) {
 
   lobbyCodeDisplay.innerText = gameState.id || '';
 
-  // Phase 7.5 Red Carpet: which players are *newly arriving* this page
-  // session? diffArrivals is pure; the seen-set is page-session module
-  // state (NOT persisted) so the entrance animation fires once on a real
-  // join — never replayed on the idempotent re-render every settings
-  // toggle / stateUpdate triggers.
+  // Phase 7.5 Red Carpet: a NEW lobby (gameState.id changed without a full
+  // page reload) is a fresh premiere — clear the seen-set so every player
+  // "arrives" once in the new room. Without this, ids carried from a prior
+  // lobby (notably the local player's own unchanged socket id) would
+  // suppress their entrance. Same-lobby re-renders keep the set (animate
+  // once per real arrival, never replayed on a settings-toggle re-render).
+  if (gameState.id !== _lastLobbyId) {
+    _seenPlayerIds = new Set();
+    _lastLobbyId = gameState.id;
+  }
+  // diffArrivals is pure; the seen-set is page-session module state (NOT
+  // persisted, NO stableId).
   const { entering, seen } = diffArrivals(_seenPlayerIds, gameState.players);
   _seenPlayerIds = new Set(seen);
+  // WHY a local Set for membership: diffArrivals returns `entering` as an
+  // ORDERED array (pure, trivially unit-assertable — Task 0 pins it as an
+  // array, do not change that contract). Lobby rosters are tiny (≤~12 incl.
+  // bots) so cost is irrelevant, but set-ifying here keeps the per-player
+  // membership check O(1) and the intent explicit (no O(n·m) .includes in
+  // the render loop).
+  const enteringSet = new Set(entering);
 
   lobbyPlayersList.innerHTML = '';
   gameState.players.forEach(p => {
@@ -90,7 +110,7 @@ export function renderLobby(gameState, myPlayerId) {
       + (card.isYou ? ' is-you' : '')
       + (card.isHost ? ' is-host' : '')
       + (card.isBot ? ' is-bot' : '')
-      + (entering.includes(p.id) ? ' is-entering' : '');
+      + (enteringSet.has(p.id) ? ' is-entering' : '');
     // WHY a CSS custom property (not a style rule): --card-accent is a
     // per-player DATA value (the deterministic hue), not style debt — the
     // same pattern modal.js uses; the .entrance-card rule consumes it via
