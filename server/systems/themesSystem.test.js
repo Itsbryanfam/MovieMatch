@@ -126,3 +126,49 @@ describe('themesSystem.isValidTheme + listThemes', () => {
       .forEach(id => expect(ids).toContain(id));
   });
 });
+
+// ============================================================================
+// Phase 7.4 — authored "movie-night program" copy contract.
+// WHY: 7.4 re-voices every theme label/description. This pins the EXACT new
+// copy AND re-affirms the behavioural contract is byte-identical (ids + match
+// fns + ordering unchanged) — the copy change must not perturb the filter.
+// ============================================================================
+describe('themesSystem — Phase 7.4 authored copy', () => {
+  const EXPECTED = {
+    any: { label: '🎬 Open Screening', description: 'Anything goes — every movie and show in the catalogue is eligible.' },
+    horror: { label: '🎃 After Dark', description: 'The midnight horror block — only scary movies connect.' },
+    comedy: { label: '😂 Comedy Night', description: 'Bring the laughs — only comedies count.' },
+    action: { label: '💥 Blockbuster Night', description: 'Big, loud, explosive — only action movies count.' },
+    scifi: { label: '🚀 Future Features', description: 'Speculative cinema only — science fiction counts.' },
+    romance: { label: '💘 Date Night', description: 'Hearts on screen — only romance counts.' },
+    animation: { label: '🎨 Animation Showcase', description: 'Hand-drawn to pixel-perfect — only animated films count.' },
+    decade_1980s: { label: '📺 The ’80s Retro Reel', description: 'Neon and VHS — only films released 1980–1989.' },
+    decade_1990s: { label: '💿 The ’90s Rewind', description: 'The CD-era canon — only films released 1990–1999.' },
+    decade_2000s: { label: '📀 The 2000s Marathon', description: 'The DVD-shelf era — only films released 2000–2009.' },
+    decade_2010s: { label: '📱 The 2010s Binge', description: 'The streaming dawn — only films released 2010–2019.' },
+  };
+
+  test('clientShape returns the exact authored label + description per id', () => {
+    Object.keys(EXPECTED).forEach((id) => {
+      const shaped = themesSystem.clientShape(id);
+      expect(shaped).toEqual({ id, label: EXPECTED[id].label, description: EXPECTED[id].description });
+    });
+  });
+
+  test('listThemes order is unchanged: "any" first, then the 10 canonical ids in declaration order', () => {
+    const ids = themesSystem.listThemes().map((t) => t.id);
+    expect(ids).toEqual([
+      'any', 'horror', 'comedy', 'action', 'scifi', 'romance', 'animation',
+      'decade_1980s', 'decade_1990s', 'decade_2000s', 'decade_2010s',
+    ]);
+  });
+
+  test('behavioural contract re-affirmed: copy change did not perturb match/validation', () => {
+    expect(themesSystem.matchesTheme('horror', { genre_ids: [27] })).toBe(true);
+    expect(themesSystem.matchesTheme('horror', { genre_ids: [35] })).toBe(false);
+    expect(themesSystem.matchesTheme('decade_1990s', { release_date: '1995-01-01' })).toBe(true);
+    expect(themesSystem.matchesTheme('any', null)).toBe(true);
+    expect(themesSystem.isValidTheme('scifi')).toBe(true);
+    expect(themesSystem.isValidTheme('does_not_exist')).toBe(false);
+  });
+});

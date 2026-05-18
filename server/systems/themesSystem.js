@@ -33,56 +33,64 @@ const GENRE_SCIFI     = 878;
 const GENRE_ROMANCE   = 10749;
 const GENRE_ANIMATION = 16;
 
-// Theme definitions. Each entry has an id (used on the wire), label
-// (client-display), description (for the picker tooltip), and a `match`
-// function called per TMDB candidate. The match function reads only
-// fields TMDB always returns on /search/movie results, so callers don't
-// need to enrich candidates before applying the filter.
+// Theme definitions. Each entry has an id (used on the wire, never changed),
+// label (client-display), description (picker tooltip), and a `match`
+// function called per TMDB candidate.
+//
+// Phase 7.4 (Theme-Packs-With-Taste): the label/description strings are
+// re-voiced into authored "movie-night program" copy. WHY: a settings-style
+// dropdown ("Only horror movies count.") doesn't feel like picking tonight's
+// screening. Only these two display strings change per entry — `id` and
+// `match` are deliberately byte-identical so the filter mechanic is provably
+// unchanged (the existing themesSystem.test.js behavioural suite is the
+// zero-regression guard). This is presentation only and does NOT introduce
+// any preset/kit bundling — that mechanic is 6c (separate spec); see the
+// 7.4 spec §4 dedup boundary.
 const THEMES = {
-  // No-op theme — explicitly listed so the picker can offer "Any genre"
-  // alongside the real themes. No filter is applied.
+  // No-op theme — explicitly listed so the picker can offer the no-filter
+  // option alongside the real themes. No filter is applied.
   any: {
     id: 'any',
-    label: '🎬 Any (no theme)',
-    description: 'Any movie or TV show is fair game.',
+    label: '🎬 Open Screening',
+    description: 'Anything goes — every movie and show in the catalogue is eligible.',
     match: () => true,
   },
 
   // Genre themes
   horror: {
     id: 'horror',
-    label: '🎃 Horror',
-    description: 'Only horror movies count.',
+    label: '🎃 After Dark',
+    description: 'The midnight horror block — only scary movies connect.',
     match: (r) => Array.isArray(r && r.genre_ids) && r.genre_ids.includes(GENRE_HORROR),
   },
   comedy: {
     id: 'comedy',
-    label: '😂 Comedy',
-    description: 'Only comedies count.',
+    label: '😂 Comedy Night',
+    description: 'Bring the laughs — only comedies count.',
     match: (r) => Array.isArray(r && r.genre_ids) && r.genre_ids.includes(GENRE_COMEDY),
   },
   action: {
     id: 'action',
-    label: '💥 Action',
-    description: 'Only action movies count.',
+    label: '💥 Blockbuster Night',
+    description: 'Big, loud, explosive — only action movies count.',
     match: (r) => Array.isArray(r && r.genre_ids) && r.genre_ids.includes(GENRE_ACTION),
   },
   scifi: {
     id: 'scifi',
-    label: '🚀 Sci-Fi',
-    description: 'Only science fiction counts.',
+    label: '🚀 Future Features',
+    description: 'Speculative cinema only — science fiction counts.',
     match: (r) => Array.isArray(r && r.genre_ids) && r.genre_ids.includes(GENRE_SCIFI),
   },
   romance: {
     id: 'romance',
-    label: '💘 Romance',
-    description: 'Only romance counts.',
+    label: '💘 Date Night',
+    description: 'Hearts on screen — only romance counts.',
     match: (r) => Array.isArray(r && r.genre_ids) && r.genre_ids.includes(GENRE_ROMANCE),
   },
   animation: {
     id: 'animation',
-    label: '🎨 Animation',
-    description: 'Only animated films count.',
+    label: '🎨 Animation Showcase',
+    description: 'Hand-drawn to pixel-perfect — only animated films count.',
     match: (r) => Array.isArray(r && r.genre_ids) && r.genre_ids.includes(GENRE_ANIMATION),
   },
 
@@ -91,26 +99,26 @@ const THEMES = {
   // accidentally letting an undated film slip through).
   decade_1980s: {
     id: 'decade_1980s',
-    label: '📺 1980s',
-    description: 'Only movies released in the 1980s.',
+    label: '📺 The ’80s Retro Reel',
+    description: 'Neon and VHS — only films released 1980–1989.',
     match: (r) => _yearInRange(r, 1980, 1989),
   },
   decade_1990s: {
     id: 'decade_1990s',
-    label: '💿 1990s',
-    description: 'Only movies released in the 1990s.',
+    label: '💿 The ’90s Rewind',
+    description: 'The CD-era canon — only films released 1990–1999.',
     match: (r) => _yearInRange(r, 1990, 1999),
   },
   decade_2000s: {
     id: 'decade_2000s',
-    label: '📀 2000s',
-    description: 'Only movies released in the 2000s.',
+    label: '📀 The 2000s Marathon',
+    description: 'The DVD-shelf era — only films released 2000–2009.',
     match: (r) => _yearInRange(r, 2000, 2009),
   },
   decade_2010s: {
     id: 'decade_2010s',
-    label: '📱 2010s',
-    description: 'Only movies released in the 2010s.',
+    label: '📱 The 2010s Binge',
+    description: 'The streaming dawn — only films released 2010–2019.',
     match: (r) => _yearInRange(r, 2010, 2019),
   },
 };
