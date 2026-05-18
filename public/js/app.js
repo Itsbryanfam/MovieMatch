@@ -544,7 +544,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
 
   let debounceTimeout = null;
-  const hintText = document.getElementById('hint-text');
 
   function submitMovie() {
     const movie = movieInput ? movieInput.value.trim() : '';
