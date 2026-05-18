@@ -12,6 +12,12 @@ import { showToast } from './ui-notifications.js';
 // broken-image glyph instead of the designed placeholder (the chain
 // board and autocomplete already use this shared ui-dom helper).
 import { attachPosterFallback } from './ui-dom.js';
+// Phase 7.3 (MI-02): the daily prompt is now the shared modal factory.
+// Direct sibling imports (not the ./ui.js barrel) keep a one-way DAG —
+// modal.js imports nothing, name-prompts.js imports nothing — so there is
+// no barrel cycle (same discipline as 7.2's feedback.js).
+import { createPromptModal } from './modal.js';
+import { buildDailyPromptConfig } from './name-prompts.js';
 
 // =========================================================================
 // ANIMATED CHAIN REPLAY (L2)
@@ -433,85 +439,15 @@ export function renderDailyResult(data) {
 // #player-name — an input that only exists on the (hidden) lobby screen.
 // A first-time visitor (no saved name) therefore got a full-screen "enter
 // a name first" notification plus a focus() on an off-screen field: a
-// dead-end on a primary entry point that never reproduced in normal dev
-// testing because the developer always has a saved name. This inline
-// prompt lets a name-less player start the Daily in place.
-//
-// It is intentionally socket-free: the caller owns the
-// `startDailyChallenge` emit, so this stays a pure, unit-testable ui seam
-// (the same split tutorial.js uses — the seam is tested, app.js is thin
-// glue). The overlay/card markup deliberately matches app.js's existing
-// showNamePrompt/showJoinPrompt so it doesn't introduce a third divergent
-// modal look; folding all three into the shared .modal-overlay system is
-// deferred design-system work (MI-02), not this hotfix's scope.
+// dead-end on a primary entry point. This inline prompt lets a name-less
+// player start the Daily in place. It is intentionally socket-free: the
+// caller owns the `startDailyChallenge` emit (pure, unit-testable seam —
+// daily-name-prompt.test.js). Phase 7.3 (MI-02): the overlay markup is now
+// the shared createPromptModal factory (this used to be ~70 lines of
+// hardcoded .style.cssText that deliberately mirrored showNamePrompt/
+// showJoinPrompt to avoid a third divergent look — that divergence is now
+// resolved; all three share one factory + the .modal-*--prompt CSS, with
+// the daily-name-* class names preserved as the test contract).
 export function showDailyNamePrompt({ prefill = '', onConfirm } = {}) {
-  const overlay = document.createElement('div');
-  overlay.className = 'daily-name-overlay';
-  overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:1000;';
-
-  const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface,#18181b);border-radius:1rem;padding:2rem;max-width:340px;width:90%;text-align:center;border:1px solid rgba(255,255,255,0.08);';
-
-  const title = document.createElement('h2');
-  title.style.cssText = 'margin:0 0 0.25rem;font-size:1.25rem;color:var(--text,#f8fafc);';
-  title.textContent = '🗓️ Daily Challenge';
-
-  const subtitle = document.createElement('p');
-  subtitle.style.cssText = 'margin:0 0 1.5rem;color:var(--text-muted,#94a3b8);font-size:0.9rem;';
-  subtitle.textContent = 'Pick a name to track your score on the daily leaderboard.';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = 'Enter your name';
-  input.autocomplete = 'off';
-  input.maxLength = 24;
-  input.value = prefill || '';
-  input.style.cssText = 'width:100%;padding:0.75rem 1rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:var(--text,#f8fafc);font-size:1rem;box-sizing:border-box;margin-bottom:1rem;outline:none;font-family:inherit;';
-
-  const go = document.createElement('button');
-  go.type = 'button';
-  go.className = 'daily-name-go';
-  go.textContent = 'Start Daily Challenge';
-  go.style.cssText = 'width:100%;padding:0.75rem;border-radius:0.5rem;border:none;background:var(--accent,#818cf8);color:white;font-size:1rem;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:0.75rem;';
-
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.className = 'daily-name-cancel';
-  cancel.textContent = 'Maybe later';
-  cancel.style.cssText = 'width:100%;padding:0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.1);background:transparent;color:var(--text-muted,#94a3b8);font-size:0.9rem;cursor:pointer;font-family:inherit;';
-
-  function close() { overlay.remove(); }
-
-  function submit() {
-    const name = input.value.trim();
-    if (!name) {
-      // Mirror the existing prompts' invalid cue and keep the prompt open
-      // so the player can correct it — no false start, and crucially no new
-      // trap (the whole point of HL-01 is removing a dead-end).
-      input.style.borderColor = '#f87171';
-      input.focus();
-      return;
-    }
-    close();
-    if (onConfirm) onConfirm(name);
-  }
-
-  go.addEventListener('click', submit);
-  cancel.addEventListener('click', close);
-  input.addEventListener('keypress', (e) => { if (e.key === 'Enter') submit(); });
-  // Backdrop (click outside the card) closes — fixing the dead-end must not
-  // replace it with a modal the player can't back out of.
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-
-  card.appendChild(title);
-  card.appendChild(subtitle);
-  card.appendChild(input);
-  card.appendChild(go);
-  card.appendChild(cancel);
-  overlay.appendChild(card);
-  document.body.appendChild(overlay);
-  // Focus immediately: this overlay has no entrance transition (unlike the
-  // CSS-animated .modal-overlay modals), so there's nothing to wait on and
-  // a deferred focus would only leave a dangling timer in tests.
-  input.focus();
+  return createPromptModal(buildDailyPromptConfig({ prefill, onConfirm }));
 }
