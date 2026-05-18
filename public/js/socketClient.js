@@ -15,6 +15,7 @@ import {
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
   showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
   toast, gameEvent, submissionPill, // Phase 7.2: feedback router
+  timerSeverity, // Phase 7.4: pure timer-severity seam (Panic Timer)
   showScreen, // WHY: Phase 3 Task D — canonical group-normaliser for screen transitions
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
@@ -369,6 +370,9 @@ export function initSocket() {
             clearInterval(interval);
             setTurnInterval(null);
             if (timerBar) timerBar.classList.remove('timer-critical');
+            // Phase 7.4: panic is a strict subset of critical — clear it
+            // wherever critical is cleared so it can never outlive critical.
+            if (timerBar) timerBar.classList.remove('timer-panic');
             return;
           }
 
@@ -389,12 +393,18 @@ export function initSocket() {
             if (tr <= 10) {
               timerBar.style.backgroundColor = 'var(--timer-red)';
               timerBar.classList.add('timer-critical');
+              // Phase 7.4: physical last-5s. toggle (not add) using the pure
+              // seam so 6–10s correctly CLEARS panic while still inside the
+              // critical band — panic ⊂ critical, decided in one place.
+              timerBar.classList.toggle('timer-panic', timerSeverity(tr) === 'panic');
               if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
                 playTick();
                 setLastTickSound(Math.floor(Date.now() / 1000));
               }
             } else {
               timerBar.classList.remove('timer-critical');
+              // Phase 7.4: tr>10 → neither critical nor panic.
+              timerBar.classList.remove('timer-panic');
               if (tr <= 30) {
                 timerBar.style.backgroundColor = 'var(--timer-yellow)';
               } else {
