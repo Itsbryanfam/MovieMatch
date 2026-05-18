@@ -17,10 +17,10 @@
     {
       "id": 2,
       "subject": "Task 2: Append-only Red Carpet CSS section",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** Append the Red-Carpet styles to public/css/02-hero-lobby.css — marquee, entrance card + states + @keyframes cardEntrance (transform/opacity only), Director panel, the migrated .theme-select/.waiting-public-toggle, .roll-camera variants — append-only (no existing rule edited), token-driven, reduced-motion auto-covered by the existing global block.\n\n**Files:**\n- Modify: public/css/02-hero-lobby.css (append a new section at EOF — current last content line 728 .bot-thinking)\n\n**Verify:** `cd C:/mm-phase7-5 && npx jest` all green (additive over 52/395, zero regressions). `git diff public/css/02-hero-lobby.css | grep '^-' | grep -v '^---'` prints NOTHING (purely additive). Visual + reduced-motion eyeball is user-side (jsdom never lays out).\n\n**Steps:** Append the Red Carpet section at EOF after the .bot-thinking rule (marquee/.marquee__title + #lobby-code-display; #lobby-players li.entrance-card flex/gap/border-left hsl(var(--card-accent)); .entrance-card__emoji/__name; .is-you; .is-entering animation:cardEntrance 0.34s both; @keyframes cardEntrance opacity+transform ONLY; .director-panel + __header + scoped .mode-selector divider reset; .theme-select reproduces removed inline verbatim w/ --radius-sm==6px; .waiting-public-toggle position:absolute top0 right0; .roll-camera display:block + --ready/--waiting-* box-shadow hooks) → verify append-only (git diff no deletions) → full suite green → branch-verify → commit.\n\n```json:metadata\n{\"files\": [\"public/css/02-hero-lobby.css\"], \"verifyCommand\": \"cd C:/mm-phase7-5 && npx jest\", \"acceptanceCriteria\": [\"Section appended at EOF; NO existing rule edited/reordered/removed (git diff shows only additions after .bot-thinking)\", \"@keyframes cardEntrance animates ONLY opacity + transform (compositor-safe; no width/layout/colour)\", \".theme-select reproduces the removed inline declarations; .waiting-public-toggle = position:absolute;top:0;right:0;; .roll-camera sets display:block (restores removed inline/JS display)\", \"Uses 01-base.css tokens where they apply; no per-rule prefers-reduced-motion (global 06-states-anim.css block auto-covers)\", \"full npx jest green, additive over 52/395, zero regressions; visual/reduced-motion eyeball flagged user-side\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-18T20:55:00Z"
+  "lastUpdated": "2026-05-18T21:40:00Z"
 }
