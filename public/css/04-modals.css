@@ -258,7 +258,10 @@
   animation: none;
 }
 .modal-card--prompt {
-  /* legacy card cssText, verbatim */
+  /* legacy card cssText, verbatim. NOTE: --surface is intentionally
+     UNDEFINED in the cascade — the #18181b fallback IS the value
+     (legacy parity). Do not add a --surface token: it would silently
+     shift all 3 prompts off #18181b. */
   background: var(--surface, #18181b);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 1rem;
@@ -267,7 +270,9 @@
   width: 90%;
   text-align: center;
   box-shadow: none;
-  position: static;
+  position: static; /* base .modal-card is position:relative for its
+                       absolute .modal-close; prompt cards have no
+                       .modal-close child, so static = legacy parity */
   animation: none;
 }
 .modal-prompt-title {
