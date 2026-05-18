@@ -549,6 +549,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const movie = movieInput ? movieInput.value.trim() : '';
     if (!movie) return;
 
+    // Submitting supersedes any in-flight typeahead search: cancel the
+    // pending debounced autocompleteSearch so it can't fire a stale request
+    // (~400ms later) for input the player has already submitted.
+    clearTimeout(debounceTimeout);
+
     if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
     closeMobileAc();
 
