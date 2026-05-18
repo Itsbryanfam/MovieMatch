@@ -726,3 +726,134 @@ input:disabled {
   margin-left: 4px;
 }
 
+/* =============================================
+   PHASE 7.5 — RED CARPET LOBBY (APPEND-ONLY)
+   WHY append-only: no rule above is edited or reordered — the six-partial
+   cascade is load-bearing. Every selector here is NEW; classic lobbies
+   render byte-identically except where renderLobby now adds these classes.
+   cardEntrance is transform/opacity ONLY (compositor-safe — the vanilla
+   perf budget) and is auto-neutralised by the existing global
+   prefers-reduced-motion block in 06-states-anim.css (no per-rule handling
+   needed; the card is fully legible with zero motion).
+   ============================================= */
+
+/* Marquee room code — theatrical "now showing" header. CSS-only treatment
+   on the index.html wrapper; #lobby-code-display keeps its id + innerText
+   (zero socketClient regression). */
+.marquee {
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+.marquee__title {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+.marquee__title #lobby-code-display {
+  display: inline-block;
+  letter-spacing: 0.26em;
+  padding-left: 0.26em; /* balance trailing letter-spacing so it stays centred */
+  color: var(--accent-primary);
+  text-shadow: var(--shadow-glow);
+}
+
+/* Player Entrance Card. The row is still <li> inside #lobby-players (the
+   existing #lobby-players li base rule still applies — padding/bg/border/
+   radius/margin/font); these ADD the red-carpet layer. --card-accent is
+   the per-player hue (a data value the glue sets inline, not style debt). */
+#lobby-players li.entrance-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  /* Quiet per-player identity cue from the deterministic hue; the token bg
+     from the base rule is unchanged so contrast/legibility is preserved. */
+  border-left: 3px solid hsl(var(--card-accent, 240), 60%, 60%);
+}
+.entrance-card__emoji {
+  font-size: 1.1rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.entrance-card__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere; /* long names wrap inside the fixed-width panel */
+}
+.entrance-card.is-you {
+  border-left-color: var(--accent-primary);
+}
+.entrance-card.is-entering {
+  /* Under the global prefers-reduced-motion block animation-duration is
+     forced to ~0 so the card simply appears at its natural end-state —
+     fully legible, zero motion. `both` keeps the from-state only while the
+     (near-instant under RM) animation runs. */
+  animation: cardEntrance 0.34s ease-out both;
+}
+@keyframes cardEntrance {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+/* Director panel — presentational grouping of the EXISTING host controls.
+   No new mechanic (6c dedup). Everyone sees it; controls stay disabled for
+   non-hosts via the unchanged renderLobby JS. */
+.director-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-base);
+  padding: 1rem;
+  margin-top: 1rem;
+}
+.director-panel__header {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-primary);
+  margin-bottom: 0.75rem;
+}
+/* The mode-selector inside the panel no longer needs its own top divider —
+   the panel border supplies separation. Additive override scoped to the
+   panel; the base .mode-selector rule is untouched for any other context. */
+.director-panel .mode-selector {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* Theme select — migrated VERBATIM from the index.html inline style
+   (bounded DS-01; same element, no competing rule → identical computed
+   style). --radius-sm == 6px (exact match to the old literal). */
+.theme-select {
+  margin-left: auto;
+  padding: 0.3rem 0.5rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+/* Public-room toggle — migrated VERBATIM from the index.html inline style
+   (same element, no competing rule → identical computed position). */
+.waiting-public-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+/* Roll Camera — the re-voiced Start button. WHY display:block here: the
+   pre-7.5 code forced startBtn.style.display='block'; that inline write +
+   the index.html style="display:none" were removed (bounded DS-01) so this
+   additive rule restores the EXACT block layout. .btn-primary still
+   supplies all colour/sizing; this only adds the cinematic variant cue. */
+.roll-camera {
+  display: block;
+}
+.roll-camera--ready {
+  box-shadow: var(--shadow-glow-strong);
+}
+.roll-camera--waiting-host,
+.roll-camera--waiting-cast {
+  box-shadow: none;
+}
+
