@@ -4,9 +4,9 @@
 const { loadIndexHtml } = require('./fixtures');
 // initUIElements binds the live notificationOverlay/notificationText refs that
 // showNotification (called inside gameEvent) depends on. Pure-UI harness — no socket.
-import { initUIElements } from '../public/js/ui.js';
-import { toast, gameEvent } from '../public/js/ui.js';
-import { showToast } from '../public/js/ui.js';
+// Single import per specifier — matches the one-import-per-specifier convention
+// used by every other file in client-tests/.
+import { initUIElements, toast, gameEvent, showToast } from '../public/js/ui.js';
 
 describe('feedback router — toast + gameEvent', () => {
   beforeEach(() => { loadIndexHtml(); initUIElements(); });
@@ -38,7 +38,8 @@ describe('feedback router — toast + gameEvent', () => {
     const overlay = document.getElementById('notification-overlay');
     expect(overlay.classList.contains('hidden')).toBe(false);
     expect(overlay.classList.contains('notification--elimination')).toBe(true);
-    expect(document.getElementById('notification-text').innerText).toBe('Alice was eliminated');
+    // textContent is layout-independent in jsdom (innerText is fragile there)
+    expect(document.getElementById('notification-text').textContent).toBe('Alice was eliminated');
     expect(document.querySelector('.elimination-flash')).not.toBeNull();
   });
 

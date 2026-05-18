@@ -10,7 +10,8 @@ import {
 // Transient, non-blocking channel. Delegates to the (now variant-aware)
 // showToast primitive so there is exactly one toast implementation.
 export function toast(message, opts) {
-  return showToast(message, opts);
+  // showToast returns undefined; drop the no-op return so callers see no implied value
+  showToast(message, opts);
 }
 
 // Dramatic channel. Replicates EXACTLY the visual branching socketClient's
