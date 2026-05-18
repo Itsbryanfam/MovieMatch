@@ -15,7 +15,7 @@
 
 import {
   initUIElements, closeMobileAc, openShareModal, showNotification, showToast,
-  buildTextRecap,
+  buildTextRecap, showDailyNamePrompt, // WHY: HL-01 — name-less Daily seam
   showScreen, // WHY: canonical group-normaliser added in Phase 3 Task D
   playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
@@ -84,31 +84,43 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // =========================================================================
-  // DAILY CHALLENGE BUTTON (H2)
+  // DAILY CHALLENGE BUTTON (H2 / HL-01)
   // =========================================================================
   // Single-click entry point. Server checks attempt-NX; if the player has
   // already played today, server emits dailyAlreadyPlayed and the result
   // modal opens with their prior score + leaderboard. Otherwise it creates
   // an ephemeral daily lobby with the seed pre-populated as chain[0] and
   // the player joins via the standard 'joined' event flow.
-  heroDailyBtn?.addEventListener('click', () => {
-    const name = playerNameInput ? playerNameInput.value.trim() : '';
-    if (!name) {
-      showNotification('Enter a name first to track your Daily score!');
-      // Scroll the name input into view + focus it so the player can fix
-      // the gap immediately. Skipped on mobile to avoid summoning the
-      // keyboard before the player has time to read the message.
-      if (window.innerWidth > 767) playerNameInput?.focus();
-      return;
-    }
-    // Persist the name (same pattern as the existing join flow) so a
-    // refresh after a daily run still shows the player's name on their
-    // future daily attempts and on the daily leaderboard.
+  //
+  // HL-01: a name may already exist because init pre-fills #player-name
+  // from localStorage (see the `savedName` block lower in this file) or the
+  // player typed one in the lobby. ONLY then can we start straight away. A
+  // first-time visitor on the hero has neither — the old code showed a
+  // full-screen notification and focused #player-name, which lives on the
+  // hidden lobby screen, so the primary Daily CTA dead-ended (silently: a
+  // developer always has a saved name, so it never reproduced in testing).
+  // Now a name-less start opens an inline prompt instead of dead-ending.
+  function emitStartDaily(name) {
+    // Persist the name (same pattern as the join flow) so a refresh after a
+    // daily run still shows the player's name on future attempts and on the
+    // daily leaderboard; mirror it into #player-name so the rest of the app
+    // sees the same name the lobby flow would have set.
     localStorage.setItem('mm_playerName', name);
-    getSocket().emit('startDailyChallenge', {
-      name,
-      stableId: getStableId(),
-    });
+    if (playerNameInput) playerNameInput.value = name;
+    getSocket().emit('startDailyChallenge', { name, stableId: getStableId() });
+  }
+
+  heroDailyBtn?.addEventListener('click', () => {
+    const existing = (
+      (playerNameInput && playerNameInput.value) ||
+      localStorage.getItem('mm_playerName') ||
+      ''
+    ).trim();
+    if (existing) { emitStartDaily(existing); return; }
+    // No name yet — prompt in place rather than dead-ending. The prompt is
+    // a socket-free ui seam (unit-tested in client-tests/daily-name-prompt
+    // .test.js); the emit stays here where the socket + stableId live.
+    showDailyNamePrompt({ prefill: '', onConfirm: emitStartDaily });
   });
 
   // =========================================================================
