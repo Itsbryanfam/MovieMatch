@@ -24,10 +24,10 @@
     {
       "id": 3,
       "subject": "Task 3: client outs block + timeout variant in showSelfEliminationScreen",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2],
       "description": "**Goal:** Render ≤3 outs rows ({title} ({year}) — via {actor}) + 'You were one bridge away.'; timeout variant (detailed card, needed-only column, no You-played); preserve no-innerHTML, legacy flash, dismiss/Escape/focus.\n\n**Files:** Modify public/js/ui/ui-notifications.js (showSelfEliminationScreen 43-164: guard L48, .self-elim-could 124-130/154-155, hint 132-136); Test client-tests/self-elim-aftercare.test.js (new) + migrate client couldHavePlayed/self-elim-could assertions.\n\n**Verify:** npx jest client-tests/self-elim-aftercare.test.js client-tests/\n\n```json:metadata\n{\"files\":[\"public/js/ui/ui-notifications.js\",\"client-tests/self-elim-aftercare.test.js\"],\"verifyCommand\":\"npx jest client-tests/self-elim-aftercare.test.js client-tests/\",\"acceptanceCriteria\":[\"outs list \\u22643 with via-actor + bridge line; replaces generic hint\",\"timedOut \\u2192 detailed card, needed-only, no You-played column, time head\",\"no outs+no timedOut \\u2261 pre-7.1 detailed card; detail-less \\u2261 legacy flash\",\"titles/actors rendered as text (no innerHTML)\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-18T03:30:00Z"
+  "lastUpdated": "2026-05-18T04:00:00Z"
 }
