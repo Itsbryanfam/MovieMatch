@@ -1091,3 +1091,33 @@ a:focus-visible,
   font-weight: 600;
   text-align: center;
 }
+
+/* =============================================
+   Phase 7.2 (CG-03) SUBMISSION PILL
+   Mirrors .peer-typing (06-states-anim.css:452) — deliberately subtle so it
+   sits quietly under the input without competing with the timer/chain.
+   ============================================= */
+.submission-pill {
+  display: none;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0.25rem 0 0;
+  opacity: 0;
+  transition: opacity 180ms ease-in;
+}
+.submission-pill.visible {
+  display: block;
+  opacity: 1;
+}
+
+/* =============================================
+   Phase 7.2 (MI-01) TOAST VARIANTS
+   Additive ONLY. Base .copy-toast lives in 04-modals.css:467 and is
+   unchanged; 06-states-anim.css loads after it (index.html:73) so these
+   accents cascade correctly. 'info' has no rule on purpose — neutral =
+   today's look (no empty ruleset). Hex fallbacks so it works even if the
+   CSS var is absent.
+   ============================================= */
+.copy-toast--error { border-left: 3px solid var(--timer-red, #f43f5e); }
+.copy-toast--success { border-left: 3px solid var(--timer-green, #34d399); }

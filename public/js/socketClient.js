@@ -14,6 +14,7 @@ import {
   openShareModal, showGameOverBanner, resetMobileTab,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
   showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
+  toast, gameEvent, submissionPill, // Phase 7.2: feedback router
   showScreen, // WHY: Phase 3 Task D — canonical group-normaliser for screen transitions
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
@@ -256,6 +257,10 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('stateUpdate', (state) => {
+    // Phase 7.2 (CG-03): any state broadcast means the in-flight submit
+    // resolved (accepted move, or eliminate-then-update). Idempotent — a
+    // no-op when no pill is showing; safe on the frequent stateUpdate fire.
+    submissionPill.clear();
     const prevState = getGameState();
     const prevSelfAlive = prevState?.players?.find(p => p.id === getMyPlayerId())?.isAlive;
     const wasMyTurn = prevState?.status === 'playing' &&
@@ -504,36 +509,24 @@ export function initSocket() {
       else if (msg.includes('wins')) kind = 'win';
     }
 
-    if (!selfElimActive) showNotification(msg);
-
+    // Phase 7.2: route through the feedback layer. Audio/haptics stay here
+    // (network-layer side effects, not UI-feedback DOM). gameEvent replicates
+    // the exact prior overlay/flash/confetti behaviour for elim/win, so those
+    // are behaviour-preserving. The ONE deliberate delta: kind:'info' no
+    // longer takes over the centre overlay — it goes to the calm toast
+    // channel (MI-01). Eliminations/wins keep the overlay via gameEvent.
     if (kind === 'elimination') {
       playFail();
       vibrate([200, 100, 200]); // attention-grabbing pattern on elimination
-      showEliminationFlash();
-      if (!selfElimActive) {
-        const overlay = document.getElementById('notification-overlay');
-        if (overlay) overlay.classList.add('notification--elimination');
-      }
-      const board = document.querySelector('.board');
-      if (board) {
-        board.classList.add('shake');
-        setTimeout(() => board.classList.remove('shake'), 750);
-      }
+      gameEvent('elimination', { msg, selfElimActive });
     } else if (kind === 'win') {
-      // Win takes precedence over any in-flight elimination flash from the
-      // same losing turn — clean those up before the celebration plays.
-      document.querySelectorAll('.elimination-flash').forEach(el => el.remove());
-      // M2: Single melodic 3-note arpeggio replaces the old three-success-
-      // ding pattern. Sounds intentional rather than a stuck button.
+      // M2: single melodic arpeggio + celebration haptics (unchanged).
       playSfx('win');
-      vibrate([60, 80, 60, 80, 60]); // celebration pattern on win
-      showWinFlash();
-      // M2: Confetti burst. CSS-driven via showConfetti so it auto-cleans
-      // up after the animation; respects prefers-reduced-motion via the
-      // existing global media query (animation-duration→0 disables it).
-      showConfetti();
+      vibrate([60, 80, 60, 80, 60]);
+      gameEvent('win', { msg, selfElimActive });
+    } else {
+      toast(msg, { variant: 'info' });
     }
-    // kind === 'info' (or unknown): no effects, just the text overlay.
   });
 
   // -----------------------------------------------------------------------
@@ -618,15 +611,16 @@ export function initSocket() {
     if (!total) return; // no votes this turn — nothing to surface
     const myVoteCorrect = perVoter && perVoter[socket.id];
     const overall = `${correct} of ${total} called it`;
+    // Phase 7.2: consolidate through the toast channel with a status variant
+    // (still a toast, same text/timing — purely additive colour accent).
     if (myVoteCorrect === true) {
-      showToast(`✅ You called it! (${overall})`);
+      toast(`✅ You called it! (${overall})`, { variant: 'success' });
       playSfx('success');
     } else if (myVoteCorrect === false) {
-      showToast(`❌ Wrong call (${overall})`);
+      toast(`❌ Wrong call (${overall})`, { variant: 'error' });
       playSfx('fail');
     } else {
-      // Player or non-voting spectator — just the room-level summary.
-      showToast(`🔮 ${overall}`);
+      toast(`🔮 ${overall}`, { variant: 'info' });
     }
   });
 
@@ -660,7 +654,11 @@ export function initSocket() {
       else if (retriesLeft === 1) tail = ' (1 try left)';
       else if (retriesLeft === 0) tail = ' (last chance!)';
     }
-    showToast((message || "Couldn't find that title.") + tail);
+    // Phase 7.2: validation errors use the error-variant toast channel; the
+    // in-flight "Checking:" pill is resolved (the restored input + this toast
+    // now carry the feedback). All other behaviour below is unchanged.
+    toast((message || "Couldn't find that title.") + tail, { variant: 'error' });
+    submissionPill.clear();
 
     // Re-enable the input. submitMovie() in app.js disables the input/button
     // locally when the player presses Enter, expecting a server-side state
@@ -701,7 +699,13 @@ export function initSocket() {
   // AUTOCOMPLETE
   // -----------------------------------------------------------------------
 
-  socket.on('autocompleteResults', renderAutocompleteResults);
+  // Phase 7.2 (CG-03): a returned search clears the "Searching…" pill, but
+  // ONLY if still in searching mode — a debounced result that lands after
+  // the player pressed Enter must not wipe the "Checking:" pill.
+  socket.on('autocompleteResults', (payload) => {
+    submissionPill.clear('searching');
+    renderAutocompleteResults(payload);
+  });
 
   // -----------------------------------------------------------------------
   // CHAT & REACTIONS

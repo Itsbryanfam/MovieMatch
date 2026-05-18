@@ -17,6 +17,7 @@ import {
   initUIElements, closeMobileAc, openShareModal, showNotification, showToast,
   buildTextRecap, showDailyNamePrompt, // WHY: HL-01 — name-less Daily seam
   showScreen, // WHY: canonical group-normaliser added in Phase 3 Task D
+  submissionPill, // Phase 7.2 (CG-03): keeps submitted title visible during TMDB round-trip
   playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
   privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
   tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
@@ -543,7 +544,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
 
   let debounceTimeout = null;
-  const hintText = document.getElementById('hint-text');
 
   function submitMovie() {
     const movie = movieInput ? movieInput.value.trim() : '';
@@ -559,7 +559,10 @@ document.addEventListener('DOMContentLoaded', () => {
       movieInput.disabled = true;
     }
     if (submitBtn) submitBtn.disabled = true;
-    if (hintText) hintText.innerText = 'Validating connection...';
+    // Phase 7.2 (CG-03): the pill replaces the static "Validating
+    // connection..." hint so the player's submitted title stays visible
+    // through the TMDB round-trip instead of facing a blank input.
+    submissionPill.checking(movie);
   }
 
   submitBtn?.addEventListener('click', submitMovie);
@@ -591,10 +594,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (query.length < 2) {
       if (autocompleteContainer) autocompleteContainer.innerHTML = '<div class="empty-hint">Type a movie to see suggestions...</div>';
       closeMobileAc();
+      submissionPill.clear('searching'); // left the typeahead — drop the searching pill
       return;
     }
     clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(() => {
+      submissionPill.searching();
       socket.emit('autocompleteSearch', { query, lobbyId: getCurrentLobbyId() });
     }, 400);
   });

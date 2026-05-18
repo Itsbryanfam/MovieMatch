@@ -398,6 +398,11 @@
               </button>
             </div>
             <p id="hint-text" class="hint-text">Waiting...</p>
+            <!-- Phase 7.2 (CG-03): submission pill. Mirrors #peer-typing-indicator
+                 (hidden until .visible, aria-live polite). socketClient/app.js
+                 toggle it so the submitted title stays visible during TMDB
+                 validation instead of the input going blank. -->
+            <p id="submission-pill" class="submission-pill" role="status" aria-live="polite"></p>
             <!-- M3: "X is typing…" indicator. Hidden by default; the
                  socketClient.js peerTyping handler toggles .visible on/off
                  and replaces the text. role="status" + aria-live="polite"
