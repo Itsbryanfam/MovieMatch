@@ -213,7 +213,10 @@ async function generateBotMove(room, profile, deps) {
  */
 async function enumerateConnectingMoves(room, deps, { limit = 3 } = {}) {
   try {
-    const { pubClient, headers, rng, getOrFetchPersonCredits } = deps;
+    // WHY: read-side deps contract differs from generateBotMove — there the floor
+    // comes from profile.popularityFloor; here it is a deps option, defaulting
+    // to 0 (most permissive) so the enumerator surfaces every viable out.
+    const { pubClient, headers, rng, getOrFetchPersonCredits, popularityFloor = 0 } = deps;
     const chain = (room && room.chain) || [];
     if (chain.length === 0) return [];
     const lastNode = chain[chain.length - 1];
@@ -229,6 +232,8 @@ async function enumerateConnectingMoves(room, deps, { limit = 3 } = {}) {
     // Deterministic when rng:()=>0 (the suggestion caller passes that), but
     // honour an injected rng for parity with generateBotMove's actor order.
     actors = _shuffled(actors, rng);
+    // No retryCap — the read-side enumerator iterates all actors to maximise
+    // candidate coverage; limit (not a per-turn perf cap) bounds the work.
 
     const out = [];
     const seen = new Set();
@@ -240,7 +245,7 @@ async function enumerateConnectingMoves(room, deps, { limit = 3 } = {}) {
       } catch (e) {
         continue; // TMDB blip on this actor — best-effort, try the next
       }
-      const ranked = _rankConnectingCandidates(credits, lastMovieId, used, deps.popularityFloor != null ? deps.popularityFloor : 0);
+      const ranked = _rankConnectingCandidates(credits, lastMovieId, used, popularityFloor);
       for (const m of ranked) {
         if (out.length >= limit) break;
         if (seen.has(m.id)) continue;

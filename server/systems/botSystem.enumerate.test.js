@@ -13,7 +13,6 @@ function room() {
     hardcoreMode: false,
   };
 }
-const profile = { whiff: 0, popularityFloor: 4, retryCap: 3 };
 function deps(creditsById) {
   return {
     pubClient: {}, headers: {}, rng: () => 0, dailySeed: [],
