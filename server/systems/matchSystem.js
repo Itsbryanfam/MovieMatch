@@ -29,6 +29,10 @@ const COULD_HAVE_PLAYED_TIMEOUT_MS = 1200;
 // A non-difficulty "always finds a move" profile for the SUGGESTION use of
 // generateBotMove. whiff:0 ⇒ `rng() < 0` is never true ⇒ it never blanks.
 // Plain literal consumed read-only by generateBotMove — no botSystem change.
+// popularityFloor:4 is the lowest (most permissive) floor — maximizes the
+// chance a suggestion exists whenever any valid move does.
+// retryCap:3 bounds per-actor TMDB attempts so a cache miss still resolves
+// within COULD_HAVE_PLAYED_TIMEOUT_MS.
 const SUGGESTION_BOT_PROFILE = { whiff: 0, popularityFloor: 4, retryCap: 3 };
 
 // H1: Per-turn budget for "title not found" retries before falling back to
