@@ -125,6 +125,20 @@ function _sameActor(a, b) {
   return a.name.toLowerCase() === b.name.toLowerCase();
 }
 
+// Phase 7.1: the per-actor "credits → ranked connecting candidates" step,
+// extracted verbatim from generateBotMove so the read-side enumerator can
+// reuse the SAME validity/popularity/sort rule (no rule duplicated). Pure:
+// no TMDB, no rng. Returns candidates sorted by popularity desc.
+function _rankConnectingCandidates(credits, lastMovieId, used, popularityFloor) {
+  const candidates = ((credits && credits.movies) || []).filter(m =>
+    m.id !== lastMovieId &&
+    !used.has(`movie:${m.id}`) &&
+    (m.popularity || 0) >= popularityFloor
+  );
+  candidates.sort((x, y) => (y.popularity || 0) - (x.popularity || 0));
+  return candidates;
+}
+
 /**
  * Decide the bot's move. Returns { tmdbId, mediaType:'movie' } or null.
  * null means "no move" — the caller (scheduleBotMove) turns that into a
@@ -177,20 +191,67 @@ async function generateBotMove(room, profile, deps) {
       // whole turn (graceful degradation; 5b's fallback DB will harden this).
       continue;
     }
-    const candidates = (credits.movies || []).filter(m =>
-      m.id !== lastMovieId &&
-      !used.has(`movie:${m.id}`) &&
-      (m.popularity || 0) >= profile.popularityFloor
-    );
+    const candidates = _rankConnectingCandidates(credits, lastMovieId, used, profile.popularityFloor);
     if (candidates.length === 0) continue;
-    // Prefer recognizable films: sort by popularity desc, then rng-pick from
-    // the top slice so it's not robotically always the single most-popular.
-    candidates.sort((x, y) => (y.popularity || 0) - (x.popularity || 0));
+    // Prefer recognizable films: rng-pick from the top slice so it's not
+    // robotically always the single most-popular (unchanged from pre-7.1).
     const topN = candidates.slice(0, Math.min(5, candidates.length));
     const pick = topN[Math.floor(rng() * topN.length)];
     return { tmdbId: pick.id, mediaType: 'movie' };
   }
   return null;
+}
+
+/**
+ * Phase 7.1 read-side: enumerate up to `limit` distinct connecting moves for
+ * the CURRENT chain, each tagged with the actor that bridges it to the last
+ * entry. Reuses generateBotMove's exact actor-selection + candidate rule (via
+ * _rankConnectingCandidates) — NO connection rule duplicated, NO whiff, NO
+ * first-move seeding (the only caller, _computeCouldHavePlayed, always has
+ * chain.length >= 1). Contract: NEVER throws; returns [] on empty chain / no
+ * credits / errors. deps mirror generateBotMove's.
+ */
+async function enumerateConnectingMoves(room, deps, { limit = 3 } = {}) {
+  try {
+    const { pubClient, headers, rng, getOrFetchPersonCredits } = deps;
+    const chain = (room && room.chain) || [];
+    if (chain.length === 0) return [];
+    const lastNode = chain[chain.length - 1];
+    const lastMovieId = lastNode && lastNode.movie ? lastNode.movie.id : null;
+    const lastCast = (lastNode && lastNode.movie && lastNode.movie.cast) || [];
+    const used = new Set(room.usedMovies || []);
+    const prevConnectors = room.previousSharedActors || [];
+
+    let actors = lastCast.filter(a => a && a.id != null);
+    if (room.hardcoreMode) {
+      actors = actors.filter(a => !prevConnectors.some(p => _sameActor(p, a)));
+    }
+    // Deterministic when rng:()=>0 (the suggestion caller passes that), but
+    // honour an injected rng for parity with generateBotMove's actor order.
+    actors = _shuffled(actors, rng);
+
+    const out = [];
+    const seen = new Set();
+    for (const actor of actors) {
+      if (out.length >= limit) break;
+      let credits;
+      try {
+        credits = await getOrFetchPersonCredits(pubClient, actor.id, headers);
+      } catch (e) {
+        continue; // TMDB blip on this actor — best-effort, try the next
+      }
+      const ranked = _rankConnectingCandidates(credits, lastMovieId, used, deps.popularityFloor != null ? deps.popularityFloor : 0);
+      for (const m of ranked) {
+        if (out.length >= limit) break;
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        out.push({ tmdbId: m.id, mediaType: 'movie', viaActor: { id: actor.id, name: actor.name } });
+      }
+    }
+    return out;
+  } catch (e) {
+    return []; // best-effort: a missing suggestion must never break elimination
+  }
 }
 
 // In-process bot-move timers, keyed by lobbyId — the bot analogue of
@@ -316,4 +377,4 @@ function pubClient_getLobby(pubClient, lobbyId) {
   return require('../redisUtils').getLobby(pubClient, lobbyId);
 }
 
-module.exports = { BOT_DIFFICULTIES, BOT_NAMES, createBot, generateBotMove, scheduleBotMove, clearBotTimeout };
+module.exports = { BOT_DIFFICULTIES, BOT_NAMES, createBot, generateBotMove, enumerateConnectingMoves, _tmdbHeaders, scheduleBotMove, clearBotTimeout };
