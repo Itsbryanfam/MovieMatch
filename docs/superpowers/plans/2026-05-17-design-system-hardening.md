@@ -312,11 +312,18 @@ export function createPromptModal(config) {
       card.appendChild(labelEl);
     }
     const input = document.createElement('input');
-    input.type = f.type || 'text';
+    // WHY (Phase 7.3 review-fix): all 3 legacy prompts use text inputs
+    // only — hard-code it rather than expose an untested `type` option
+    // (YAGNI; keeps the factory contract minimal for the zero-behaviour
+    // refactor).
+    input.type = 'text';
     input.placeholder = f.placeholder || '';
     input.autocomplete = 'off';
     if (typeof f.maxLength === 'number') input.maxLength = f.maxLength;
-    if (f.value) input.value = f.value;
+    // WHY (Phase 7.3 review-fix): guard against a MISSING value, not a
+    // falsy one — '' is a valid explicit pre-fill (e.g. the new-user name
+    // field) and must be applied, mirroring the maxLength guard above.
+    if (f.value !== undefined && f.value !== null) input.value = f.value;
     // gap = the exact per-field bottom margin from the legacy cssText:
     // '1rem' is the base; '1.5rem' (join code field) gets --gap-lg.
     input.className = f.gap === '1.5rem'

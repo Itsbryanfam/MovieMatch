@@ -145,6 +145,26 @@ describe('createPromptModal — Phase 7.3 modal factory', () => {
     expect(document.activeElement).toBe(f1);
   });
 
+  test('focusDelayMs:0 focuses the focusIndex field synchronously', () => {
+    createPromptModal(baseConfig({
+      fields: [
+        { placeholder: 'n', maxLength: 24, gap: '1rem' },
+        { placeholder: 'c', maxLength: 6, gap: '1.5rem' },
+      ],
+      focusDelayMs: 0, focusIndex: 1,
+    }));
+    const f1 = document.querySelectorAll('.modal-prompt-input')[1];
+    expect(document.activeElement).toBe(f1);
+  });
+
+  test('field value pre-fill is applied (incl. explicit empty string)', () => {
+    createPromptModal(baseConfig({ fields: [{ placeholder: 'n', maxLength: 24, gap: '1rem', value: 'Alice' }] }));
+    expect(document.querySelector('.modal-prompt-input').value).toBe('Alice');
+    document.body.innerHTML = '';
+    createPromptModal(baseConfig({ fields: [{ placeholder: 'n', maxLength: 24, gap: '1rem', value: '' }] }));
+    expect(document.querySelector('.modal-prompt-input').value).toBe('');
+  });
+
   test('XSS: crafted title is inert text', () => {
     createPromptModal(baseConfig({ title: '<img src=x onerror=alert(1)>' }));
     const t = document.querySelector('.modal-prompt-title');

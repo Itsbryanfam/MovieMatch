@@ -7,7 +7,7 @@ export * from './ui/ui-dom.js';
 export * from './ui/ui-render.js';
 export * from './ui/ui-notifications.js';
 export * from './ui/feedback.js';   // Phase 7.2: feedback router (toast/gameEvent/submissionPill)
-export * from './ui/modal.js';        // Phase 7.3: shared prompt-modal factory (MI-02)
+export * from './ui/modal.js';   // Phase 7.3: shared prompt-modal factory (MI-02)
 export * from './ui/ui-autocomplete.js';
 export * from './ui/ui-sharecard.js';
 export * from './ui/ui-panels.js';
