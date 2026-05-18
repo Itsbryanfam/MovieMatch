@@ -10,7 +10,7 @@
     {
       "id": 1,
       "subject": "Task 1: matchSystem multi-out wrapper + invalid-connection outs emit",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [0],
       "description": "**Goal:** Rework _computeCouldHavePlayed to return ≤3 {title,year,viaActor} outs via enumerateConnectingMoves (timeout/fail-closed discipline preserved); invalid-connection youWereEliminated emits `outs` not `couldHavePlayed`; export _computeCouldHavePlayed/resolveCandidates/topCastNames.\n\n**Files:** Modify server/systems/matchSystem.js (_computeCouldHavePlayed 409-459, emit ~281-296, exports); Test server/systems/matchSystem.aftercare.test.js (new) + migrate couldHavePlayed assertions in matchSystem.test.js/integration.test.js.\n\n**Verify:** npx jest server/systems/matchSystem.aftercare.test.js server/systems/matchSystem.test.js server/integration.test.js\n\n```json:metadata\n{\"files\":[\"server/systems/matchSystem.js\",\"server/systems/matchSystem.aftercare.test.js\",\"server/systems/matchSystem.test.js\",\"server/integration.test.js\"],\"verifyCommand\":\"npx jest server/systems/matchSystem.aftercare.test.js server/systems/matchSystem.test.js server/integration.test.js\",\"acceptanceCriteria\":[\"outs:[{title,year,viaActor}] \\u22643 deduped or null\",\"whole batch within COULD_HAVE_PLAYED_TIMEOUT_MS, fail-closed null\",\"invalid emit carries outs / omits when none; yourGuess/lastChainEntry/reason unchanged\",\"_computeCouldHavePlayed+resolveCandidates+topCastNames exported; pre-7.1 assertions migrated\"]}\n```"
     },
@@ -29,5 +29,5 @@
       "description": "**Goal:** Render ≤3 outs rows ({title} ({year}) — via {actor}) + 'You were one bridge away.'; timeout variant (detailed card, needed-only column, no You-played); preserve no-innerHTML, legacy flash, dismiss/Escape/focus.\n\n**Files:** Modify public/js/ui/ui-notifications.js (showSelfEliminationScreen 43-164: guard L48, .self-elim-could 124-130/154-155, hint 132-136); Test client-tests/self-elim-aftercare.test.js (new) + migrate client couldHavePlayed/self-elim-could assertions.\n\n**Verify:** npx jest client-tests/self-elim-aftercare.test.js client-tests/\n\n```json:metadata\n{\"files\":[\"public/js/ui/ui-notifications.js\",\"client-tests/self-elim-aftercare.test.js\"],\"verifyCommand\":\"npx jest client-tests/self-elim-aftercare.test.js client-tests/\",\"acceptanceCriteria\":[\"outs list \\u22643 with via-actor + bridge line; replaces generic hint\",\"timedOut \\u2192 detailed card, needed-only, no You-played column, time head\",\"no outs+no timedOut \\u2261 pre-7.1 detailed card; detail-less \\u2261 legacy flash\",\"titles/actors rendered as text (no innerHTML)\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-18T02:30:00Z"
+  "lastUpdated": "2026-05-18T03:00:00Z"
 }
