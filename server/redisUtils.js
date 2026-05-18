@@ -1,3 +1,6 @@
+// Phase 5b: local fallback movie DB (leaf module — fs/path only, no cycle).
+const fallbackMovies = require('./systems/fallbackMovies');
+
 async function getLobby(pubClient, id) {
   const data = await pubClient.get(`lobby:${id}`);
   if (!data) return null;
@@ -163,9 +166,20 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
     }
 
     if (!response.ok) {
-      // Drain the body before throwing so the underlying connection is
-      // returned to the pool, not held open while we wait for GC.
+      // Drain the body before falling back/throwing so the underlying
+      // connection is returned to the pool, not held open until GC.
       await response.arrayBuffer();
+      // Phase 5b: TMDB is down for this title. If it's a movie we have
+      // locally, return that cast instead of eliminating the player. Do NOT
+      // write it to the 7-day Redis cache — once TMDB recovers, the next miss
+      // must re-fetch fresh full credits, not serve trimmed fallback for a week.
+      if (mediaType !== 'tv') {
+        const fb = fallbackMovies.getFallbackById(tmdbId);
+        // length>0 guard: an entry with an empty cast is no better than no
+        // entry (a 0-actor "match" can't validate any chain connection) —
+        // treat it as uncovered and fall through to the existing throw.
+        if (fb && Array.isArray(fb.cast) && fb.cast.length > 0) return { cast: fb.cast };
+      }
       throw new Error(`TMDB credits failed: ${response.status}`);
     }
 
@@ -184,6 +198,23 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
     await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
 
     return stripped;
+  } catch (err) {
+    // Phase 5b: two cases reach here. (1) Network/timeout: fetch() rejected
+    // (ETIMEDOUT/AbortError/etc.) — this path had NO catch before; try the
+    // local fallback. (2) !ok + NOT in fallback: the throw above is caught
+    // here, getFallbackById returns null again (a pure idempotent Map read,
+    // no side effects) and we fall through to re-throw the ORIGINAL error
+    // unchanged via `throw err` — behavior identical to baseline. (!ok + IN
+    // fallback already returned before the throw, so it never reaches here.)
+    // Movie-only; tv falls straight to `throw err`.
+    if (mediaType !== 'tv') {
+      const fb = fallbackMovies.getFallbackById(tmdbId);
+      // length>0 guard: an entry with an empty cast is no better than no
+      // entry (a 0-actor "match" can't validate any chain connection) —
+      // treat it as uncovered and fall through to the existing throw.
+      if (fb && Array.isArray(fb.cast) && fb.cast.length > 0) return { cast: fb.cast };
+    }
+    throw err; // uncovered: today's behavior (caller eliminates)
   } finally {
     // Release only if we actually held the lock — the fall-through path above
     // proceeds without holding it.
