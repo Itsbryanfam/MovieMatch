@@ -752,7 +752,9 @@ input:disabled {
   display: inline-block;
   letter-spacing: 0.26em;
   padding-left: 0.26em; /* balance trailing letter-spacing so it stays centred */
-  color: var(--accent-primary);
+  /* WHY no color here: #lobby-code-display keeps its pre-existing
+     .accent-text class (retained for zero-regression) which already
+     supplies var(--accent-primary); re-declaring it would be redundant. */
   text-shadow: var(--shadow-glow);
 }
 
@@ -778,7 +780,10 @@ input:disabled {
   min-width: 0;
   overflow-wrap: anywhere; /* long names wrap inside the fixed-width panel */
 }
-.entrance-card.is-you {
+/* WHY the #lobby-players li prefix: the base #lobby-players li.entrance-card
+   border-left rule carries an id (specificity 1,1,1); this override must
+   match that id (→ 1,2,1) or the "you" identity highlight is a dead rule. */
+#lobby-players li.entrance-card.is-you {
   border-left-color: var(--accent-primary);
 }
 .entrance-card.is-entering {
@@ -849,11 +854,14 @@ input:disabled {
 .roll-camera {
   display: block;
 }
-.roll-camera--ready {
+/* WHY the #start-btn prefix: .btn-primary:hover (0,2,0) would otherwise
+   eclipse these variant cues (0,1,0); #start-btn.roll-camera--* (1,1,0)
+   wins so the cinematic ready/waiting shadow is correct even on hover. */
+#start-btn.roll-camera--ready {
   box-shadow: var(--shadow-glow-strong);
 }
-.roll-camera--waiting-host,
-.roll-camera--waiting-cast {
+#start-btn.roll-camera--waiting-host,
+#start-btn.roll-camera--waiting-cast {
   box-shadow: none;
 }
 
