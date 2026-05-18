@@ -17,7 +17,7 @@
     {
       "id": 2,
       "subject": "Task 2: gameLogic timeout-only private youWereEliminated",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** In eliminateCurrentPlayer, for a human (stableId) non-team connected player eliminated by timeout (_categorizeReason==='timeout'), privately emit youWereEliminated {lastChainEntry,reason,timedOut:true,outs?} (no yourGuess), bounded + fail-closed, not affecting other callers.\n\n**Files:** Modify server/gameLogic.js (eliminateCurrentPlayer 175-206, insert before checkWinCondition L202); Test server/gameLogic.aftercare.test.js (new).\n\n**Verify:** npx jest server/gameLogic.aftercare.test.js server/turn-watchdog.test.js server/turn-sweep.test.js server/integration.test.js\n\n```json:metadata\n{\"files\":[\"server/gameLogic.js\",\"server/gameLogic.aftercare.test.js\"],\"verifyCommand\":\"npx jest server/gameLogic.aftercare.test.js server/turn-watchdog.test.js server/turn-sweep.test.js server/integration.test.js\",\"acceptanceCriteria\":[\"human non-team connected timeout \\u2192 private youWereEliminated timedOut:true no yourGuess\",\"NOT for bot/quit/disconnect/typo-cap/team\",\"outs omitted when null; nextTurn not blocked beyond bound\",\"existing timeout/watchdog/integration suites green\"]}\n```"
     },
@@ -29,5 +29,5 @@
       "description": "**Goal:** Render ≤3 outs rows ({title} ({year}) — via {actor}) + 'You were one bridge away.'; timeout variant (detailed card, needed-only column, no You-played); preserve no-innerHTML, legacy flash, dismiss/Escape/focus.\n\n**Files:** Modify public/js/ui/ui-notifications.js (showSelfEliminationScreen 43-164: guard L48, .self-elim-could 124-130/154-155, hint 132-136); Test client-tests/self-elim-aftercare.test.js (new) + migrate client couldHavePlayed/self-elim-could assertions.\n\n**Verify:** npx jest client-tests/self-elim-aftercare.test.js client-tests/\n\n```json:metadata\n{\"files\":[\"public/js/ui/ui-notifications.js\",\"client-tests/self-elim-aftercare.test.js\"],\"verifyCommand\":\"npx jest client-tests/self-elim-aftercare.test.js client-tests/\",\"acceptanceCriteria\":[\"outs list \\u22643 with via-actor + bridge line; replaces generic hint\",\"timedOut \\u2192 detailed card, needed-only, no You-played column, time head\",\"no outs+no timedOut \\u2261 pre-7.1 detailed card; detail-less \\u2261 legacy flash\",\"titles/actors rendered as text (no innerHTML)\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-18T03:00:00Z"
+  "lastUpdated": "2026-05-18T03:30:00Z"
 }
