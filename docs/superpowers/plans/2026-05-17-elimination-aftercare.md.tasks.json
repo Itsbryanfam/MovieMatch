@@ -4,7 +4,7 @@
     {
       "id": 0,
       "subject": "Task 0: botSystem read-side enumerator seam (enumerateConnectingMoves)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Extract generateBotMove's per-actor candidate ranking into a pure helper (_rankConnectingCandidates) and add a fail-closed exported enumerateConnectingMoves returning up to `limit` {tmdbId,mediaType,viaActor}, behaviour-preserving for generateBotMove; also export the existing _tmdbHeaders env-headers helper for Task 2's no-ctx timeout aftercare.\n\n**Files:** Modify server/systems/botSystem.js (generateBotMove ~180-191, add helpers, module.exports L319 add enumerateConnectingMoves + _tmdbHeaders); Test server/systems/botSystem.enumerate.test.js (new).\n\n**Verify:** npx jest server/systems/botSystem.enumerate.test.js server/systems/botSystem.test.js server/systems/botSystem.schedule.test.js server/systems/matchSystem.botmove.test.js server/systems/lobbySystem.botlifecycle.test.js\n\n```json:metadata\n{\"files\":[\"server/systems/botSystem.js\",\"server/systems/botSystem.enumerate.test.js\"],\"verifyCommand\":\"npx jest server/systems/botSystem.enumerate.test.js server/systems/botSystem.test.js server/systems/botSystem.schedule.test.js server/systems/matchSystem.botmove.test.js server/systems/lobbySystem.botlifecycle.test.js\",\"acceptanceCriteria\":[\"\\u2264limit results each with bridging viaActor from last cast\",\"deduped by tmdbId, deterministic with rng:()=>0\",\"fail-closed [] on empty chain/no credits/errors, never throws\",\"generateBotMove regression suites stay green\",\"_tmdbHeaders exported (reused by Task 2 no-ctx headers)\"]}\n```"
     },
     {
@@ -29,5 +29,5 @@
       "description": "**Goal:** Render ≤3 outs rows ({title} ({year}) — via {actor}) + 'You were one bridge away.'; timeout variant (detailed card, needed-only column, no You-played); preserve no-innerHTML, legacy flash, dismiss/Escape/focus.\n\n**Files:** Modify public/js/ui/ui-notifications.js (showSelfEliminationScreen 43-164: guard L48, .self-elim-could 124-130/154-155, hint 132-136); Test client-tests/self-elim-aftercare.test.js (new) + migrate client couldHavePlayed/self-elim-could assertions.\n\n**Verify:** npx jest client-tests/self-elim-aftercare.test.js client-tests/\n\n```json:metadata\n{\"files\":[\"public/js/ui/ui-notifications.js\",\"client-tests/self-elim-aftercare.test.js\"],\"verifyCommand\":\"npx jest client-tests/self-elim-aftercare.test.js client-tests/\",\"acceptanceCriteria\":[\"outs list \\u22643 with via-actor + bridge line; replaces generic hint\",\"timedOut \\u2192 detailed card, needed-only, no You-played column, time head\",\"no outs+no timedOut \\u2261 pre-7.1 detailed card; detail-less \\u2261 legacy flash\",\"titles/actors rendered as text (no innerHTML)\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-05-17T00:00:00Z"
+  "lastUpdated": "2026-05-18T02:30:00Z"
 }
