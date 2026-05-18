@@ -18,7 +18,7 @@ const DETAILS = {
   yourGuess: { title: 'Casino Royale', year: '2006', cast: ['Daniel Craig'] },
 };
 
-describe('learning breakdown — couldHavePlayed in self-elimination screen', () => {
+describe('learning breakdown — outs suggestion in self-elimination screen', () => {
   beforeEach(() => { jest.useFakeTimers(); });
   afterEach(() => {
     // afterEach runs even if a test throws, so timer/DOM restore is failure-safe.

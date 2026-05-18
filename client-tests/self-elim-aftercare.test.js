@@ -8,6 +8,8 @@ const lastEntry = { title: 'Heat', year: 1995, cast: ['Al Pacino', 'Robert De Ni
 
 describe('showSelfEliminationScreen — 7.1 aftercare', () => {
   beforeEach(() => { loadIndexHtml(); });
+  // Fix C: align teardown to sibling-suite convention (learning-breakdown, etc.)
+  afterEach(() => { document.body.innerHTML = ''; });
 
   test('invalid path: outs list with via-actor + bridge line, no generic hint', () => {
     showSelfEliminationScreen({
@@ -51,5 +53,18 @@ describe('showSelfEliminationScreen — 7.1 aftercare', () => {
     const row = document.querySelector('.self-elim-outs-row');
     expect(row.querySelector('img')).toBeNull();
     expect(row.textContent).toContain('<img');
+  });
+
+  // Fix B: fail-closed — timedOut:true with no outs (server TMDB-miss / _computeCouldHavePlayed
+  // returned null → key omitted). Card must degrade coherently: detailed timeout card renders,
+  // needed column present, no "You played" column, no .self-elim-outs block, generic hint fallback.
+  test('timeout + no outs ⇒ detailed timeout card, needed-only, generic hint fallback (fail-closed)', () => {
+    showSelfEliminationScreen({ reason: 'Turn timed out', lastChainEntry: lastEntry, timedOut: true });
+    expect(document.querySelector('.self-elim-screen--detailed')).not.toBeNull();
+    expect(document.querySelector('.self-elim-col--needed')).not.toBeNull();
+    expect(document.querySelector('.self-elim-col--played')).toBeNull();
+    expect(document.querySelector('.self-elim-outs')).toBeNull();
+    expect(document.querySelector('.self-elim-hint')).not.toBeNull();
+    expect(document.querySelector('.self-elim-title').textContent).toMatch(/time/i);
   });
 });
