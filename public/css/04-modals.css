@@ -232,6 +232,103 @@
   font-weight: 700;
 }
 
+/* =============================================================
+   Phase 7.3 (MI-02 / DS-01) PROMPT MODAL — compact modifier
+   The 3 name overlays (showNamePrompt/showJoinPrompt/
+   showDailyNamePrompt) were built with ~28 hardcoded .style.cssText
+   assignments that bypassed this modal system. They now use
+   createPromptModal, which emits .modal-overlay/.modal-card PLUS this
+   --prompt modifier. WHY a modifier (not the bare modal classes): the
+   legacy prompts are visually different from the big modals (340px vs
+   min(640px,90vw), 2rem vs 2.5rem, z-1000 vs z-200, NO entrance
+   animation, NO backdrop blur) and showDailyNamePrompt depends on the
+   absence of a transition (it focuses synchronously). This block
+   reproduces the legacy pixels byte-for-byte so MI-02/DS-01 is a strict
+   zero-behaviour-change refactor. Visual unification with the big modals
+   is deliberately deferred to a later visual phase. Lives in
+   04-modals.css (the modal-system home) — the six-partial cascade order
+   is unchanged.
+   ============================================================= */
+.modal-overlay--prompt {
+  /* legacy overlay: z-index:1000; no padding; no blur; no animation */
+  z-index: 1000;
+  padding: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  animation: none;
+}
+.modal-card--prompt {
+  /* legacy card cssText, verbatim */
+  background: var(--surface, #18181b);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  padding: 2rem;
+  max-width: 340px;
+  width: 90%;
+  text-align: center;
+  box-shadow: none;
+  position: static;
+  animation: none;
+}
+.modal-prompt-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+  color: var(--text, #f8fafc);
+}
+/* join had no subtitle → larger title bottom-margin */
+.modal-prompt-title--solo { margin: 0 0 1.5rem; }
+.modal-prompt-subtitle {
+  margin: 0 0 1.5rem;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.9rem;
+}
+.modal-prompt-label {
+  display: block;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 0.35rem;
+  letter-spacing: 0.03em;
+}
+.modal-prompt-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text, #f8fafc);
+  font-size: 1rem;
+  box-sizing: border-box;
+  margin-bottom: 1rem;
+  outline: none;
+  font-family: inherit;
+}
+.modal-prompt-input--gap-lg { margin-bottom: 1.5rem; }
+.modal-prompt-input--upper { text-transform: uppercase; }
+.modal-prompt-btn {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.modal-prompt-btn--primary {
+  border: none;
+  background: var(--accent, #818cf8);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+}
+/* primary gets a bottom margin only when a secondary button follows */
+.modal-prompt-btn--stacked { margin-bottom: 0.75rem; }
+.modal-prompt-btn--secondary {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.9rem;
+}
+
 /* HOW TO PLAY */
 .how-to-steps {
   display: flex;
