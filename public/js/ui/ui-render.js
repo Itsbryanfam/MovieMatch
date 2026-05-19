@@ -660,13 +660,17 @@ function renderChainItems(gameState, myPlayerId) {
     return;
   }
 
-  // a (re)started game has a chain again → clear stale end-of-game artifacts
-  // (preserved verbatim from the 1.0 L632-637).
+  // a (re)started game has a chain again → clear stale end-of-game artifacts.
+  // .game-over-banner and .empty-hint are status-conditional (banners MUST
+  // persist across finished-state re-renders — §4.8 / spec §1.7); but the
+  // empty-board-hint must clear UNCONDITIONALLY when a chain exists, otherwise
+  // a direct playing-empty → finished-with-chain transition (forfeit race /
+  // late-join spectator path) could leave it stuck alongside the filmstrip.
   if (gameState.status === 'playing') {
     displayEl.querySelector('.game-over-banner')?.remove();
     displayEl.querySelector('.empty-hint')?.remove();
-    displayEl.querySelector('.empty-board-hint')?.remove();
   }
+  displayEl.querySelector('.empty-board-hint')?.remove();
 
   // .filmstrip is the rebuilt child; its dataset.count carries the
   // previously-rendered chain length so the "new entry only" side effects
