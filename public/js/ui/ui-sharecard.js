@@ -155,7 +155,7 @@ export function generateShareCard(state) {
     // badge above the footer. Reuses the existing COLORS (no new colour
     // value) and the existing layout math (winnerY) — purely additive.
     // WHY these y-offsets: winnerY is always clamped to 580 (Math.max caps it
-    // because 7 curated entries * 44px lineH + 132 start + 20 guard = 460 < 580).
+    // because 7 curated entries * 44px lineH + 132 start + 28 skipped block + 20 guard = 488 < 580).
     // Billing sub-line draws at winnerY+60 = 640. Footer band starts at H-48=672.
     // grid baseline: winnerY+70 = 650 (10px below billing, 22px above footer).
     // survived baseline: winnerY+86 = 666 (16px below grid, 6px above footer).

@@ -31,6 +31,17 @@ describe('buildEmojiGrid — spoiler-free & zero-identity', () => {
     const g = sc.buildEmojiGrid({ gameMode: 'classic', chain: chainOf(12), winner: null });
     expect(g).toMatch(/\+5$/); // 12 - 7 curated = 5
   });
+  test('spicy 🔥 for a high-score middle entry (scoreChainEntry >= 5)', () => {
+    // mediaType diff (movie→tv) = +3; year gap |2000-1975|=25 → floor(25/10)=+2; total 5 → 🔥
+    const base = link(0); // movie, year 2000
+    const spicy = link(1, {
+      movie: { title: 'TV Show', year: 1975, poster: '', mediaType: 'tv', cast: [] },
+      matchedActors: [],
+    });
+    const last = link(2); // movie, year 2002
+    const g = sc.buildEmojiGrid({ gameMode: 'classic', chain: [base, spicy, last], winner: null });
+    expect([...g]).toEqual(['🎬', '🔥', '🏁']); // seed, spicy-middle, last
+  });
 });
 
 describe('survivedLine', () => {
