@@ -609,22 +609,37 @@
 }
 
 /* =============================================================
-   PHASE 7.6 — CHAIN PREMIERE RECAP OVERLAY (append-only)
-   WHY: structural rules only, mirroring .share-modal-card so the
-   recap reuses the existing .modal-overlay/.modal-card system. NO
-   pre-existing rule edited; NO new colour value (existing custom
-   props / palette only). Entrance animation lives in
-   06-states-anim.css so the existing global reduced-motion handling
-   neutralizes it; recap-player.js also JS-short-circuits.
-   Token substitutions vs. plan spec:
-     --text-secondary → --text-muted  (--text-secondary does not exist)
-     --accent         → --accent-primary  (bare --accent does not exist)
+   PHASE 7.6 / 7.6.2 — CHAIN PREMIERE RECAP OVERLAY (append-only)
+   WHY 7.6.2 (user feedback): the recap must match the refined
+   Theater Lobby aesthetic, and the shared ✕ (.modal-close) was
+   colliding with the first full-bleed beat. STILL append-only —
+   this is 7.6's OWN block, NO pre-existing rule edited. NO new
+   colour value: reuses existing custom props + the SAME verbatim
+   accent rgba(129,140,248,…) the `.theater .screen` lobby rules
+   already use (#818cf8 == --accent-primary; CSS has no
+   var()-with-opacity syntax, so the rgba literal is the
+   established brand pattern — see the identical note on
+   .screen-headline — NOT a new colour). The intro mirrors
+   `.theater .screen` + `.screen-eyebrow/headline/sub`; the finale
+   reuses that same marquee treatment as the payoff. Entrance stays
+   in 06-states-anim.css (the global prefers-reduced-motion block
+   neutralises it with NO new @media; recap-player.js also
+   JS-short-circuits). Token substitutions: --text-secondary →
+   --text-muted, --accent → --accent-primary (neither bare prop
+   exists in 01-base.css).
    ============================================================= */
 .recap-card {
-  max-width: 640px;
+  max-width: min(620px, 92vw);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.85rem;
+  /* WHY 4rem top: the shared .modal-close is position:absolute
+     top:1rem and 44px tall (its bottom reaches 60px). The recap's
+     first beat is full-bleed, so it rendered UNDERNEATH the ✕
+     (the reported "alignment issue"). 64px padding-top clears the
+     close button with a small gap; the sides are tightened for a
+     focused single-column theatre feel. */
+  padding: 4rem 1.5rem 1.5rem;
 }
 .recap-stage {
   display: flex;
@@ -632,40 +647,160 @@
   gap: 0.6rem;
   max-height: 60vh;
   overflow-y: auto;
+  padding-right: 2px; /* gutter so tiles don't kiss the scrollbar */
 }
+
+/* --- link tile: refined surface, mirrors the lobby seat/ledger --- */
 .recap-beat {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.65rem;
+  gap: 0.8rem;
+  padding: 0.6rem 0.7rem;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--bg-elevated);
 }
-.recap-intro, .recap-skipped, .recap-bridge {
-  justify-content: center;
-  color: var(--text-muted);
-  font-style: italic;
+.recap-poster {
+  width: 48px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px var(--border-subtle), var(--shadow-sm);
 }
+.recap-poster.placeholder {
+  background: var(--bg-base);
+  /* empty film-frame hint — accent at the SAME low opacity the
+     lobby screen border uses (verbatim brand rgba, not new). */
+  box-shadow: inset 0 0 0 1px rgba(129,140,248,0.18);
+}
+.recap-meta { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.recap-who { font-weight: 600; color: var(--text-main); }
+.recap-title { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* --- bridge: a slim accent connector between links --- */
+.recap-bridge {
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  padding: 0.1rem 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+}
+/* --- skipped: a subtle muted pill, centred (not full-bleed) --- */
+.recap-skipped {
+  align-self: center;
+  justify-content: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  padding: 0.35rem 0.8rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+/* --- intro: the cinema screen (mirrors `.theater .screen`) --- */
+.recap-intro { background: transparent; border: 0; padding: 0; }
+.recap-screen {
+  width: 100%;
+  background: linear-gradient(180deg, #1a1b22 0%, #0f1015 100%);
+  border: 1px solid rgba(129,140,248,0.18);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 0 60px rgba(129,140,248,0.12),
+    0 0 120px rgba(129,140,248,0.08);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 1.5rem 1rem;
+}
+.recap-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(180deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, rgba(129,140,248,0.08), transparent 70%);
+  pointer-events: none;
+}
+.recap-screen-eyebrow {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+  opacity: 0.9;
+  z-index: 1;
+}
+.recap-screen-headline {
+  font-size: clamp(1.2rem, 2.4vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-main);
+  text-shadow: 0 0 22px rgba(129,140,248,0.35);
+  text-align: center;
+  line-height: 1.1;
+  z-index: 1;
+}
+.recap-screen-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  z-index: 1;
+}
+
+/* --- finale: the marquee payoff, same screen treatment --- */
 .recap-finale {
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
-  background: var(--bg-surface);
+  gap: 0.35rem;
+  background: linear-gradient(180deg, #1a1b22 0%, #0f1015 100%);
+  border: 1px solid rgba(129,140,248,0.18);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 0 60px rgba(129,140,248,0.12);
+  position: relative;
+  overflow: hidden;
+  padding: 1.4rem 1rem;
 }
-.recap-finale-title { font-size: 1.4rem; font-weight: 700; color: var(--accent-primary); text-align: center; }
-.recap-finale-sub { color: var(--text-muted); }
-.recap-poster {
-  width: 46px;
-  height: 69px;
-  object-fit: cover;
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
+.recap-finale-eyebrow {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+  opacity: 0.9;
 }
-.recap-poster.placeholder { background: var(--bg-base); }
-.recap-meta { display: flex; flex-direction: column; min-width: 0; }
-.recap-who { font-weight: 600; }
-.recap-title { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.recap-actions { display: flex; gap: 0.75rem; }
+.recap-finale-title {
+  font-size: clamp(1.3rem, 2.6vw, 1.7rem);
+  font-weight: 700;
+  color: var(--text-main);
+  text-align: center;
+  text-shadow: 0 0 22px rgba(129,140,248,0.35);
+  line-height: 1.15;
+}
+.recap-finale-sub {
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+/* --- actions: the global btn system (same as the lobby Roll Camera) --- */
+.recap-actions {
+  display: flex;
+  gap: 0.75rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-subtle);
+}
 .recap-actions .btn-primary, .recap-actions .btn-secondary { flex: 1; }
 

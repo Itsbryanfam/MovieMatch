@@ -109,6 +109,42 @@ test('null mount element is a safe no-op', () => {
   expect(() => playRecap(state(), null, { prefersReducedMotion: true })).not.toThrow();
 });
 
+// Phase 7.6.2 — the recap is modelled after the Theater Lobby's refined
+// aesthetic. The intro beat is no longer a flat italic pill: it renders a
+// cinema-screen (eyebrow + headline + sub) mirroring .theater .screen, and
+// the finale carries a marquee eyebrow. createElement/textContent only.
+test('intro beat renders a cinema-screen: eyebrow + headline (engine title) + connection sub', () => {
+  const el = overlay();
+  playRecap(state(), el, { prefersReducedMotion: true });
+  const screen = el.querySelector('.recap-intro .recap-screen');
+  expect(screen).not.toBeNull();
+  expect(screen.querySelector('.recap-screen-eyebrow').textContent).toBe('CHAIN PREMIERE');
+  // headline = the engine's intro.payload.title (unchanged contract)
+  expect(screen.querySelector('.recap-screen-headline').textContent).toBe('MovieMatch');
+  // sub = the connection count, uppercase, pluralised (fixture chain = 2)
+  expect(screen.querySelector('.recap-screen-sub').textContent).toBe('2 CONNECTIONS');
+  // no raw innerHTML markup leaked in (textContent-only discipline)
+  expect(screen.innerHTML).not.toContain('&lt;');
+});
+
+test('singular connection count is not pluralised', () => {
+  const el = overlay();
+  playRecap(state({ chain: [
+    { playerName: 'Ann', movie: { title: 'A', year: 2001, poster: '' }, matchedActors: [] },
+  ] }), el, { prefersReducedMotion: true });
+  expect(el.querySelector('.recap-intro .recap-screen-sub').textContent).toBe('1 CONNECTION');
+});
+
+test('finale beat carries a marquee eyebrow above the title/sub', () => {
+  const el = overlay();
+  playRecap(state(), el, { prefersReducedMotion: true });
+  const fin = el.querySelector('.recap-finale');
+  expect(fin.querySelector('.recap-finale-eyebrow').textContent).toBe("THAT'S A WRAP");
+  // existing title/sub contract preserved (still the engine's winner/subLine)
+  expect(fin.querySelector('.recap-finale-title').textContent).toBe('🏆 Ann wins!');
+  expect(fin.querySelector('.recap-finale-sub')).not.toBeNull();
+});
+
 // M-3: accurately verifies BOTH the tmdb-<img>+fallback path AND the
 // empty-poster → placeholder path. (The empty poster is normalised to null
 // by chain-recap.js, so it goes straight to the placeholder <div> path —

@@ -1214,7 +1214,7 @@ a:focus-visible,
 .self-elim-col:only-child { grid-column: 1 / -1; }
 
 /* =============================================================
-   PHASE 7.6 — CHAIN PREMIERE RECAP entrance (append-only)
+   PHASE 7.6 / 7.6.2 — CHAIN PREMIERE RECAP entrance (append-only)
    WHY: compositor-only (transform + opacity) so it is GPU-cheap on
    the vanilla no-build mobile stack and the EXISTING global
    prefers-reduced-motion handling (see the comment at L409-412 —
@@ -1222,13 +1222,17 @@ a:focus-visible,
    neutralizes it with NO new @media. recap-player.js ALSO
    JS-short-circuits to the instant settled end-state under
    reduced-motion (belt-and-suspenders, spec §1.8).
+   WHY 7.6.2: a richer rise-and-settle (translateY 16px + a barely
+   perceptible scale) so each beat reads like it's projected onto
+   the screen — the lobby's motion language. STILL only transform +
+   opacity (no reflow), STILL globally reduced-motion-neutralised.
    ============================================================= */
 .recap-beat {
   opacity: 0;
-  transform: translateY(10px);
-  transition: opacity 0.34s ease, transform 0.34s cubic-bezier(0.2, 0.75, 0.25, 1);
+  transform: translateY(16px) scale(0.985);
+  transition: opacity 0.4s ease, transform 0.45s cubic-bezier(0.2, 0.8, 0.25, 1);
 }
 .recap-beat.is-in {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
