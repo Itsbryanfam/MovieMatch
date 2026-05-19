@@ -86,11 +86,21 @@ describe('renderLobby — theater entrance + preserved behaviour', () => {
       .toBeGreaterThan(0);
   });
 
-  test('swatch strip only on the local player\'s own seat; never in team mode', () => {
+  test('swatch strip renders only on the local player\'s own occupied seat', () => {
     renderLobby(makeWaitingState({ id: 'RC8' }), 'host_id');
     const occ = document.querySelectorAll('#lobby-players li.seat.occupied');
     expect(occ[0].querySelector('.seat-swatches')).not.toBeNull();
     expect(occ[1].querySelector('.seat-swatches')).toBeNull();
+  });
+
+  test('team mode builds no swatch DOM (fresh render — team early-return untouched, #lobby-players not cleared by the team path)', () => {
+    // WHY a fresh render (not waiting-then-team in one test): the team
+    // early-return intentionally does NOT clear #lobby-players (showScreen
+    // hides #waiting-room; 7.5.2 byte-identical, spec G4). beforeEach
+    // reloads the DOM per test, so team mode here renders from an empty
+    // #lobby-players → early-return → zero swatch DOM, which is the true
+    // invariant ("team mode builds no swatch DOM") without depending on
+    // the protected team path clearing the hidden container.
     renderLobby(makeWaitingState({ gameMode: 'team', id: 'RC9' }), 'host_id');
     expect(document.querySelectorAll('.seat-swatches').length).toBe(0);
   });

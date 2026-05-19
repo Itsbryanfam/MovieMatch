@@ -143,11 +143,6 @@ export function renderLobby(gameState, myPlayerId) {
   // (renderLobby runs on every stateUpdate; this keeps it idempotent).
   const prevBotRow = startBtn.parentNode && startBtn.parentNode.querySelector('.add-bot-row');
   if (prevBotRow) prevBotRow.remove();
-  // Phase 7.5.3: clear the lobby seat list on EVERY renderLobby call,
-  // BEFORE the team-mode early return — otherwise a seat→team transition
-  // would leave stale .seat-swatches (and any other seat DOM) in the document
-  // even after team mode takes over. Mirrors the prevBotRow teardown above.
-  lobbyPlayersList.innerHTML = '';
 
   if (mode === 'team') {
     showScreen('team');                           // normalise waiting/team pair: show team
