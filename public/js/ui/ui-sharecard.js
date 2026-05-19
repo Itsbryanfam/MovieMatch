@@ -151,6 +151,23 @@ export function generateShareCard(state) {
         ctx.fillText('🎬 Game Over!', W / 2, winnerY + 36);
     }
 
+    // Phase 7.6 Share 2.0: additive spoiler-free emoji strip + survived
+    // badge above the footer. Reuses the existing COLORS (no new colour
+    // value) and the existing layout math (winnerY) — purely additive.
+    // WHY these y-offsets: winnerY is always clamped to 580 (Math.max caps it
+    // because 7 curated entries * 44px lineH + 132 start + 20 guard = 460 < 580).
+    // Billing sub-line draws at winnerY+60 = 640. Footer band starts at H-48=672.
+    // grid baseline: winnerY+70 = 650 (10px below billing, 22px above footer).
+    // survived baseline: winnerY+86 = 666 (16px below grid, 6px above footer).
+    // Both 650 < 672 and 666 < 672 — no overlap with footer content.
+    ctx.font = '20px sans-serif';
+    ctx.fillStyle = COLORS.text;
+    ctx.textAlign = 'center';
+    ctx.fillText(buildEmojiGrid(state), W / 2, winnerY + 70);
+    ctx.font = '600 13px "Plus Jakarta Sans", sans-serif';
+    ctx.fillStyle = COLORS.muted;
+    ctx.fillText(survivedLine(state), W / 2, winnerY + 86);
+
     const footerGrad = ctx.createLinearGradient(0, H - 48, 0, H);
     footerGrad.addColorStop(0, 'transparent');
     footerGrad.addColorStop(1, 'rgba(0,0,0,0.8)');
@@ -197,6 +214,32 @@ export function openShareModal(gameState) {
   });
 }
 
+// Phase 7.6 Share 2.0: spoiler-free result strip — one emoji per CURATED
+// chain entry, encoding the same signal scoreChainEntry already computes.
+// WHY: shareable like a Framed/Wordle grid WITHOUT leaking titles or any
+// identifier (zero-identity — the Phase-1 daily-leaderboard security
+// invariant). Reuses the relocated selectChainEntries/scoreChainEntry.
+export function buildEmojiGrid(state) {
+  const chain = Array.isArray(state && state.chain) ? state.chain : [];
+  const { entries, skipped } = selectChainEntries(chain);
+  const lastIdx = chain.length - 1;
+  const glyphs = entries.map((e) => {
+    if (e._idx === 0) return '🎬';
+    if (e._idx === lastIdx && chain.length > 1) return '🏁';
+    // "spicy" link: a high cross-media / deep-cast / era-jump score.
+    return scoreChainEntry(e, e._idx, chain) >= 5 ? '🔥' : '🟦';
+  }).join('');
+  return skipped > 0 ? `${glyphs} +${skipped}` : glyphs;
+}
+
+// Phase 7.6 Share 2.0: first-person, integer-only "survived" line. WHY:
+// no name/identifier (zero-identity); a personal, shareable badge of the
+// chain length the player reached.
+export function survivedLine(state) {
+  const n = Array.isArray(state && state.chain) ? state.chain.length : 0;
+  return `🔗 I survived ${n} links`;
+}
+
 export function buildTextRecap(state) {
     const lines = ['🎬 MovieMatch\n'];
     lines.push(`Chain of ${state.chain.length} connections:\n`);
@@ -205,6 +248,11 @@ export function buildTextRecap(state) {
         lines.push(`${i + 1}. ${item.playerName} → ${item.movie.title} (${item.movie.year})${actor ? ` ↔ ${actor}` : ''}`);
     });
     if (state.winner) lines.push(`\n🏆 ${state.winner.name} wins with ${state.winner.score} pts!`);
+    // Phase 7.6 Share 2.0: additive spoiler-free grid + survived badge.
+    // WHY before siteUrl: the emoji strip reads like a Wordle/Framed share
+    // block, sitting between the winner line and the "Play at" call-to-action.
+    lines.push(`\n${buildEmojiGrid(state)}`);
+    lines.push(survivedLine(state));
     const siteUrl = window.location.hostname !== 'localhost' ? window.location.hostname : 'moviematch.it.com';
     lines.push(`\nPlay at ${siteUrl}`);
     return lines.join('\n');
