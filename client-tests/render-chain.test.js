@@ -10,7 +10,7 @@
 // behaviour. jsdom never lays out / has no matchMedia → renderChainItems
 // computes reducedMotion at the call site and paints the SETTLED end-state
 // (no timers) here; the motion fidelity is the user-side eyeball (spec §9.8).
-import { initUIElements, renderGame } from '../public/js/ui.js';
+import { initUIElements, renderGame, markClutchSave } from '../public/js/ui.js';
 const { loadIndexHtml, makePlayingState, makeChainItem, makePlayer } = require('./fixtures');
 
 const display = () => document.getElementById('chain-display');
@@ -167,8 +167,6 @@ describe('filmstrip — §4 behavioural-equivalence', () => {
   });
 });
 
-import { markClutchSave } from '../public/js/ui.js';
-
 describe('filmstrip — Task 2 wired contract', () => {
   test('jsdom (no matchMedia) → settled end-state, no pending timers', () => {
     jest.useFakeTimers();
@@ -192,8 +190,19 @@ describe('filmstrip — Task 2 wired contract', () => {
     const hero = display().querySelector('.reel-node.now-playing');
     expect(hero.classList.contains('clutch')).toBe(true);
     expect(hero.querySelectorAll('.clutch-flash').length).toBe(1);
-    // flag consumed: a subsequent render WITHOUT markClutchSave() → no clutch
-    renderGame(base, 'host_id', false);
+    // STRENGTHENED: a SUBSEQUENT GROWING render WITHOUT markClutchSave() must
+    // produce a hero with NO .clutch. This directly pins the one-shot consume:
+    // if _clutchPending wasn't cleared after the first render, this grow-render's
+    // choreographTurn would replay the clutch. (The original weaker assertion
+    // re-rendered the same state — grew=false so choreographTurn was never
+    // called and the firstChild wipe trivially produced a clean hero; that
+    // proved the right observable outcome but for the wrong reason.)
+    const grown = makePlayingState({ chain: [
+      makeChainItem(),
+      makeChainItem({ matchedActors: ['x'] }),
+      makeChainItem({ matchedActors: ['y'] }),
+    ]});
+    renderGame(grown, 'host_id', false);
     expect(display().querySelector('.reel-node.now-playing').classList.contains('clutch')).toBe(false);
   });
 
