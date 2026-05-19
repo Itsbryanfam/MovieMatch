@@ -50,3 +50,38 @@ if (!navigator.clipboard) {
 if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function () {};
 }
+
+// Phase 7.6 Task 2: jsdom has no canvas rendering engine — getContext('2d')
+// returns null by default, causing generateShareCard to throw when it sets
+// ctx.fillStyle. Stub the minimal no-op 2D context that generateShareCard and
+// roundRect actually use (+drawImage for openShareModal) so the canvas-path
+// tests verify the function returns a canvas element without needing pixel
+// layout (the visual correctness is the user-side eyeball, per spec §5).
+// WHY additive here (not jest-canvas-mock): avoids a new dev-dependency;
+// all we need is that draw calls don't throw, not that they produce pixels.
+if (typeof HTMLCanvasElement !== 'undefined') {
+  HTMLCanvasElement.prototype.getContext = function (type) {
+    if (type !== '2d') return null;
+    const noop = () => {};
+    return {
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+      font: '',
+      textBaseline: '',
+      textAlign: '',
+      fillRect: noop,
+      fillText: noop,
+      measureText: () => ({ width: 0 }),
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      arcTo: noop,
+      stroke: noop,
+      fill: noop,
+      drawImage: noop,
+      createLinearGradient: () => ({ addColorStop: noop }),
+    };
+  };
+}

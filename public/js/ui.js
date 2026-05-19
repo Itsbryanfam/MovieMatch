@@ -15,3 +15,4 @@ export * from './ui/red-carpet.js';   // Phase 7.5: pure Red Carpet seams (arriv
 export * from './ui/ui-autocomplete.js';
 export * from './ui/ui-sharecard.js';
 export * from './ui/ui-panels.js';
+export * from './ui/recap-player.js';   // Phase 7.6: Chain Premiere Recap driver (playRecap/cancelRecap)

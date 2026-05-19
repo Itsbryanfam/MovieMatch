@@ -1212,3 +1212,23 @@ a:focus-visible,
    is universally supported (no :has() dependency).
    ============================================================= */
 .self-elim-col:only-child { grid-column: 1 / -1; }
+
+/* =============================================================
+   PHASE 7.6 — CHAIN PREMIERE RECAP entrance (append-only)
+   WHY: compositor-only (transform + opacity) so it is GPU-cheap on
+   the vanilla no-build mobile stack and the EXISTING global
+   prefers-reduced-motion handling (see the comment at L409-412 —
+   "global media query already zeroes the animation-duration")
+   neutralizes it with NO new @media. recap-player.js ALSO
+   JS-short-circuits to the instant settled end-state under
+   reduced-motion (belt-and-suspenders, spec §1.8).
+   ============================================================= */
+.recap-beat {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.34s ease, transform 0.34s cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+.recap-beat.is-in {
+  opacity: 1;
+  transform: translateY(0);
+}

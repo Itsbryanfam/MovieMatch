@@ -11,7 +11,7 @@
 import {
   initUIElements, renderLobby, renderGame, renderTeamScreen,
   showNotification, renderAutocompleteResults, closeMobileAc,
-  openShareModal, showGameOverBanner, resetMobileTab,
+  openShareModal, showGameOverBanner, resetMobileTab, playRecap,
   showEliminationFlash, showSelfEliminationScreen, showWinFlash,
   showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
   toast, gameEvent, submissionPill, // Phase 7.2: feedback router
@@ -496,6 +496,25 @@ export function initSocket() {
           setTimeout(tryRender, pollMs);
         };
         setTimeout(tryRender, pollMs);
+      }
+
+      // Phase 7.6: cinematic Chain Premiere Recap. One-shot on the SAME
+      // playing→finished edge the Daily modal uses (justFinished is itself
+      // the guard — re-fired stateUpdates have prevState.status==='finished',
+      // so this never replays — exactly the Daily-modal precedent above).
+      // Daily-suppressed: the Daily-result modal already owns end-of-game in
+      // Daily (its own ▶ Replay); two competing end overlays would be a UX +
+      // contract risk (spec §1.6). showGameOverBanner (rendered by renderGame
+      // above, L439) is byte-identical and present underneath whether or not
+      // this plays — the overlay is purely additive.
+      if (justFinished && !getIsDaily()) {
+        const recapOverlay = document.getElementById('recap-overlay');
+        // Accessibility-safe: if motion preference is unreadable (no
+        // matchMedia, e.g. jsdom) OR reduced-motion is preferred → skip the
+        // animation and show the settled end-state instantly (spec §1.8).
+        const prefersReducedMotion = !window.matchMedia
+          || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        playRecap(state, recapOverlay, { prefersReducedMotion });
       }
     }
   });
