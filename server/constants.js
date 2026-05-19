@@ -18,4 +18,14 @@
 // (gameLogic.promoteSpectators) and to filter the public-lobby list.
 const MAX_PLAYERS_PER_LOBBY = 8;
 
-module.exports = { MAX_PLAYERS_PER_LOBBY };
+// Phase 7.5.3 (Pick-Your-Own-Colour): the frozen seat-hue palette. WHY a
+// server mirror: the server is CommonJS and cannot import the client ES
+// module public/js/ui/red-carpet.js (line 39) where SEAT_HUES is the
+// authoritative client copy. selectColor validates the requested hue
+// against THIS list server-side — the setTheme whitelist precedent (a
+// malicious client must not set an off-palette chair colour). This array
+// MUST stay byte-identical to red-carpet.js:39; a test pins the exact
+// literal on BOTH sides so an edit to either fails CI.
+const SEAT_HUES = Object.freeze([350, 25, 45, 140, 188, 220, 270, 312]);
+
+module.exports = { MAX_PLAYERS_PER_LOBBY, SEAT_HUES };

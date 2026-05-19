@@ -128,8 +128,17 @@ export function playerCardModel(player, opts) {
   // (never undefined, never throws). >7 is unreachable (server caps the
   // lobby at 8) but degrades gracefully.
   const rawSlot = Number.isInteger(opts && opts.slot) ? opts.slot : 0;
-  const accentHue =
+  const slotHue =
     SEAT_HUES[((rawSlot % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
+  // Phase 7.5.3 (Pick-Your-Own-Colour): an explicitly-claimed, in-palette
+  // colorHue overrides the slot default so the player SEES their own
+  // choice. Anything else (absent / non-int / off-palette) falls back to
+  // the 7.5.1 collision-free slot hue → a player who never picks gets the
+  // SAME accentHue as 7.5.2 (hasPickedColor is an additive field). ZERO identity: colorHue is a frozen-palette
+  // integer, NEVER derived from stableId/name/socket-id (sentinel-tested).
+  const hasPickedColor =
+    Number.isInteger(p.colorHue) && SEAT_HUES.includes(p.colorHue);
+  const accentHue = hasPickedColor ? p.colorHue : slotHue;
   // The emoji is UNCHANGED 7.5 behaviour: a secondary cue still derived from
   // the room-scoped name+':'+socket-id ONLY (NEVER stableId). The user
   // flagged colour only; re-indexing the emoji would be needless churn/risk
@@ -142,7 +151,7 @@ export function playerCardModel(player, opts) {
   if (isHost) label += ' 👑';
   if (wins > 0) label += ` • ${wins} 🏆`;
 
-  return { name, isHost, isYou, isBot, wins, accentHue, accentEmoji, label };
+  return { name, isHost, isYou, isBot, wins, accentHue, accentEmoji, label, hasPickedColor };
 }
 
 /**

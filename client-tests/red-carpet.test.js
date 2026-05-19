@@ -132,9 +132,9 @@ describe('playerCardModel', () => {
   });
   test('isYou/isHost/isBot/wins derivation', () => {
     expect(playerCardModel({ id: 'me', name: 'Me', isHost: true, isBot: false, wins: 2 },
-      { myPlayerId: 'me' })).toMatchObject({ isYou: true, isHost: true, isBot: false, wins: 2, name: 'Me' });
+      { myPlayerId: 'me' })).toMatchObject({ isYou: true, isHost: true, isBot: false, wins: 2, name: 'Me', hasPickedColor: false });
     expect(playerCardModel({ id: 'b', name: 'B', isBot: true, wins: -4 }, {}))
-      .toMatchObject({ isBot: true, wins: 0 });
+      .toMatchObject({ isBot: true, wins: 0, hasPickedColor: false });
   });
   test('SECURITY sentinel: a stableId on the input never affects the model', () => {
     const base = { id: 's1', name: 'Ada', isHost: true, wins: 1 };
@@ -153,6 +153,41 @@ describe('playerCardModel', () => {
     expect(playerCardModel({ id: 'c', name: 'C', wins: NaN }, {}).label).toBe('C');
     expect(playerCardModel({ id: 'd', name: 'D', wins: Infinity }, {}).label).toBe('D');
     expect(playerCardModel({ id: 'e', name: 'E', wins: 3 }, {}).label).toBe('E • 3 🏆');
+  });
+});
+
+describe('SEAT_HUES — exact literal pin (must match server/constants.js)', () => {
+  test('the frozen palette is byte-identical to the server mirror', () => {
+    // WHY exact values (the 7.5.1 suite only pinned len/distinct/range):
+    // Phase 7.5.3 added server/constants.js SEAT_HUES for server-side
+    // validation. Pinning the SAME literal on BOTH sides makes any drift
+    // (a one-side edit) fail CI — they cannot cross-import (ESM vs CJS).
+    expect([...SEAT_HUES]).toEqual([350, 25, 45, 140, 188, 220, 270, 312]);
+  });
+});
+
+describe('playerCardModel — Phase 7.5.3 colorHue prefer/fallback', () => {
+  test('no colorHue → slot hue + hasPickedColor false (accentHue unchanged from 7.5.2)', () => {
+    const m = playerCardModel({ id: 's1', name: 'Ada' }, { slot: 3 });
+    expect(m.accentHue).toBe(SEAT_HUES[3]);
+    expect(m.hasPickedColor).toBe(false);
+  });
+  test('valid in-palette colorHue overrides the slot hue', () => {
+    const m = playerCardModel({ id: 's1', name: 'Ada', colorHue: SEAT_HUES[6] }, { slot: 2 });
+    expect(m.accentHue).toBe(SEAT_HUES[6]);
+    expect(m.hasPickedColor).toBe(true);
+  });
+  test('off-palette / non-int / null colorHue → slot fallback, not picked', () => {
+    for (const bad of [37, 999, -1, 2.5, '350', null, undefined, NaN]) {
+      const m = playerCardModel({ id: 's1', name: 'Ada', colorHue: bad }, { slot: 1 });
+      expect(m.accentHue).toBe(SEAT_HUES[1]);
+      expect(m.hasPickedColor).toBe(false);
+    }
+  });
+  test('a picked colorHue still carries ZERO identity (sentinel: stableId irrelevant)', () => {
+    const base = { id: 's1', name: 'Ada', colorHue: SEAT_HUES[4] };
+    expect(playerCardModel({ ...base, stableId: 'p_LEAK' }, { slot: 0 }))
+      .toEqual(playerCardModel(base, { slot: 0 }));
   });
 });
 

@@ -211,6 +211,14 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       await lobbySystem.assignTeam(ctx, socket, data);
     });
 
+    on('selectColor', async (data) => {
+      // Phase 7.5.3: non-host self-mutation, same cadence class as
+      // assignTeam → reuse the shared host/lifecycle limiter (no new
+      // bucket — G7). data||{} guard mirrors addBot.
+      if (await lobbyConfigLimited()) return;
+      await lobbySystem.selectColor(ctx, socket, data || {});
+    });
+
     on('togglePublic', async (data) => {
       if (await lobbyConfigLimited()) return;
       await lobbySystem.toggleSetting(ctx, socket, data, 'isPublic');
