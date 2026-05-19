@@ -240,8 +240,20 @@ export function renderLobby(gameState, myPlayerId) {
       crown.textContent = '♛';
       plate.appendChild(crown);
     }
+    // Phase 7.6.1 fix: the nameplate already renders dedicated .crown (host),
+    // .you-pill (you) and .bot-pill (bot) badges, so re-baking the legacy
+    // " 👑"/" (You)" suffixes from card.label DUPLICATED the host crown (two
+    // crowns) and overflowed the 160px .nameplate so the name/🏆 got ellipsis-
+    // clipped. Compose the visible text from the structured fields (bare name
+    // + the byte-identical " • N 🏆" wins fragment, same > 0 guard as the
+    // seam). The pure seam's card.label is intentionally left UNTOUCHED (its
+    // tested byte-identical contract / future consumers stay intact — we just
+    // stop CONSUMING the bundled string here). .seat-name classes it like its
+    // .crown/.you-pill siblings; no .seat-name CSS rule exists → zero visual
+    // change, a test/style hook only.
     const nameSpan = document.createElement('span');
-    nameSpan.textContent = card.label; // EXACT prior label semantics (You)/wins
+    nameSpan.className = 'seat-name';
+    nameSpan.textContent = card.name + (card.wins > 0 ? ` • ${card.wins} 🏆` : '');
     plate.appendChild(nameSpan);
     if (card.isYou) {
       const youPill = document.createElement('span');

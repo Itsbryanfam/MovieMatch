@@ -137,4 +137,46 @@ describe('renderLobby — theater seats + kick wiring', () => {
     expect(me.querySelector('.swatch.is-selected').style.getPropertyValue('--avatar-hue'))
       .toBe(String(SEAT_HUES[5]));
   });
+
+  // Phase 7.6.1 regression: a host's nameplate rendered the styled .crown ♛
+  // badge AND re-baked the legacy " 👑"/" (You)" suffixes from card.label
+  // into the name text → TWO crowns, and the bundled label overflowed the
+  // 160px nameplate so the name/trophy got ellipsis-clipped. The dedicated
+  // .crown / .you-pill elements already convey host/you, so the text line
+  // must be the bare name + wins only.
+  test('host-with-wins nameplate: ONE crown badge + full name (no duplicate 👑/(You) baked into the text)', () => {
+    const st = makeWaitingState({ players: [
+      makePlayer({ id: 'host_id', name: 'Bryan', isHost: true, wins: 34 }),
+      makePlayer({ id: 'guest_id', name: 'Guest' }),
+    ]});
+    renderLobby(st, 'host_id'); // host_id is me → isHost + isYou + wins
+    const me = document.querySelector('#lobby-players li.seat.occupied');
+    // exactly one crown indicator (the styled .crown ♛ badge) — never two
+    expect(me.querySelectorAll('.crown').length).toBe(1);
+    expect((me.textContent.match(/♛/g) || []).length).toBe(1);
+    expect(me.textContent).not.toContain('👑');
+    // the name line itself = bare name + wins; host/you carried by the badges
+    const nameEl = me.querySelector('.nameplate .seat-name');
+    expect(nameEl).not.toBeNull();
+    expect(nameEl.textContent).toBe('Bryan • 34 🏆');
+    expect(nameEl.textContent).not.toContain('(You)');
+    // dedicated role badges still present (host + you still conveyed)
+    expect(me.querySelector('.crown')).not.toBeNull();
+    expect(me.querySelector('.you-pill')).not.toBeNull();
+  });
+
+  test('non-host winner nameplate: bare name + wins only, no (You)/crown text', () => {
+    const st = makeWaitingState({ players: [
+      makePlayer({ id: 'host_id', name: 'Host', isHost: true }),
+      makePlayer({ id: 'guest_id', name: 'Cordelia', wins: 7 }),
+    ]});
+    renderLobby(st, 'host_id'); // viewer is host; the guest is the non-host winner
+    const guest = document.querySelectorAll('#lobby-players li.seat.occupied')[1];
+    const nameEl = guest.querySelector('.nameplate .seat-name');
+    expect(nameEl).not.toBeNull();
+    expect(nameEl.textContent).toBe('Cordelia • 7 🏆');
+    expect(guest.querySelectorAll('.crown').length).toBe(0); // not host → no crown badge
+    expect(guest.textContent).not.toContain('👑');
+    expect(guest.textContent).not.toContain('(You)');
+  });
 });
