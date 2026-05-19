@@ -278,7 +278,7 @@ export function renderLobby(gameState, myPlayerId) {
     if (card.isYou) {
       const takenByOthers = new Set();
       gameState.players.forEach((op, oi) => {
-        if (oi === slot) return; // never blocked by my own current hue
+        if (oi === slot) return; // own seat — skip myself when collecting the hues OTHER players hold
         const eff = (Number.isInteger(op.colorHue) && SEAT_HUES.includes(op.colorHue))
           ? op.colorHue
           : SEAT_HUES[((oi % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];

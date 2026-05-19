@@ -105,6 +105,7 @@ describe('renderLobby — theater seats + kick wiring', () => {
     const sel = strip.querySelectorAll('.swatch.is-selected');
     expect(sel.length).toBe(1);
     expect(sel[0].disabled).toBe(true);
+    expect(sel[0].getAttribute('aria-pressed')).toBe('true');
     const taken = strip.querySelectorAll('.swatch.is-taken');
     expect(taken.length).toBe(1);                  // guest's slot fallback
     expect(taken[0].disabled).toBe(true);
@@ -120,6 +121,7 @@ describe('renderLobby — theater seats + kick wiring', () => {
     expect(evt).toBe('selectColor');
     expect(payload.lobbyId).toBe('TEST01');
     expect(SEAT_HUES).toContain(payload.hue);
+    expect(payload.hue).toBe(Number(free.style.getPropertyValue('--avatar-hue')));
   });
 
   test('a picked colorHue → .has-picked + --avatar-hue is the picked hue', () => {

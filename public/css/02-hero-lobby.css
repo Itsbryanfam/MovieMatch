@@ -1667,7 +1667,6 @@ input:disabled {
 }
 .seat-swatches .swatch.is-selected {
   box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px hsl(var(--avatar-hue, 240), 70%, 60%);
-  cursor: default;
 }
 .seat-swatches .swatch.is-taken,
 .seat-swatches .swatch[disabled] {
@@ -1676,4 +1675,8 @@ input:disabled {
 }
 .seat-swatches .swatch.is-selected {
   opacity: 1;            /* selected is disabled-but-not-dimmed (it's mine) */
+  /* cursor:default wins here because this rule is LATER in source than the
+     .swatch[disabled]{cursor:not-allowed} rule above (equal specificity) —
+     the selected swatch is the player's own, not a blocked choice. */
+  cursor: default;
 }
