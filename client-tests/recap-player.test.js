@@ -53,6 +53,24 @@ test('animated path schedules beats then resolves; cancelRecap stops it', () => 
   expect(() => cancelRecap()).not.toThrow();
 });
 
+// I-2: pin the leak-safe claim — mid-flight cancel must leave zero orphaned
+// tick-chain timers. After the 200 ms initial delay fires, tick() runs: it
+// schedules a requestAnimationFrame (harmless .is-in class add, ~16 ms fake
+// frame) and the next _recapTimer setTimeout. cancelRecap() clears _recapTimer;
+// draining the rAF by advancing 16 ms must NOT re-queue any new setTimeout,
+// proving the tick chain is truly stopped.
+test('cancelRecap mid-flight clears all pending timers (leak-safe)', () => {
+  jest.useFakeTimers();
+  const el = overlay();
+  playRecap(state(), el, { prefersReducedMotion: false });
+  jest.advanceTimersByTime(200); // fire initial delay → tick runs
+  expect(jest.getTimerCount()).toBeGreaterThan(0); // next beat + rAF queued
+  cancelRecap();
+  // drain the in-flight rAF (adds .is-in class only — must not re-queue tick)
+  jest.advanceTimersByTime(16);
+  expect(jest.getTimerCount()).toBe(0); // no orphaned timers remain
+});
+
 test('Skip button → settled end-state immediately (finale visible), timer cleared', () => {
   jest.useFakeTimers();
   const el = overlay();
@@ -62,17 +80,22 @@ test('Skip button → settled end-state immediately (finale visible), timer clea
   expect(() => jest.runAllTimers()).not.toThrow();
 });
 
-test('Replay button → restarts from beat 0 (stage repopulates)', () => {
+// M-2: drop the trivially-true assertion; actually pin clear → repopulate from beat 0.
+// start() calls clearStage() synchronously before scheduling the first tick, so the
+// stage is empty RIGHT after the click (before any timer fires).
+test('Replay button → clears the stage and repopulates from beat 0', () => {
   jest.useFakeTimers();
   const el = overlay();
   playRecap(state(), el, { prefersReducedMotion: false });
   jest.runAllTimers();
   const stage = document.getElementById('recap-stage');
-  const firstHtml = stage.innerHTML;
+  const afterFirst = stage.children.length;
+  expect(afterFirst).toBeGreaterThan(0);
   document.getElementById('recap-replay').click();
+  // clearStage() runs synchronously inside start() before the first timer fires
+  expect(stage.children.length).toBe(0);
   jest.runAllTimers();
-  expect(stage.innerHTML.length).toBeGreaterThan(0);
-  expect(typeof firstHtml).toBe('string');
+  expect(stage.children.length).toBe(afterFirst); // fully repopulated, same beat count
 });
 
 test('Close button hides the overlay', () => {
@@ -86,9 +109,19 @@ test('null mount element is a safe no-op', () => {
   expect(() => playRecap(state(), null, { prefersReducedMotion: true })).not.toThrow();
 });
 
-test('poster fallback: non-tmdb poster does not create an <img> with that src', () => {
+// M-3: accurately verifies BOTH the tmdb-<img>+fallback path AND the
+// empty-poster → placeholder path. (The empty poster is normalised to null
+// by chain-recap.js, so it goes straight to the placeholder <div> path —
+// no <img src=""> is ever created.)
+test('tmdb poster → <img> (with fallback handler); empty poster → placeholder div, no empty <img>', () => {
   const el = overlay();
   playRecap(state(), el, { prefersReducedMotion: true });
-  const imgs = [...el.querySelectorAll('img')].map(i => i.getAttribute('src'));
-  expect(imgs).not.toContain('');
+  const imgs = [...el.querySelectorAll('img')];
+  // the tmdb-poster entry produces exactly one <img> with the real src
+  expect(imgs.map(i => i.getAttribute('src'))).toEqual(['https://image.tmdb.org/t/p/w200/a.jpg']);
+  // attachPosterFallback wires an onerror handler so a 404 degrades gracefully
+  expect(typeof imgs[0].onerror).toBe('function');
+  // the empty-poster entry produced a placeholder div, NOT an <img src="">
+  expect(el.querySelectorAll('.recap-poster.placeholder').length).toBe(1);
+  expect(imgs.map(i => i.getAttribute('src'))).not.toContain('');
 });

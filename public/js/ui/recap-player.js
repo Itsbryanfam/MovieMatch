@@ -7,6 +7,11 @@
 import { buildRecapStoryboard } from './chain-recap.js';
 import { attachPosterFallback } from './ui-dom.js';
 
+// M-4 WHY: onDone may fire MORE THAN ONCE — once per natural schedule
+// completion, again after each Replay click, and immediately in the
+// reduced-motion path. Callers must be idempotent (e.g. guard with a
+// flag or use it for side-effect-free UI updates only).
+
 let _recapTimer = null; // single cancellable handle (leak-safe)
 
 export function cancelRecap() {
@@ -88,10 +93,10 @@ export function playRecap(state, mountEl, opts = {}) {
   if (closeBtn) closeBtn.onclick = () => { cancelRecap(); mountEl.classList.add('hidden'); };
   if (skipBtn) skipBtn.onclick = () => settle(false);
 
-  // Accessibility-safe: reduced-motion (or unknowable motion preference,
-  // handled at the call site) → no animation, instant settled end-state.
-  if (prefersReducedMotion) { settle(true); if (replayBtn) replayBtn.onclick = () => start(); return; }
-
+  // I-1: function start() declared HERE (above the guard that references it)
+  // to eliminate the hoisting-order readability trap. Behavior is identical —
+  // function declarations are hoisted regardless — but source order now matches
+  // call order, making the control flow unambiguous at a glance.
   function start() {
     cancelRecap();
     clearStage();
@@ -109,6 +114,10 @@ export function playRecap(state, mountEl, opts = {}) {
     };
     _recapTimer = setTimeout(tick, 200); // small initial beat (mirrors ui-panels)
   }
+
+  // Accessibility-safe: reduced-motion (or unknowable motion preference,
+  // handled at the call site) → no animation, instant settled end-state.
+  if (prefersReducedMotion) { settle(true); if (replayBtn) replayBtn.onclick = () => start(); return; }
   if (replayBtn) replayBtn.onclick = () => start();
   start();
 }
