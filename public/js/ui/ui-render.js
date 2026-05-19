@@ -30,7 +30,10 @@ import { clearGhostAttempt } from './ui-notifications.js';
 // ./ui.js barrel) — ui-render.js is itself re-exported by that barrel, so a
 // barrel import here would be a cycle (7.3 DAG discipline; mirrors the 7.4
 // ui-panels.js → ./daily-ritual.js precedent).
-import { diffArrivals, playerCardModel, rollCameraLabel } from './red-carpet.js';
+// SEAT_HUES added Phase 7.5.3: renderLobby mirrors the claim-only mutex
+// client-side (compute every OTHER player's effective hue) so taken
+// swatches render disabled — the server is still the arbiter.
+import { diffArrivals, playerCardModel, rollCameraLabel, SEAT_HUES } from './red-carpet.js';
 
 // Phase 7.5 Red Carpet: page-session set of player ids whose entrance card
 // has already been shown, so the entrance animation plays ONCE per real
@@ -140,6 +143,11 @@ export function renderLobby(gameState, myPlayerId) {
   // (renderLobby runs on every stateUpdate; this keeps it idempotent).
   const prevBotRow = startBtn.parentNode && startBtn.parentNode.querySelector('.add-bot-row');
   if (prevBotRow) prevBotRow.remove();
+  // Phase 7.5.3: clear the lobby seat list on EVERY renderLobby call,
+  // BEFORE the team-mode early return — otherwise a seat→team transition
+  // would leave stale .seat-swatches (and any other seat DOM) in the document
+  // even after team mode takes over. Mirrors the prevBotRow teardown above.
+  lobbyPlayersList.innerHTML = '';
 
   if (mode === 'team') {
     showScreen('team');                           // normalise waiting/team pair: show team
@@ -217,7 +225,11 @@ export function renderLobby(gameState, myPlayerId) {
       + (card.isYou ? ' is-you' : '')
       + (card.isHost ? ' is-host' : '')
       + (card.isBot ? ' is-bot' : '')
-      + (isEntering ? ' entering' : '');
+      + (isEntering ? ' entering' : '')
+      // Phase 7.5.3: .has-picked lifts the .seat.is-you fixed-indigo
+      // override (CSS scoped to :not(.has-picked)) so the local picker
+      // SEES their own claimed hue; un-picked "you" stays 7.5.2-indigo.
+      + (card.hasPickedColor ? ' has-picked' : '');
     li.dataset.playerId = String(p.id);
     // WHY a CSS custom property: --avatar-hue is the per-seat DATA value (the
     // collision-free SEAT_HUES slot hue). The .seat.occupied rule recolors the
@@ -258,6 +270,54 @@ export function renderLobby(gameState, myPlayerId) {
     av.textContent = card.accentEmoji;
     person.appendChild(av);
     li.appendChild(person);
+
+    // Phase 7.5.3 (Pick-Your-Own-Colour): the local player's OWN occupied
+    // seat gets a swatch strip to claim a free palette hue. Claim-only:
+    // a hue that is another player's EFFECTIVE hue (their explicit
+    // colorHue, else SEAT_HUES[their slot]) renders disabled; the player's
+    // own current effective hue is .is-selected (not re-claimable). A free
+    // click emits the server-authoritative selectColor — NO optimistic
+    // local mutation; the next stateUpdate is the source of truth (mirrors
+    // the .seat-kick emit discipline). Built with createElement (no
+    // innerHTML for anything dynamic — file convention).
+    if (card.isYou) {
+      const takenByOthers = new Set();
+      gameState.players.forEach((op, oi) => {
+        if (oi === slot) return; // never blocked by my own current hue
+        const eff = (Number.isInteger(op.colorHue) && SEAT_HUES.includes(op.colorHue))
+          ? op.colorHue
+          : SEAT_HUES[((oi % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
+        takenByOthers.add(eff);
+      });
+      const myEff = card.accentHue; // already prefer-colorHue-else-slot
+      const strip = document.createElement('div');
+      strip.className = 'seat-swatches';
+      strip.setAttribute('role', 'group');
+      strip.setAttribute('aria-label', 'Pick your seat colour');
+      SEAT_HUES.forEach(hue => {
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'swatch';
+        // Dot colour is the same hsl(var(--avatar-hue),…) derived family
+        // as the chairs — no new colour values (spec §3.5).
+        sw.style.setProperty('--avatar-hue', String(hue));
+        sw.setAttribute('aria-label', 'Seat colour ' + hue);
+        if (hue === myEff) {
+          sw.classList.add('is-selected');
+          sw.disabled = true;            // already mine — not re-claimable
+          sw.setAttribute('aria-pressed', 'true');
+        } else if (takenByOthers.has(hue)) {
+          sw.classList.add('is-taken');
+          sw.disabled = true;            // claim-only: another player holds it
+        } else {
+          sw.addEventListener('click', () => {
+            getSocket().emit('selectColor', { lobbyId: gameState.id, hue });
+          });
+        }
+        strip.appendChild(sw);
+      });
+      li.appendChild(strip);
+    }
 
     const wrap = document.createElement('div');
     wrap.className = 'seat-svg-wrap';

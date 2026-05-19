@@ -1139,10 +1139,13 @@ input:disabled {
 .seat:not(.occupied) {
   filter: saturate(0.65) brightness(0.78);
 }
-/* .is-you: override with a fixed indigo for the local player's seat
-   (README §"Per-seat CSS variables" verbatim — these are not new brand
-   colors; they match the existing var(--accent-primary) hue family). */
-.seat.is-you {
+/* .is-you: a fixed indigo for the local player's seat WHEN they have not
+   explicitly picked a colour. Phase 7.5.3 scopes this to :not(.has-picked)
+   so a player who claims a hue SEES their own choice (the .seat.occupied
+   --avatar-hue-derived velvet then applies); an un-picked "you" is
+   byte-identical to 7.5.2. The .seat-svg-wrap glow below is the
+   you-identity halo (NOT chair colour) and is deliberately left verbatim. */
+.seat.is-you:not(.has-picked) {
   --velvet-light: #3b3a6a;
   --velvet-mid:   #272649;
   --velvet-dark:  #161527;
@@ -1618,4 +1621,59 @@ input:disabled {
   .theater {
     padding: 18px;
   }
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  PHASE 7.5.3 — PICK-YOUR-OWN-COLOUR SWATCH STRIP          ║
+   ║  Appended (7.5/7.5.1/7.5.2 EOF-append convention). No     ║
+   ║  pre-7.5.3 rule edited except scoping ONE .seat.is-you    ║
+   ║  selector to :not(.has-picked). NO new colour values —    ║
+   ║  swatch dots reuse the hsl(var(--avatar-hue),…) family.   ║
+   ║  Reduced-motion: the EXISTING global 06-states-anim.css   ║
+   ║  block neutralises transitions — NO per-rule @media here. ║
+   ╚══════════════════════════════════════════════════════════╝ */
+.seat-swatches {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 6;
+  padding: 4px 6px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+}
+.seat-swatches .swatch {
+  appearance: none;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  /* dot fill derived from the per-swatch --avatar-hue — same family as the
+     chair velvet, NOT a new brand colour. */
+  background: hsl(var(--avatar-hue, 240), 60%, 55%);
+  border: 2px solid rgba(255,255,255,0.22);
+  transition: transform .15s, box-shadow .15s, opacity .15s;
+}
+.seat-swatches .swatch:hover:not([disabled]) {
+  transform: scale(1.18);
+}
+.seat-swatches .swatch:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+.seat-swatches .swatch.is-selected {
+  box-shadow: 0 0 0 2px var(--bg-base), 0 0 0 4px hsl(var(--avatar-hue, 240), 70%, 60%);
+  cursor: default;
+}
+.seat-swatches .swatch.is-taken,
+.seat-swatches .swatch[disabled] {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+.seat-swatches .swatch.is-selected {
+  opacity: 1;            /* selected is disabled-but-not-dimmed (it's mine) */
 }

@@ -58,4 +58,15 @@ describe('renderLobby — theater seat colour', () => {
     expect(document.querySelectorAll('#team-red-list li, #team-blue-list li').length)
       .toBeGreaterThan(0);
   });
+
+  test('a picked hue stays distinct end-to-end (claim overrides the slot hue)', () => {
+    const players = eightPlayers();
+    players[7] = makePlayer({ id: 'p7', name: 'Bot Scott', isBot: true, colorHue: SEAT_HUES[0] === SEAT_HUES[7] ? SEAT_HUES[1] : SEAT_HUES[0] });
+    // p7 claimed seat-0's hue; p0 (host, un-picked) keeps SEAT_HUES[0].
+    // The picked seat must render the CLAIMED hue, not its slot-7 hue.
+    renderLobby(makeWaitingState({ id: 'STP', players }), 'p0');
+    const seats = [...document.querySelectorAll('#lobby-players li.seat.occupied')];
+    expect(seats[7].style.getPropertyValue('--avatar-hue')).toBe(String(SEAT_HUES[0]));
+    expect(seats[7].classList.contains('has-picked')).toBe(true);
+  });
 });

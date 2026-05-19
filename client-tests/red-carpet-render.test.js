@@ -85,4 +85,13 @@ describe('renderLobby — theater entrance + preserved behaviour', () => {
     expect(document.querySelectorAll('#team-red-list li, #team-blue-list li').length)
       .toBeGreaterThan(0);
   });
+
+  test('swatch strip only on the local player\'s own seat; never in team mode', () => {
+    renderLobby(makeWaitingState({ id: 'RC8' }), 'host_id');
+    const occ = document.querySelectorAll('#lobby-players li.seat.occupied');
+    expect(occ[0].querySelector('.seat-swatches')).not.toBeNull();
+    expect(occ[1].querySelector('.seat-swatches')).toBeNull();
+    renderLobby(makeWaitingState({ gameMode: 'team', id: 'RC9' }), 'host_id');
+    expect(document.querySelectorAll('.seat-swatches').length).toBe(0);
+  });
 });
