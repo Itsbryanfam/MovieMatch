@@ -281,6 +281,39 @@ async function assignTeam(ctx, socket, { lobbyId, teamId }) {
   if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
+// Phase 7.5.3 (Pick-Your-Own-Colour): a player claims a free seat-hue.
+// NON-host self-mutation — you only ever recolour yourself, so (exactly
+// like assignTeam) there is NO host check. Claim-only: rejected if the
+// requested hue is any OTHER player's EFFECTIVE hue (their explicit
+// colorHue, else SEAT_HUES[their room-array slot]). Server-authoritative
+// palette validation (the setTheme whitelist precedent). RMW strictly
+// under withLobbyLock so a concurrent join/settings change can't clobber
+// the write (audit finding #4, mirrors every sibling mutator). colorHue
+// is a frozen-palette integer → ZERO identity (never stableId/name/id);
+// toClientState ships it via ...rest with no projection change.
+async function selectColor(ctx, socket, { lobbyId, hue }) {
+  const { io, pubClient } = ctx;
+  const { SEAT_HUES } = require('../constants');
+  if (!Number.isInteger(hue) || !SEAT_HUES.includes(hue)) return;
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    const meIdx = r.players.findIndex(p => p.id === socket.id);
+    if (meIdx === -1) return false;
+    const taken = r.players.some((p, i) => {
+      if (i === meIdx) return false; // not blocked by my own current hue
+      const eff = (Number.isInteger(p.colorHue) && SEAT_HUES.includes(p.colorHue))
+        ? p.colorHue
+        : SEAT_HUES[((i % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
+      return eff === hue;
+    });
+    if (taken) return false;
+    r.players[meIdx].colorHue = hue;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
+}
+
 async function toggleSetting(ctx, socket, { lobbyId, state: enabled }, field) {
   const { io, pubClient } = ctx;
   // Audit finding #4: serialized read-modify-write (see setGameMode).
@@ -860,6 +893,7 @@ module.exports = {
   setGameMode,
   setTheme,
   assignTeam,
+  selectColor,
   toggleSetting,
   startLobby,
   restartLobby,
