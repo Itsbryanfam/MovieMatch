@@ -6,9 +6,11 @@
 // Roll-Camera start gating — is isolated here as pure, zero-import,
 // unit-testable functions (7.2/7.3/7.4 pure-seam discipline); renderLobby
 // stays thin glue. Nothing here touches the DOM, the socket, the server,
-// localStorage, or any persistent id — the accent key is the room-scoped
-// name+socket-id ONLY, so NO stableId is ever involved (the Phase-1 daily-
-// leaderboard leak fix is structurally preserved).
+// localStorage, or any persistent id. The per-player accent has two
+// device-local keys: the COLOUR (accentHue) is the room seat SLOT only
+// (Phase 7.5.1 — zero identity), and the EMOJI is the room-scoped
+// name+':'+socket-id. NEITHER ever involves stableId, so the Phase-1
+// daily-leaderboard leak fix is structurally preserved.
 
 // WHY a frozen single-Unicode-scalar film-emoji set: each entry is ONE
 // scalar (no variation-selector / ZWJ / skin-tone sequence) so length,
@@ -83,10 +85,13 @@ function _djb2(str) {
 /**
  * Pure per-player card model for the Red Carpet entrance card.
  *
- * The accent key is `name + ':' + id` where `id` is the ROOM-SCOPED socket
- * id (rotates per connection — already the client render identity key).
- * This function MUST NOT read any persistent id: stableId is stripped
- * server-side (gameLogic.js toClientState, the Phase-1 leak fix) and is
+ * The accent has two device-local keys (Phase 7.5.1): the COLOUR
+ * (accentHue) is the player's seat SLOT only (no identity at all — see
+ * SEAT_HUES); the EMOJI (accentEmoji) is keyed by `name + ':' + id` where
+ * `id` is the ROOM-SCOPED socket id (rotates per connection — already the
+ * client render identity key). This function MUST NOT read any persistent
+ * id: stableId is stripped server-side (gameLogic.js toClientState, the
+ * Phase-1 leak fix) and is
  * structurally absent here — passing an object that happens to carry a
  * stableId must not change the output (sentinel-tested).
  *
@@ -116,10 +121,12 @@ export function playerCardModel(player, opts) {
   // Phase 7.5.1: the accent COLOUR is the player's seat-slot hue (distinct
   // per seat — fixes the 7.5 hash-collision where two identities shared a
   // colour). `slot` is the 0-based render index (renderLobby passes it; host
-  // = players[0] = seat 0 → a stable first colour). The double-modulo is
-  // DEFENSIVE: a non-finite / negative / non-integer / absent slot still
-  // yields a valid in-range index (never undefined, never throws). >7 is
-  // unreachable (server caps the lobby at 8) but degrades gracefully.
+  // = players[0] = seat 0 → a stable first colour). DEFENSIVE in two layers:
+  // (1) the Number.isInteger guard collapses a non-finite / non-integer /
+  // absent / null-opts slot to 0; (2) the double-modulo wraps a NEGATIVE
+  // integer into range. Together they always yield a valid in-range index
+  // (never undefined, never throws). >7 is unreachable (server caps the
+  // lobby at 8) but degrades gracefully.
   const rawSlot = Number.isInteger(opts && opts.slot) ? opts.slot : 0;
   const accentHue =
     SEAT_HUES[((rawSlot % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
