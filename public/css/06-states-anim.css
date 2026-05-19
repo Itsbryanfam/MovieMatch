@@ -1236,3 +1236,60 @@ a:focus-visible,
   opacity: 1;
   transform: translateY(0) scale(1);
 }
+
+/* =============================================================
+   PHASE 7.7 — CONSTELLATION per-turn motion + CLUTCH SAVE
+   (append-only) WHY: compositor-only (transform + opacity) so it
+   is GPU-cheap on the vanilla no-build mobile stack and the
+   EXISTING global prefers-reduced-motion handling (the * block
+   above — "animation-duration:0.01ms / transition-duration:
+   0.01ms") neutralizes it with NO new @media. choreographTurn()
+   in ui-render.js ALSO JS-short-circuits to the instant settled
+   end-state under reduced-motion / no matchMedia (belt-and-
+   suspenders, spec §1.10/§3.3). No new colour — the verbatim
+   brand accent rgba(129,140,248,…) the lobby .theater .screen
+   already uses.
+   ============================================================= */
+.reel-node.now-playing.phase-reveal .reel-poster {
+  animation: reelRevealRise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes reelRevealRise {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* WHY interrupt vs sequence: by the time .phase-impact is added, .phase-reveal
+   is still on the node — both rules match the same .reel-poster simultaneously
+   and the later-declared reelImpactLock wins via cascade order. The reveal is
+   intentionally cut by the lock (a tactile "snap into place" read of spec
+   §3.1's impact phase) rather than awaited; the class additions are never
+   removed (they self-terminate when the next turn rebuilds the reel). */
+.reel-node.now-playing.phase-impact .reel-poster {
+  animation: reelImpactLock 0.5s ease-out both;
+}
+@keyframes reelImpactLock {
+  0%   { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.reel-node.clutch .reel-poster {
+  box-shadow: 0 0 34px rgba(129, 140, 248, 0.85);
+}
+.clutch-flash {
+  position: absolute;
+  top: -1.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--accent-primary);
+  text-shadow: 0 0 12px rgba(129, 140, 248, 0.6);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: clutchFlash 0.9s ease-out both;
+}
+@keyframes clutchFlash {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.9); }
+  20%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}

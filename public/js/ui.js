@@ -16,3 +16,4 @@ export * from './ui/ui-autocomplete.js';
 export * from './ui/ui-sharecard.js';
 export * from './ui/ui-panels.js';
 export * from './ui/recap-player.js';   // Phase 7.6: Chain Premiere Recap driver (playRecap/cancelRecap)
+export * from './ui/turn-motion.js';   // Phase 7.7: pure per-turn motion timeline + clutch-save predicate

@@ -486,3 +486,147 @@
   border-color: var(--accent-primary);
 }
 
+/* =============================================================
+   PHASE 7.7 — CONSTELLATION FILMSTRIP (append-only, structural)
+   WHY: the in-game chain is now a horizontal reel + glowing
+   now-playing hero + full-width full-name cast panel (spec §1.1/
+   §1.2/§3.3). Append-only — the legacy .chain-item rules above
+   are now inert (renderChainItems no longer emits .chain-item)
+   and are left untouched (spec §5 = append-only, no pre-existing
+   rule edited; a later DS-pass can prune the dead rules). No new
+   colour value — existing tokens + the verbatim brand accent
+   rgba(129,140,248,…) the lobby .theater .screen already uses.
+   The reel CENTERS when it fits and FILLS+SCROLLS when it
+   overflows via the margin:auto flex trick (no JS layout). The
+   ONLY @media here is the existing-codebase 767px LAYOUT
+   breakpoint for the mobile sticky strip — NOT a motion @media
+   (motion lives in 06-states-anim.css, neutralized by the
+   existing global reduced-motion * block at L1020).
+   ============================================================= */
+.filmstrip {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.filmstrip .reel {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  margin: 0 auto; /* centers when narrower than .filmstrip; collapses → left+scroll when wider */
+  width: max-content;
+  max-width: 100%;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.reel-node {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  opacity: 0.82;
+  transition: opacity 0.3s ease;
+}
+.reel-node.now-playing { opacity: 1; }
+.reel-poster {
+  width: 64px;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+.reel-node.now-playing .reel-poster {
+  width: 104px;
+  border: 2px solid var(--accent-primary);
+  box-shadow: 0 0 24px rgba(129, 140, 248, 0.55);
+}
+.reel-poster.placeholder {
+  display: flex;
+}
+.reel-who {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-top: 0.4rem;
+}
+.reel-node.now-playing .reel-who { color: var(--accent-primary); font-weight: 700; }
+.reel-title {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  max-width: 96px;
+  margin-top: 0.15rem;
+}
+.reel-node.now-playing .reel-title { color: var(--text-main); font-size: 0.8rem; max-width: 120px; }
+.reel-bridge {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.66rem;
+  color: var(--accent-primary);
+  letter-spacing: 0.02em;
+  padding: 0 0.5rem;
+  white-space: nowrap;
+}
+.reel-node.burned { opacity: 0.6; }
+.reel-node.burned .reel-poster {
+  filter: grayscale(0.7) brightness(0.7);
+  border: 1px solid var(--accent-warm);
+}
+.reel-burned-stamp {
+  position: absolute;
+  top: 28%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--accent-warm);
+  border: 1.5px solid var(--accent-warm);
+  border-radius: var(--radius-xs);
+  padding: 0.05rem 0.3rem;
+  pointer-events: none;
+}
+.now-cast { width: 100%; }
+.now-cast-head { margin-bottom: 0.5rem; }
+.now-cast-link {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--accent-primary);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.now-cast-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 0.15rem;
+}
+.now-cast-list {
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+.now-cast-list .cast-name { color: var(--text-main); }
+
+/* Mobile sticky strip (spec §3.4 / MO-01) — the reel becomes a compact
+   scroll-snap rail; the full-name cast still wraps full-width below it (no
+   expand gate). Reuses the EXISTING 767px codebase breakpoint (layout, not
+   motion). */
+@media (max-width: 767px) {
+  .filmstrip .reel {
+    width: 100%;
+    margin: 0;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    justify-content: flex-start;
+  }
+  .reel-node { scroll-snap-align: end; }
+  .reel-poster { width: 48px; }
+  .reel-node.now-playing .reel-poster { width: 76px; }
+  .now-cast-title { font-size: 1rem; }
+}
+

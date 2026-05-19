@@ -16,6 +16,7 @@ import {
   showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
   toast, gameEvent, submissionPill, // Phase 7.2: feedback router
   timerSeverity, // Phase 7.4: pure timer-severity seam (Panic Timer)
+  isClutchSave, markClutchSave, // Phase 7.7: clutch-save predicate + one-shot flag
   showScreen, // WHY: Phase 3 Task D — canonical group-normaliser for screen transitions
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
@@ -313,6 +314,25 @@ export function initSocket() {
     if (state.status === 'playing') {
       showScreen('game');                               // normalise top-level group: lobby→off, game→on
       resetMobileTab();                                 // keep: non-visibility side-effect
+
+      // Phase 7.7: Clutch Save — a VALID answer I just played while my turn
+      // timer was inside the panic window (spec §3.3.1). Purely additive,
+      // zero socket/protocol change: the chain only grows on a valid move,
+      // so a new last entry whose playerId is mine + it WAS my turn in
+      // prevState ⇒ valid:true; secondsRemaining is derived from the turn I
+      // just played (prevState.turnExpiresAt) using the SAME ceil()-of-ms
+      // the live timer bar uses, and isClutchSave mirrors timer-panic.js's
+      // ≤5s 'panic' band. markClutchSave() is consumed by the very next
+      // renderGame → renderChainItems (one-shot — never replays).
+      const prevChainLen = prevState?.chain?.length || 0;
+      const newLast = state.chain && state.chain[state.chain.length - 1];
+      const iJustPlayed = state.chain.length > prevChainLen &&
+        newLast && newLast.playerId === getMyPlayerId();
+      if (iJustPlayed && wasMyTurn && prevState?.turnExpiresAt) {
+        const secsLeft = Math.max(0, Math.ceil((prevState.turnExpiresAt - Date.now()) / 1000));
+        if (isClutchSave({ valid: true, secondsRemaining: secsLeft })) markClutchSave();
+      }
+
       renderGame(state, getMyPlayerId(), getIsSpectator());
 
       // M5: Solo streak / objective celebrations. The server stamps

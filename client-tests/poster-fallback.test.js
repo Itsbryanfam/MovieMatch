@@ -20,6 +20,11 @@ describe('poster load-failure fallback (audit #3)', () => {
   });
 
   test('a chain poster that fails to load is replaced by the designed placeholder', () => {
+    // WHY update (Phase 7.7 guard-rewrite — the §1.9/§5 precedent): renderChainItems
+    // now emits .reel-node / img.reel-poster (filmstrip) instead of
+    // .chain-item / img.chain-poster. attachPosterFallback is still called with
+    // the new class name 'reel-poster'. Selectors updated to match; the tested
+    // contract (broken-image → placeholder swap) is 100% preserved.
     const state = makePlayingState({
       chain: [makeChainItem({
         movie: { title: 'Iron Man', year: 2008, cast: ['RDJ'], poster: 'https://image.tmdb.org/t/p/w200/test.jpg' },
@@ -27,8 +32,8 @@ describe('poster load-failure fallback (audit #3)', () => {
     });
     renderGame(state, 'host_id', false);
 
-    const chainItem = document.querySelector('#chain-display .chain-item');
-    const img = chainItem.querySelector('img.chain-poster');
+    const reelNode = document.querySelector('#chain-display .reel-node');
+    const img = reelNode.querySelector('img.reel-poster');
     expect(img).not.toBeNull();
 
     // Simulate the browser failing to load the image.
@@ -36,8 +41,8 @@ describe('poster load-failure fallback (audit #3)', () => {
 
     // The broken <img> must be gone, replaced by the designed placeholder
     // div so the card never shows a native broken-image glyph.
-    expect(chainItem.querySelector('img.chain-poster')).toBeNull();
-    expect(chainItem.querySelector('.chain-poster.placeholder')).not.toBeNull();
+    expect(reelNode.querySelector('img.reel-poster')).toBeNull();
+    expect(reelNode.querySelector('.reel-poster.placeholder')).not.toBeNull();
   });
 
   test('an autocomplete mini-poster that fails to load is replaced by the placeholder', () => {
