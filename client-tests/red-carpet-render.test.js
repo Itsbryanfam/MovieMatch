@@ -14,6 +14,10 @@ jest.mock('../public/js/state.js', () => ({
 import { initUIElements, renderLobby } from '../public/js/ui.js';
 
 describe('renderLobby — theater entrance + preserved behaviour', () => {
+  // Each test uses a UNIQUE lobby id (RC1, RC2, …) so the module-scoped
+  // _seenPlayerIds/_lastLobbyId in ui-render.js don't bleed between tests
+  // without needing a module reset — the entering/idempotent assertions
+  // depend on this isolation.
   beforeEach(() => { loadIndexHtml(); initUIElements(); mockEmit.mockClear(); });
 
   test('first render: occupied seats .entering with --avatar-hue + emoji', () => {

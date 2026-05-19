@@ -45,6 +45,11 @@ let _seenPlayerIds = new Set();
 // would suppress their entrance animation in the new room.
 let _lastLobbyId = null;
 
+// Phase 7.5.2 (Theater Lobby): the theater always has exactly 8 chairs —
+// one per SEAT_HUES slot (red-carpet.js), so a full lobby fills every
+// collision-free hue. Module-scope constant (no per-render dependency).
+const SEATS = 8;
+
 // Phase 7.5.2 (Theater Lobby): the velvet chair, verbatim from the design
 // handoff. Identical markup for every seat — recolored per-seat purely via
 // the inherited `--avatar-hue` custom property (see .seat.occupied CSS). It
@@ -183,7 +188,6 @@ export function renderLobby(gameState, myPlayerId) {
   // across 8 SVGs are REQUIRED, not a defect. The SVG string is a constant
   // (no user data) so a single innerHTML on the static wrapper is safe; all
   // player-controlled text (name/emoji) goes through textContent only.
-  const SEATS = 8;
   for (let slot = 0; slot < SEATS; slot++) {
     const p = gameState.players[slot];
     const li = document.createElement('li');
@@ -286,7 +290,10 @@ export function renderLobby(gameState, myPlayerId) {
       // idempotent re-render never re-triggers (diffArrivals already only
       // returns truly-new ids in `entering`; this just clears the one-shot
       // class). Reduced-motion is handled by the global 06-states-anim.css
-      // block — the seat is fully legible at its end-state regardless.
+      // block (its `* { animation-duration: 0.01ms }` rule will cover the Task-2
+      // `.seat.entering` keyframe) — the seat is fully legible at its
+      // end-state regardless (the `.entering` class has no CSS effect until
+      // Task 2 appends the keyframes).
       const id = p.id;
       setTimeout(() => {
         const el = lobbyPlayersList.querySelector('li.seat[data-player-id="' + id + '"]');
