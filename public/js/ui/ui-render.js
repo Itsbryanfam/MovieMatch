@@ -349,8 +349,17 @@ export function renderLobby(gameState, myPlayerId) {
 
   hardcoreToggle.checked = gameState.hardcoreMode || false;
   hardcoreToggle.disabled = !amIHost;
+  // Phase 7.5.2 (Theater Lobby): the ledger's visible .toggle-pill is
+  // CSS-driven by `.ledger-row.on` (the real .ledger-checkbox is visually
+  // hidden: position:absolute;opacity:0;width:0;height:0;pointer-events:none).
+  // The React prototype set `.on` in JSX; vanilla must mirror checkbox→.on
+  // here or the pill is permanently OFF (host gets no confirmation, guests
+  // can't see the room rules). The emit/change-handler path is unchanged —
+  // this only reflects state visually. ?. guards against a missing row.
+  hardcoreToggle.closest('.ledger-row')?.classList.toggle('on', gameState.hardcoreMode || false);
   tvShowsToggle.checked = gameState.allowTvShows || false;
   tvShowsToggle.disabled = !amIHost;
+  tvShowsToggle.closest('.ledger-row')?.classList.toggle('on', gameState.allowTvShows || false);
   if (publicRoomToggle) {
     publicRoomToggle.checked = gameState.isPublic || false;
     publicRoomToggle.disabled = !amIHost || mode === 'solo';

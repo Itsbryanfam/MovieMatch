@@ -70,4 +70,22 @@ describe('renderLobby — theater seats + kick wiring', () => {
     expect(document.getElementById('seated-count').textContent).toBe('1');
     expect(document.getElementById('seated-hint').textContent).toBe('Waiting for more cast…');
   });
+
+  test('ledger rows mirror hardcore/tv state onto .on (drives the visible toggle-pill)', () => {
+    // WHY: the .toggle-pill slide/tint is CSS-driven by .ledger-row.on; the
+    // real .ledger-checkbox is visually hidden (position:absolute;opacity:0;
+    // width:0;height:0;pointer-events:none). renderLobby must mirror
+    // checkbox→.on or the pill is permanently stuck OFF (host sees no
+    // confirmation; guests can't see the room rules). Pins the §4
+    // visible-state wiring so it can't silently regress.
+    const onState = makeWaitingState({ hardcoreMode: true, allowTvShows: true });
+    renderLobby(onState, 'host_id');
+    expect(document.getElementById('hardcore-toggle').closest('.ledger-row').classList.contains('on')).toBe(true);
+    expect(document.getElementById('tv-shows-toggle').closest('.ledger-row').classList.contains('on')).toBe(true);
+
+    const offState = makeWaitingState({ hardcoreMode: false, allowTvShows: false });
+    renderLobby(offState, 'host_id');
+    expect(document.getElementById('hardcore-toggle').closest('.ledger-row').classList.contains('on')).toBe(false);
+    expect(document.getElementById('tv-shows-toggle').closest('.ledger-row').classList.contains('on')).toBe(false);
+  });
 });
