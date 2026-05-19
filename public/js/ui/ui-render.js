@@ -614,116 +614,198 @@ function renderPlayerSidebar(gameState, mode) {
   }, 50);
 }
 
-// Appends only NEW chain items to the board (incremental — does not re-render existing ones).
+// Phase 7.7: the chain is the horizontal Constellation filmstrip — a reel of
+// poster nodes + labeled actor bridges + a glowing now-playing hero + a
+// full-width, full-name, ALL-member, ungated cast panel. WHY a deterministic
+// full rebuild of a .filmstrip CHILD of #chain-display (NOT #chain-display
+// .innerHTML): showGameOverBanner independently appendChild()s its
+// .game-over-banner into #chain-display at game-over — rebuilding only the
+// .filmstrip child leaves that banner sibling byte-identical and never
+// clobbered (spec §1.7 / §4.8). Task 1 paints the SETTLED end-state on every
+// render; Task 2 layers the per-turn motion timeline + Clutch Save on top
+// without removing any behaviour here.
 function renderChainItems(gameState, myPlayerId) {
-  const currentDisplayedCount = chainDisplay.querySelectorAll('.chain-item').length;
+  const displayEl = chainDisplay;
+  const chain = gameState.chain;
 
-  if (gameState.chain.length === 0 && gameState.status === 'playing') {
-    chainDisplay.innerHTML = '<div class="empty-board-hint"><span class="empty-board-icon">🎬</span><span class="empty-board-title">The board is empty</span><span class="empty-board-sub">Waiting for the first move...</span></div>';
+  // pre-first-move: the empty-board hint (preserved verbatim from the 1.0,
+  // built with createElement so it never relies on innerHTML for the path
+  // the §4.8 test pins).
+  if (chain.length === 0 && gameState.status === 'playing') {
+    displayEl.querySelector('.filmstrip')?.remove();
+    if (!displayEl.querySelector('.empty-board-hint')) {
+      const hint = document.createElement('div');
+      hint.className = 'empty-board-hint';
+      const icon = document.createElement('span');
+      icon.className = 'empty-board-icon';
+      icon.textContent = '🎬';
+      const title = document.createElement('span');
+      title.className = 'empty-board-title';
+      title.textContent = 'The board is empty';
+      const sub = document.createElement('span');
+      sub.className = 'empty-board-sub';
+      sub.textContent = 'Waiting for the first move...';
+      hint.appendChild(icon);
+      hint.appendChild(title);
+      hint.appendChild(sub);
+      displayEl.appendChild(hint);
+    }
     return;
   }
 
-  if (gameState.chain.length === 0 || gameState.chain.length < currentDisplayedCount) {
-    // Chain was reset (new game) — clear everything
-    chainDisplay.innerHTML = '';
+  // hard reset (chain cleared / new game) — drop the filmstrip + any hint
+  // (the 1.0 L626-630 intent: nothing to show).
+  if (chain.length === 0) {
+    displayEl.querySelectorAll('.filmstrip, .empty-board-hint').forEach(n => n.remove());
     return;
   }
 
+  // a (re)started game has a chain again → clear stale end-of-game artifacts
+  // (preserved verbatim from the 1.0 L632-637).
   if (gameState.status === 'playing') {
-    // Remove stale game-over banner or empty hint if the game just (re-)started
-    chainDisplay.querySelector('.game-over-banner')?.remove();
-    chainDisplay.querySelector('.empty-hint')?.remove();
-    chainDisplay.querySelector('.empty-board-hint')?.remove();
+    displayEl.querySelector('.game-over-banner')?.remove();
+    displayEl.querySelector('.empty-hint')?.remove();
+    displayEl.querySelector('.empty-board-hint')?.remove();
   }
 
-  // Track which actors were in the previous node so we can bold shared ones
-  let previousActors = [];
-  if (currentDisplayedCount > 0 && gameState.chain[currentDisplayedCount - 1]) {
-    previousActors = gameState.chain[currentDisplayedCount - 1].movie.cast || [];
-  }
+  // .filmstrip is the rebuilt child; its dataset.count carries the
+  // previously-rendered chain length so the "new entry only" side effects
+  // (clearGhostAttempt + playSuccess) fire exactly when the 1.0 fired them
+  // — NOT on every idempotent stateUpdate re-render.
+  let film = displayEl.querySelector('.filmstrip');
+  const prevCount = film ? Number(film.dataset.count || 0) : 0;
+  const grew = chain.length > prevCount;
 
-  // A new chain item is about to be appended → previous attempts are stale
-  if (gameState.chain.length > currentDisplayedCount) {
+  if (grew) {
+    // a new chain entry arrived → the prior ghost attempt is stale
+    // (preserved from the 1.0 L645-648).
     clearGhostAttempt();
   }
 
-  for (let index = currentDisplayedCount; index < gameState.chain.length; index++) {
-    const item = gameState.chain[index];
-    const div = document.createElement('div');
-    div.className = 'chain-item';
-    if (index > 0) div.classList.add('shared-highlight');
+  if (film) {
+    while (film.firstChild) film.removeChild(film.firstChild);
+  } else {
+    film = document.createElement('div');
+    film.className = 'filmstrip';
+    // FIRST child so showGameOverBanner's appendChild()'d banner renders
+    // AFTER the reel — exactly as the 1.0 banner rendered after the chain.
+    displayEl.insertBefore(film, displayEl.firstChild);
+  }
+  film.dataset.count = String(chain.length);
+
+  const reel = document.createElement('div');
+  reel.className = 'reel';
+  const lastIdx = chain.length - 1;
+
+  for (let index = 0; index < chain.length; index++) {
+    const item = chain[index];
+
+    // bridge BEFORE this node (index>0): the actor linking it to the
+    // previous movie — the semantics the 1.0 bold-shared-actor carried.
+    if (index > 0) {
+      const linkActor = (item.matchedActors || [])[0];
+      const bridge = document.createElement('div');
+      bridge.className = 'reel-bridge';
+      bridge.textContent = linkActor ? `↔ ${linkActor}` : '↔';
+      reel.appendChild(bridge);
+    }
+
+    const node = document.createElement('div');
+    node.className = 'reel-node';
+    if (index === lastIdx) node.classList.add('now-playing');
+    // Best-effort burned stamp (spec §1.5): the live chain entry shape
+    // carries NO per-link elimination marker today, so this NEVER fires on
+    // real data — defensive + NO fabrication. Tested both ways (§4.5).
+    const eliminated = !!(item && item.eliminated === true);
+    if (eliminated) node.classList.add('burned');
 
     if (item.movie.poster && item.movie.poster.startsWith('https://image.tmdb.org/')) {
       const img = document.createElement('img');
       img.src = item.movie.poster;
       img.alt = 'Poster';
-      img.className = 'chain-poster';
-      // Swap to the designed placeholder if the poster fails to load.
-      attachPosterFallback(img, 'chain-poster');
-      div.appendChild(img);
+      img.className = 'reel-poster';
+      // WHY: off-screen reel posters defer-load — additive perf, no
+      // behaviour change (spec §1.10).
+      img.loading = 'lazy';
+      attachPosterFallback(img, 'reel-poster');
+      node.appendChild(img);
     } else {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'chain-poster placeholder';
-      div.appendChild(placeholder);
+      const ph = document.createElement('div');
+      ph.className = 'reel-poster placeholder';
+      node.appendChild(ph);
     }
 
-    const content = document.createElement('div');
-    content.className = 'chain-content';
+    const who = document.createElement('div');
+    who.className = 'reel-who';
+    who.textContent = item.playerName;
+    node.appendChild(who);
 
-    const playerNameDiv = document.createElement('div');
-    playerNameDiv.className = 'player-name';
-    playerNameDiv.textContent = item.playerName;
-    content.appendChild(playerNameDiv);
+    const title = document.createElement('div');
+    title.className = 'reel-title';
+    title.textContent = `${item.movie.title} (${item.movie.year})`;
+    node.appendChild(title);
 
-    const titleDiv = document.createElement('div');
-    titleDiv.className = 'movie-title';
-    titleDiv.appendChild(document.createTextNode(item.movie.title + ' '));
-    const yearSpan = document.createElement('span');
-    yearSpan.className = 'year';
-    yearSpan.textContent = '(' + item.movie.year + ')';
-    titleDiv.appendChild(yearSpan);
-    content.appendChild(titleDiv);
-
-    const castDiv = document.createElement('div');
-    castDiv.className = 'movie-cast';
-    castDiv.appendChild(document.createTextNode('Cast: '));
-    const castList = item.movie.cast || [];
-    castList.forEach((actor, ci) => {
-      // H4: cast entries are now {id, name} objects. Tolerate the legacy
-      // string shape for in-flight rooms whose state was serialized before
-      // the deploy that introduced ids.
-      const actorName = typeof actor === 'string' ? actor : (actor && actor.name) || '';
-      const actorId = typeof actor === 'object' ? actor && actor.id : null;
-      if (!actorName) return;
-      if (ci > 0) castDiv.appendChild(document.createTextNode(', '));
-      // Highlighted iff this actor appears in the previous node's cast.
-      // Compare by id when both sides have one (id-precise across name
-      // collisions), otherwise fall back to case-insensitive name compare.
-      const isMatched = index > 0 && previousActors.some(pa => {
-        const paName = typeof pa === 'string' ? pa : (pa && pa.name) || '';
-        const paId = typeof pa === 'object' ? pa && pa.id : null;
-        if (actorId != null && paId != null) return actorId === paId;
-        return paName.toLowerCase() === actorName.toLowerCase();
-      });
-      if (isMatched) {
-        const strong = document.createElement('strong');
-        strong.textContent = actorName;
-        castDiv.appendChild(strong);
-      } else {
-        castDiv.appendChild(document.createTextNode(actorName));
-      }
-    });
-    content.appendChild(castDiv);
-
-    div.appendChild(content);
-    chainDisplay.appendChild(div);
-    previousActors = castList;
-
-    if (index === gameState.chain.length - 1 && item.playerId !== myPlayerId) {
-      playSuccess();
+    if (eliminated) {
+      const stamp = document.createElement('div');
+      stamp.className = 'reel-burned-stamp';
+      stamp.textContent = 'OUT';
+      node.appendChild(stamp);
     }
+
+    reel.appendChild(node);
   }
-  chainDisplay.scrollTop = chainDisplay.scrollHeight;
+  film.appendChild(reel);
+
+  // The now-playing cast panel — full-width, FULL names, EVERY member,
+  // ungated (spec §1.2 — identical data to the 1.0 .movie-cast; the §4 hinge).
+  const nowItem = chain[lastIdx];
+  const panel = document.createElement('div');
+  panel.className = 'now-cast';
+
+  const head = document.createElement('div');
+  head.className = 'now-cast-head';
+  const link = document.createElement('span');
+  link.className = 'now-cast-link';
+  const linkedVia = (nowItem.matchedActors || [])[0];
+  link.textContent = (lastIdx > 0 && linkedVia)
+    ? `${nowItem.playerName} linked via ${linkedVia}`
+    : `${nowItem.playerName} · the chain starts here`;
+  head.appendChild(link);
+  const ttl = document.createElement('div');
+  ttl.className = 'now-cast-title';
+  ttl.textContent = `${nowItem.movie.title} (${nowItem.movie.year})`;
+  head.appendChild(ttl);
+  panel.appendChild(head);
+
+  const list = document.createElement('div');
+  list.className = 'now-cast-list';
+  const castList = nowItem.movie.cast || [];
+  let emitted = 0;
+  castList.forEach((actor) => {
+    // tolerate {id,name} or legacy bare string (verbatim from the 1.0
+    // L692-697); FULL name, never abbreviated (spec §1.2).
+    const actorName = typeof actor === 'string' ? actor : (actor && actor.name) || '';
+    if (!actorName) return;
+    if (emitted > 0) list.appendChild(document.createTextNode(' · '));
+    const span = document.createElement('span');
+    span.className = 'cast-name';
+    span.textContent = actorName;
+    list.appendChild(span);
+    emitted++;
+  });
+  panel.appendChild(list);
+  film.appendChild(panel);
+
+  // Newest pinned right — the horizontal analog of the 1.0
+  // `chainDisplay.scrollTop = scrollHeight`. A ONE-TIME scroll-position set,
+  // NOT a rAF loop (spec §1.10). No-op under jsdom (no layout) — harmless.
+  film.scrollLeft = film.scrollWidth;
+
+  // A new entry by another player still chimes (preserved from the 1.0
+  // L722-724) — gated on growth so idempotent re-renders never spam it.
+  if (grew && nowItem && nowItem.playerId !== myPlayerId) {
+    playSuccess();
+  }
 }
 
 // L3: Show + populate the spectator prediction bar. Tracks the active
