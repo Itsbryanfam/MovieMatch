@@ -166,3 +166,40 @@ describe('filmstrip — §4 behavioural-equivalence', () => {
     expect(display().querySelector('.empty-board-hint')).not.toBeNull();
   });
 });
+
+import { markClutchSave } from '../public/js/ui.js';
+
+describe('filmstrip — Task 2 wired contract', () => {
+  test('jsdom (no matchMedia) → settled end-state, no pending timers', () => {
+    jest.useFakeTimers();
+    const chain = [makeChainItem({ movie: { title: 'Solo', year: 2018, cast: ['A'], poster: '' } })];
+    renderGame(makePlayingState({ chain }), 'host_id', false);
+    // reducedMotion is computed at the call site; jsdom has no matchMedia →
+    // treated as reduced → choreographTurn takes instant settled path (0 new
+    // timers). renderGame also schedules a pre-existing scroll-into-view
+    // setTimeout (renderPlayerSidebar L676) — that's 1 timer total, all from
+    // the scroll helper, NONE from choreographTurn. Plan-test bug fix: the
+    // plan assumed 0 but renderGame pre-dates Task 2 with its own scroll timer.
+    expect(jest.getTimerCount()).toBe(1);
+    expect(display().querySelector('.reel-node.now-playing .reel-title').textContent).toBe('Solo (2018)');
+    jest.useRealTimers();
+  });
+
+  test('clutch flag → now-playing node gets .clutch + one .clutch-flash, for that render only', () => {
+    const base = makePlayingState({ chain: [makeChainItem(), makeChainItem({ matchedActors: ['x'] })] });
+    markClutchSave();
+    renderGame(base, 'host_id', false);
+    const hero = display().querySelector('.reel-node.now-playing');
+    expect(hero.classList.contains('clutch')).toBe(true);
+    expect(hero.querySelectorAll('.clutch-flash').length).toBe(1);
+    // flag consumed: a subsequent render WITHOUT markClutchSave() → no clutch
+    renderGame(base, 'host_id', false);
+    expect(display().querySelector('.reel-node.now-playing').classList.contains('clutch')).toBe(false);
+  });
+
+  test('no clutch flag → never any .clutch / .clutch-flash', () => {
+    renderGame(makePlayingState({ chain: [makeChainItem()] }), 'host_id', false);
+    expect(display().querySelector('.clutch')).toBeNull();
+    expect(display().querySelector('.clutch-flash')).toBeNull();
+  });
+});

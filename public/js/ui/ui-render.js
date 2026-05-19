@@ -35,6 +35,12 @@ import { clearGhostAttempt } from './ui-notifications.js';
 // swatches render disabled — the server is still the arbiter.
 import { diffArrivals, playerCardModel, rollCameraLabel, SEAT_HUES } from './red-carpet.js';
 
+// Phase 7.7: per-turn motion timeline engine — buildTurnTimeline schedules
+// the reveal→impact choreography phases; imported here (NOT via the ./ui.js
+// barrel) to match the 7.5 DAG discipline (ui-render.js is itself re-exported
+// by that barrel, so a barrel import would be a cycle).
+import { buildTurnTimeline } from './turn-motion.js';
+
 // Phase 7.5 Red Carpet: page-session set of player ids whose entrance card
 // has already been shown, so the entrance animation plays ONCE per real
 // arrival (renderLobby re-runs on EVERY stateUpdate/rejoin — idempotent).
@@ -529,6 +535,65 @@ export function renderTeamScreen(gameState, myPlayerId, amIHost) {
   }
 }
 
+// Phase 7.7: Clutch Save + per-turn motion timeline driver state. WHY a
+// module-level flag (not a renderGame signature change): socketClient.js
+// detects the clutch on the playing edge and calls markClutchSave() right
+// before the renderGame it already invokes — additive, mirrors how 7.6 added
+// playRecap as a new ui export called from socketClient (no signature/
+// protocol change). The single cancellable handle is the leak-safe
+// recap-player.js pattern (_recapTimer/cancelRecap).
+let _clutchPending = false;
+let _turnMotionTimer = null;
+
+export function markClutchSave() { _clutchPending = true; }
+export function cancelTurnMotion() {
+  // WHY: matches the recap-player.js cancelRecap() pattern — one module-level
+  // handle, cleared on cancel so isPending checks are trivial.
+  if (_turnMotionTimer) { clearTimeout(_turnMotionTimer); _turnMotionTimer = null; }
+}
+
+// Drive the now-playing node's per-turn choreography. reducedMotion (incl.
+// jsdom: no matchMedia) → instant settled (no timers), the recap-player.js
+// accessibility-safe precedent. Animated → a single cancellable setTimeout
+// chain over buildTurnTimeline()'s schedule. The clutch burst is purely
+// additive presentation — the settled DOM is behaviour-equivalent either way.
+function choreographTurn(heroNode, gameState, clutch) {
+  if (!heroNode) return;
+  if (clutch) {
+    // Append the .clutch class + one .clutch-flash child for that render only.
+    // The CSS animation (appended in 06-states-anim.css) fades it out — the
+    // DOM node persists harmlessly until the next render replaces the filmstrip.
+    heroNode.classList.add('clutch');
+    const flash = document.createElement('div');
+    flash.className = 'clutch-flash';
+    flash.textContent = 'CLUTCH SAVE';
+    heroNode.appendChild(flash);
+  }
+  // Treat absent/broken matchMedia (jsdom, old Android WebView) as reduced-motion
+  // — instant settled, zero timers. Belt-and-suspenders with the CSS @media block.
+  const reduced = (typeof window === 'undefined') || !window.matchMedia ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) { heroNode.classList.add('settled'); return; }
+
+  // Animated path: derive the reveal→impact tail from buildTurnTimeline and
+  // walk it as a single cancellable chain. We skip the handoff/think phases
+  // (those belong to the prior turn and the live timer bar — spec §3.1).
+  const thinkMs = (gameState && typeof gameState.turnDurationMs === 'number')
+    ? gameState.turnDurationMs : 0;
+  const timeline = buildTurnTimeline({ thinkMs, clutch });
+  cancelTurnMotion();
+  const tail = timeline.filter(p => p.name === 'reveal' || p.name === 'impact');
+  let i = 0;
+  const tick = () => {
+    if (i >= tail.length) { _turnMotionTimer = null; return; }
+    const phase = tail[i];
+    heroNode.classList.add(`phase-${phase.name}`);
+    i++;
+    _turnMotionTimer = setTimeout(tick, phase.durMs);
+  };
+  _turnMotionTimer = setTimeout(tick, 0);
+}
+
 export function renderGame(gameState, myPlayerId, isSpectator = false) {
   const mode = gameState.gameMode || 'classic';
   gameScreen.classList.toggle('solo-mode-ui', mode === 'solo');
@@ -809,6 +874,19 @@ function renderChainItems(gameState, myPlayerId) {
   // L722-724) — gated on growth so idempotent re-renders never spam it.
   if (grew && nowItem && nowItem.playerId !== myPlayerId) {
     playSuccess();
+  }
+
+  // Phase 7.7: consume the one-shot clutch flag (set by socketClient on the
+  // playing edge) and drive the per-turn choreography on the hero node. The
+  // flag is consumed every render so it can never replay on an idempotent
+  // stateUpdate re-fire (the 7.6 one-shot discipline). The flag-consume must
+  // happen UNCONDITIONALLY (not only on grew) so a non-grow render after a
+  // grow render reliably clears the flag, preventing contamination across
+  // tests and across idempotent re-fires.
+  const clutch = _clutchPending;
+  _clutchPending = false;
+  if (grew) {
+    choreographTurn(reel.querySelector('.reel-node.now-playing'), gameState, clutch);
   }
 }
 
