@@ -21,6 +21,21 @@ export const ACCENT_EMOJI = Object.freeze([
   '🎬', '🍿', '🌟', '🎭', '🎪', '🎨', '🚀', '👽', '🦄', '🐉', '🎸', '🦸',
 ]);
 
+// Phase 7.5.1 (Seat-Table redesign): the per-player accent COLOUR is no
+// longer a djb2-hash hue. The 7.5 hash%360 collided for distinct identities
+// (two bots rendered the same colour on the live site). It is now a SEAT
+// slot index into this frozen 8-entry palette, so for any real lobby (the
+// server caps it at 8 = host + 7) every player gets a guaranteed-distinct,
+// well-separated hue. WHY hues only (not full colours): the existing
+// .entrance-card CSS already wraps the value as `hsl(var(--card-accent),
+// 60%, 60%)`, so keeping the contract a bare hue integer is the minimal,
+// lowest-risk change. The 8 values are perceptually spread around the wheel;
+// tests pin length/range/distinctness/frozenness/determinism, NOT the
+// specific hue at a specific index (the 7.5 ACCENT_EMOJI over-pinning
+// lesson). Colour now reads ZERO identity — a strict strengthening of the
+// no-stableId invariant.
+export const SEAT_HUES = Object.freeze([350, 25, 45, 140, 188, 220, 270, 312]);
+
 /**
  * Pure arrival diff. Given the ids already shown this page session and the
  * current player list, returns which ids are NEW (play the entrance
@@ -98,8 +113,21 @@ export function playerCardModel(player, opts) {
   const isBot = !!p.isBot;
   const wins = (Number.isFinite(p.wins) && p.wins > 0) ? p.wins : 0;
 
+  // Phase 7.5.1: the accent COLOUR is the player's seat-slot hue (distinct
+  // per seat — fixes the 7.5 hash-collision where two identities shared a
+  // colour). `slot` is the 0-based render index (renderLobby passes it; host
+  // = players[0] = seat 0 → a stable first colour). The double-modulo is
+  // DEFENSIVE: a non-finite / negative / non-integer / absent slot still
+  // yields a valid in-range index (never undefined, never throws). >7 is
+  // unreachable (server caps the lobby at 8) but degrades gracefully.
+  const rawSlot = Number.isInteger(opts && opts.slot) ? opts.slot : 0;
+  const accentHue =
+    SEAT_HUES[((rawSlot % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
+  // The emoji is UNCHANGED 7.5 behaviour: a secondary cue still derived from
+  // the room-scoped name+':'+socket-id ONLY (NEVER stableId). The user
+  // flagged colour only; re-indexing the emoji would be needless churn/risk
+  // (YAGNI) and emoji repetition is not a defect.
   const hash = _djb2(name + ':' + id);
-  const accentHue = hash % 360;
   const accentEmoji = ACCENT_EMOJI[hash % ACCENT_EMOJI.length];
 
   let label = name;
