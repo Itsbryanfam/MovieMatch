@@ -6,12 +6,18 @@
 // be pure + unit-pinned (deterministic, defensive, NO stableId) BEFORE any
 // glue wires them into renderLobby. jsdom docblock = client-tests dir
 // convention; this module is pure so no DOM is touched.
+// Phase 7.5.1 (Seat-Table): the accent COLOUR contract changed from a djb2
+// hash hue to a frozen SEAT_HUES palette indexed by the player's seat slot
+// (fixes the live collision where two identities shared a colour). This is
+// 7.5's OWN unit suite legitimately tracking the model contract change — it
+// is NOT the sacrosanct render-lobby.test.js zero-regression guard.
 import {
   diffArrivals,
   playerCardModel,
   rollCameraLabel,
   marqueeSegments,
   ACCENT_EMOJI,
+  SEAT_HUES,
 } from '../public/js/ui/red-carpet.js';
 
 describe('diffArrivals', () => {
@@ -45,12 +51,6 @@ describe('diffArrivals', () => {
       .toEqual(['a', 'b']);
   });
   test('id guard: defined non-null id (0 or empty string) is a valid id (not skipped)', () => {
-    // WHY: the guard is `=== undefined || === null`, NOT falsy. A defined id of
-    // `0` or `''` is treated as valid. Socket ids are always non-empty strings;
-    // this test pins the chosen semantics so a future change to a falsy check
-    // would be a visible, deliberate decision.
-    // id:0 is a DEFINED, non-null id → treated as valid (not skipped). Socket
-    // ids are always non-empty strings; this pins the chosen guard semantics.
     expect(diffArrivals(new Set(), [{ id: 0 }, { id: 'b' }]).seen).toEqual([0, 'b']);
   });
   test('does not mutate inputs (purity)', () => {
@@ -62,14 +62,31 @@ describe('diffArrivals', () => {
   });
 });
 
-describe('playerCardModel', () => {
-  test('deterministic: same name+id → identical model across calls', () => {
-    const p = { id: 's1', name: 'Ada', isHost: false, wins: 0 };
-    expect(playerCardModel(p, { myPlayerId: 'x' }))
-      .toEqual(playerCardModel(p, { myPlayerId: 'x' }));
+describe('SEAT_HUES (Phase 7.5.1 seat palette)', () => {
+  test('frozen array of exactly 8 integer hues in [0,359]', () => {
+    expect(Array.isArray(SEAT_HUES)).toBe(true);
+    expect(SEAT_HUES).toHaveLength(8);
+    expect(Object.isFrozen(SEAT_HUES)).toBe(true);
+    SEAT_HUES.forEach(h => {
+      expect(Number.isInteger(h)).toBe(true);
+      expect(h).toBeGreaterThanOrEqual(0);
+      expect(h).toBeLessThanOrEqual(359);
+    });
   });
-  test('accentHue int 0..359; accentEmoji ∈ exported frozen 12-set', () => {
-    const m = playerCardModel({ id: 's1', name: 'Ada' }, {});
+  test('all 8 hues are pairwise-distinct (no collision possible for a full lobby)', () => {
+    expect(new Set(SEAT_HUES).size).toBe(8);
+  });
+});
+
+describe('playerCardModel', () => {
+  test('deterministic: same input + same slot → identical model across calls', () => {
+    const p = { id: 's1', name: 'Ada', isHost: false, wins: 0 };
+    expect(playerCardModel(p, { myPlayerId: 'x', slot: 3 }))
+      .toEqual(playerCardModel(p, { myPlayerId: 'x', slot: 3 }));
+  });
+  test('accentHue is the seat palette entry; integer 0..359; emoji ∈ frozen 12-set', () => {
+    const m = playerCardModel({ id: 's1', name: 'Ada' }, { slot: 2 });
+    expect(m.accentHue).toBe(SEAT_HUES[2]);
     expect(Number.isInteger(m.accentHue)).toBe(true);
     expect(m.accentHue).toBeGreaterThanOrEqual(0);
     expect(m.accentHue).toBeLessThanOrEqual(359);
@@ -77,12 +94,35 @@ describe('playerCardModel', () => {
     expect(Object.isFrozen(ACCENT_EMOJI)).toBe(true);
     expect(ACCENT_EMOJI).toContain(m.accentEmoji);
   });
-  test('different identity → different accent (hue or emoji differs)', () => {
-    // WHY disjunction: fixtures were chosen so BOTH hue AND emoji differ for
-    // these two inputs, so the test is not vacuously satisfied by one component.
-    const a = playerCardModel({ id: 's1', name: 'Ada' }, {});
-    const b = playerCardModel({ id: 's2', name: 'Bo' }, {});
-    expect(a.accentHue !== b.accentHue || a.accentEmoji !== b.accentEmoji).toBe(true);
+  test('slots 0..7 → the 8 distinct palette hues (collision-free for a full lobby)', () => {
+    const hues = [0, 1, 2, 3, 4, 5, 6, 7].map(
+      slot => playerCardModel({ id: 's' + slot, name: 'N' + slot }, { slot }).accentHue
+    );
+    expect(hues).toEqual([...SEAT_HUES]);
+    expect(new Set(hues).size).toBe(8);
+  });
+  test('colour reads ZERO identity: different identities at the SAME slot → SAME hue', () => {
+    const a = playerCardModel({ id: 'aaa', name: 'Kurosawa' }, { slot: 4 });
+    const b = playerCardModel({ id: 'bbb', name: 'Coppola' }, { slot: 4 });
+    expect(a.accentHue).toBe(b.accentHue);
+    expect(a.accentHue).toBe(SEAT_HUES[4]);
+  });
+  test('defensive slot: non-finite / negative / non-integer / absent → valid in-range hue, never throws', () => {
+    const base = { id: 's1', name: 'Ada' };
+    expect(playerCardModel(base, {}).accentHue).toBe(SEAT_HUES[0]);
+    expect(playerCardModel(base, { slot: undefined }).accentHue).toBe(SEAT_HUES[0]);
+    expect(playerCardModel(base, { slot: -1 }).accentHue).toBe(SEAT_HUES[7]);
+    expect(playerCardModel(base, { slot: 8 }).accentHue).toBe(SEAT_HUES[0]);
+    expect(playerCardModel(base, { slot: 2.5 }).accentHue).toBe(SEAT_HUES[0]);
+    expect(playerCardModel(base, { slot: NaN }).accentHue).toBe(SEAT_HUES[0]);
+    expect(() => playerCardModel(base, { slot: Infinity })).not.toThrow();
+    expect(SEAT_HUES).toContain(playerCardModel(base, { slot: Infinity }).accentHue);
+  });
+  test('emoji UNCHANGED: deterministic by name+id, independent of slot', () => {
+    const s0 = playerCardModel({ id: 's1', name: 'Ada' }, { slot: 0 });
+    const s5 = playerCardModel({ id: 's1', name: 'Ada' }, { slot: 5 });
+    expect(s0.accentEmoji).toBe(s5.accentEmoji);
+    expect(ACCENT_EMOJI).toContain(s0.accentEmoji);
   });
   test('label mirrors the exact (You)/👑/• N 🏆 matrix', () => {
     expect(playerCardModel({ id: 'h', name: 'Host', isHost: true }, { myPlayerId: 'h' }).label)
@@ -99,8 +139,8 @@ describe('playerCardModel', () => {
   test('SECURITY sentinel: a stableId on the input never affects the model', () => {
     const base = { id: 's1', name: 'Ada', isHost: true, wins: 1 };
     const withStable = { ...base, stableId: 'p_SECRET_LEAK' };
-    expect(playerCardModel(withStable, { myPlayerId: 'x' }))
-      .toEqual(playerCardModel(base, { myPlayerId: 'x' }));
+    expect(playerCardModel(withStable, { myPlayerId: 'x', slot: 1 }))
+      .toEqual(playerCardModel(base, { myPlayerId: 'x', slot: 1 }));
   });
   test('defensive: missing name/id/null does not throw', () => {
     expect(() => playerCardModel({}, {})).not.toThrow();
@@ -108,10 +148,6 @@ describe('playerCardModel', () => {
     expect(playerCardModel({}, {}).name).toBe('');
   });
   test('label: wins badge only for a positive finite count (defensive)', () => {
-    // WHY: pins the intentional Number.isFinite guard — no trophy badge for
-    // 0 / negative / NaN / Infinity; badge only for a positive finite integer.
-    // Byte-identical to pre-7.5 for the always-non-negative-integer the
-    // server emits; a deliberate strict superset for malformed values.
     expect(playerCardModel({ id: 'a', name: 'A', wins: 0 }, {}).label).toBe('A');
     expect(playerCardModel({ id: 'b', name: 'B', wins: -4 }, {}).label).toBe('B');
     expect(playerCardModel({ id: 'c', name: 'C', wins: NaN }, {}).label).toBe('C');

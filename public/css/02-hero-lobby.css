@@ -762,16 +762,25 @@ input:disabled {
    existing #lobby-players li base rule still applies — padding/bg/border/
    radius/margin/font); these ADD the red-carpet layer. --card-accent is
    the per-player hue (a data value the glue sets inline, not style debt). */
+/* Phase 7.5.1 (Seat-Table redesign): the entrance-card is now a vertical
+   SEAT TILE in a grid (was a flex ROW in a list). Reworking 7.5's OWN rule
+   only — the pre-7.5 `#lobby-players li` base (padding/border/radius/margin/
+   font) is untouched. The distinct SEAT_HUES colour now drives a 4px left
+   edge + a faint same-hue tint over the token bg (contrast preserved). */
 #lobby-players li.entrance-card {
   display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  /* Quiet per-player identity cue from the deterministic hue; the token bg
-     from the base rule is unchanged so contrast/legibility is preserved. */
-  border-left: 3px solid hsl(var(--card-accent, 240), 60%, 60%);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  position: relative;            /* anchor the corner kick ✕ */
+  border-left: 4px solid hsl(var(--card-accent, 240), 60%, 60%);
+  background:
+    linear-gradient(hsla(var(--card-accent, 240), 60%, 60%, 0.10),
+                    hsla(var(--card-accent, 240), 60%, 60%, 0.10)),
+    var(--bg-elevated);
 }
 .entrance-card__emoji {
-  font-size: 1.1rem;
+  font-size: 1.6rem;             /* prominent on a tile (was inline-ish 1.1) */
   line-height: 1;
   flex: 0 0 auto;
 }
@@ -891,3 +900,81 @@ input:disabled {
   box-shadow: none;
 }
 
+/* =============================================
+   PHASE 7.5.1 — SEAT-TABLE LAYOUT (APPEND-ONLY)
+   WHY append-only here too: no pre-7.5 rule (≤ line 728, the .bot-thinking
+   boundary) is edited/reordered/removed. This adds the Director-sidebar +
+   responsive seat-tile-grid layout around the existing #waiting-room
+   structure. The animation (cardEntrance) + the global prefers-reduced-
+   motion neutralisation in 06-states-anim.css are reused UNCHANGED
+   (compositor-safe; no new keyframes, no new timers).
+   Cascade audit (binding 7.5 C1/DS-01 lesson — all six partials checked):
+   .lobby-panel base = 02-hero-lobby.css:230 (max-width:380px); responsive
+   overrides are .lobby-panel{max-width:420px}@max-1023 (05-responsive:31)
+   and .lobby-panel{max-width:100%}@max-767 (05-responsive:86); #lobby-screen
+   {overflow-y:auto}@max-767 (05-responsive:94) already lets the stacked
+   mobile lobby scroll (Add Bot reachable). The 02-hero @max-900/@max-480
+   blocks are hero-only (no lobby selector). So: the desktop widen below is
+   id-anchored (#waiting-room.lobby-panel = 1,1,0) inside @min-768 — it beats
+   every .lobby-panel (0,1,0) rule for ≥768 and NEVER collides with the ≤767
+   max-width:100% (different media). 768px is the exact complement of the
+   codebase's 767px mobile boundary. 15rem(240px) sidebar matches the
+   codebase's recurring 240px side-panel metric. ============================ */
+
+/* Default (all widths, mobile-first): the lobby is a vertical stack — the
+   seat-tile grid, then the Director panel below it. The grid is responsive
+   via auto-fill (≈1–2 columns on a phone-width panel). */
+.lobby-stage { display: block; }
+.lobby-stage #lobby-players {
+  /* .lobby-stage #lobby-players (0,1,1) > base #lobby-players (0,1,0) — the
+     pre-7.5 base rule (list-style:none) is NOT edited; this only adds the
+     grid + overrides its margin-bottom. */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+/* Kick ✕ becomes a corner control on the tile. The pre-7.5 .btn-kick base
+   (06-states-anim.css) is NOT edited; this .entrance-card .btn-kick (0,2,0)
+   just adds positioning over it. NOTE: flex-shrink:0 is deliberately
+   RE-STATED here — a separate 7.5-own `.entrance-card .btn-kick{flex-shrink:0}`
+   already exists above; the append-only discipline (no pre-7.5/earlier rule
+   edited or reordered) precludes consolidating them. The repetition is
+   intentional and harmless (same selector+specificity, additive cascade),
+   NOT an oversight. */
+.entrance-card .btn-kick {
+  flex-shrink: 0;
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+}
+/* The BOT badge sits UNDER the name on a tile (column layout). The pre-7.5
+   base .bot-badge{margin-left:8px} (untouched) was spacing for the OLD inline
+   ROW; in the column tile it mis-indents the badge 8px from the emoji/name —
+   zero it via this additive scoped override (.entrance-card .bot-badge =
+   0,2,0 beats the base 0,1,0; no pre-7.5 rule edited). #31's non-shrink/
+   nowrap intent is preserved by the base .bot-badge + the 7.5 rule. */
+.entrance-card .bot-badge {
+  align-self: flex-start;
+  margin-left: 0;
+}
+
+/* Desktop ≥768px: Director becomes a LEFT SIDEBAR, the players list the
+   grid to its right, and the lobby panel widens to fit both. */
+@media (min-width: 768px) {
+  #waiting-room.lobby-panel { max-width: 920px; }
+  .lobby-stage {
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+  }
+  .lobby-stage .director-panel {
+    flex: 0 0 15rem;             /* fixed left sidebar (240px) */
+    margin-top: 0;               /* override 7.5's own .director-panel{margin-top:1rem} in row context */
+  }
+  .lobby-stage .players-list-container {
+    flex: 1 1 auto;
+    min-width: 0;                /* allow the grid to shrink within the flex row */
+  }
+  .lobby-stage #lobby-players { margin-bottom: 0; }
+}

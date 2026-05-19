@@ -95,7 +95,15 @@ export function renderLobby(gameState, myPlayerId) {
   const enteringSet = new Set(entering);
 
   lobbyPlayersList.innerHTML = '';
-  gameState.players.forEach(p => {
+  // Phase 7.5.1 (Seat-Table redesign): thread the 0-based render index as
+  // the player's SEAT slot → playerCardModel maps it to a distinct SEAT_HUES
+  // colour (fixes the 7.5 hash-collision where two identities shared a hue).
+  // The server orders the host first (render-lobby.test.js pins items[0] =
+  // host) so the host is seat 0 — a stable first colour. Pure-seam: the
+  // ONLY glue change is threading `slot`; the <li>/container/label/.bot-badge
+  // /.btn-kick (same condition + emit) stay byte-identical so the sacrosanct
+  // render-lobby.test.js guard stays green.
+  gameState.players.forEach((p, slot) => {
     // Phase 7.5: the row is now a Red Carpet "entrance card". The <li> +
     // #lobby-players container + the textual label + the .bot-badge + the
     // .btn-kick (same condition, same emit) are PRESERVED byte-for-byte so
@@ -104,7 +112,7 @@ export function renderLobby(gameState, myPlayerId) {
     // inline li.style.cssText is removed — flex/align/justify now lives in
     // the additive .entrance-card CSS (bounded DS-01, confined to the row
     // we rewrite here).
-    const card = playerCardModel(p, { myPlayerId });
+    const card = playerCardModel(p, { myPlayerId, slot });
     const li = document.createElement('li');
     li.className = 'entrance-card'
       + (card.isYou ? ' is-you' : '')
