@@ -1,12 +1,10 @@
 /**
  * @jest-environment jsdom
  */
-// Phase 7.5.1 — Seat-Table redesign glue. WHY: prove (a) the live colour
-// collision is fixed — a full 8-player lobby yields 8 DISTINCT --card-accent
-// values, host = seat 0 = SEAT_HUES[0]; (b) the ONE additive .lobby-stage
-// wrapper exists and contains both the players list and the Director panel
-// (the desktop sidebar/grid + mobile stack is pure CSS, jsdom can't lay out);
-// (c) team-mode still early-returns (no entrance cards / no .lobby-stage build).
+// Phase 7.5.2 — theater seat colour contract. Proves the 7.5.1 collision fix
+// still holds end-to-end in the theater DOM: a full 8-player lobby yields 8
+// DISTINCT --avatar-hue values (= SEAT_HUES, fed by the UNCHANGED seam), the
+// host is seat 0 = SEAT_HUES[0], and team mode builds no seats.
 const { loadIndexHtml, makeWaitingState, makePlayer } = require('./fixtures');
 const mockEmit = jest.fn();
 jest.mock('../public/js/state.js', () => ({
@@ -27,36 +25,36 @@ const eightPlayers = () => ([
   makePlayer({ id: 'p7', name: 'Bot Scott', isBot: true }),
 ]);
 
-describe('renderLobby — Seat-Table redesign', () => {
+describe('renderLobby — theater seat colour', () => {
   beforeEach(() => { loadIndexHtml(); initUIElements(); mockEmit.mockClear(); });
 
-  test('full 8-player lobby → 8 DISTINCT --card-accent values (collision fixed)', () => {
+  test('full 8-player lobby → 8 DISTINCT --avatar-hue (collision-free)', () => {
     renderLobby(makeWaitingState({ id: 'ST1', players: eightPlayers() }), 'p0');
-    const accents = [...document.querySelectorAll('#lobby-players li.entrance-card')]
-      .map(li => li.style.getPropertyValue('--card-accent'));
-    expect(accents).toHaveLength(8);
-    expect(new Set(accents).size).toBe(8);
+    const hues = [...document.querySelectorAll('#lobby-players li.seat.occupied')]
+      .map(li => li.style.getPropertyValue('--avatar-hue'));
+    expect(hues).toHaveLength(8);
+    expect(new Set(hues).size).toBe(8);
   });
 
-  test('host is seat 0 → host tile --card-accent == SEAT_HUES[0]', () => {
+  test('host is seat 0 → --avatar-hue == SEAT_HUES[0]', () => {
     renderLobby(makeWaitingState({ id: 'ST2', players: eightPlayers() }), 'p0');
-    const first = document.querySelector('#lobby-players li.entrance-card');
+    const first = document.querySelector('#lobby-players li.seat.occupied');
     expect(first.textContent).toContain('Host');
-    expect(first.style.getPropertyValue('--card-accent')).toBe(String(SEAT_HUES[0]));
+    expect(first.style.getPropertyValue('--avatar-hue')).toBe(String(SEAT_HUES[0]));
   });
 
-  test('ONE additive .lobby-stage wraps the players list AND the Director panel', () => {
+  test('exactly 8 <li.seat>; 2-player roster → 2 occupied + 6 empty', () => {
     renderLobby(makeWaitingState({ id: 'ST3' }), 'host_id');
-    const stage = document.querySelector('#waiting-room .lobby-stage');
-    expect(stage).not.toBeNull();
-    expect(stage.querySelector('.players-list-container #lobby-players')).not.toBeNull();
-    expect(stage.querySelector('.director-panel')).not.toBeNull();
-    expect(document.querySelector('.lobby-stage #team-screen')).toBeNull();
+    expect(document.querySelectorAll('#lobby-players li.seat').length).toBe(8);
+    expect(document.querySelectorAll('#lobby-players li.seat.occupied').length).toBe(2);
+    const empties = document.querySelectorAll('#lobby-players li.seat:not(.occupied)');
+    expect(empties.length).toBe(6);
+    expect(empties[0].querySelector('.seat-num')).not.toBeNull();
   });
 
-  test('team mode: early-return untouched — no entrance cards / no stage build', () => {
+  test('team mode: early-return untouched — no seats built', () => {
     renderLobby(makeWaitingState({ gameMode: 'team', id: 'ST4' }), 'host_id');
-    expect(document.querySelectorAll('#lobby-players li.entrance-card').length).toBe(0);
+    expect(document.querySelectorAll('#lobby-players li.seat').length).toBe(0);
     expect(document.querySelectorAll('#team-red-list li, #team-blue-list li').length)
       .toBeGreaterThan(0);
   });
