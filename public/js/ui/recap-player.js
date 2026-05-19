@@ -27,7 +27,25 @@ function beatNode(beat) {
   d.className = `recap-beat recap-${beat.type}`;
   const p = beat.payload || {};
   if (beat.type === 'intro') {
-    d.textContent = `${p.title} — Chain of ${p.chainCount} connection${p.chainCount !== 1 ? 's' : ''}`;
+    // Phase 7.6.2: modelled after the Theater Lobby cinema screen
+    // (.theater .screen → .screen-eyebrow/.screen-headline/.screen-sub).
+    // Fixed chrome labels ("CHAIN PREMIERE" / connection sub) wrap the
+    // engine's unchanged intro payload (title, chainCount) — same pattern
+    // as the lobby markup providing "NOW CASTING"/"TONIGHT'S FEATURE"
+    // around dynamic content; chain-recap.js stays pure & untouched.
+    const scr = document.createElement('div');
+    scr.className = 'recap-screen';
+    const eb = document.createElement('span');
+    eb.className = 'recap-screen-eyebrow';
+    eb.textContent = 'CHAIN PREMIERE';
+    const hl = document.createElement('span');
+    hl.className = 'recap-screen-headline';
+    hl.textContent = p.title;
+    const sub = document.createElement('span');
+    sub.className = 'recap-screen-sub';
+    sub.textContent = `${p.chainCount} CONNECTION${p.chainCount !== 1 ? 'S' : ''}`;
+    scr.appendChild(eb); scr.appendChild(hl); scr.appendChild(sub);
+    d.appendChild(scr);
   } else if (beat.type === 'bridge') {
     d.textContent = `↔ via ${p.actor}`;
   } else if (beat.type === 'skipped') {
@@ -35,6 +53,13 @@ function beatNode(beat) {
   } else if (beat.type === 'elimination') {
     d.textContent = `❌ ${p.playerName} eliminated`;
   } else if (beat.type === 'finale') {
+    // Phase 7.6.2: marquee eyebrow mirrors the cinema-screen eyebrow so the
+    // finale reads as the "feature presentation" payoff. Fixed chrome; the
+    // engine's winnerLine/subLine contract is unchanged.
+    const fe = document.createElement('div');
+    fe.className = 'recap-finale-eyebrow';
+    fe.textContent = "THAT'S A WRAP";
+    d.appendChild(fe);
     const t = document.createElement('div');
     t.className = 'recap-finale-title';
     t.textContent = p.winnerLine;
