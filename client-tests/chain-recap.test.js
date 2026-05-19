@@ -34,7 +34,7 @@ function chainOf(n) { return Array.from({ length: n }, (_, i) => link(i)); }
 describe('buildRecapStoryboard — schema & order', () => {
   test('first beat is intro with chainCount; last beat is finale', () => {
     const sb = buildRecapStoryboard({ gameMode: 'classic', chain: chainOf(3), winner: { name: 'P1', score: 9 } });
-    expect(sb[0]).toMatchObject({ type: 'intro', index: 0, payload: { chainCount: 3 } });
+    expect(sb[0]).toMatchObject({ type: 'intro', index: 0, payload: { title: 'MovieMatch', chainCount: 3 } });
     expect(sb[sb.length - 1].type).toBe('finale');
   });
 
@@ -77,6 +77,13 @@ describe('buildRecapStoryboard — curation cap & skipped beat', () => {
     expect(sb.filter(b => b.type === 'link').length).toBeLessThanOrEqual(7);
     expect(sb.filter(b => b.type === 'skipped').length).toBe(1);
     expect(sb.find(b => b.type === 'skipped').payload.skipped).toBe(12 - 7);
+    // pin the ordering: skipped beat must appear after the last link and before the finale
+    const types = sb.map(b => b.type);
+    const skippedIdx = types.indexOf('skipped');
+    const lastLinkIdx = types.lastIndexOf('link');
+    const finaleIdx = types.indexOf('finale');
+    expect(skippedIdx).toBeGreaterThan(lastLinkIdx);
+    expect(skippedIdx).toBeLessThan(finaleIdx);
     const last = sb[sb.length - 1];
     expect(last.atMs + last.durMs).toBeLessThanOrEqual(13000);
   });
@@ -91,30 +98,40 @@ describe('buildRecapStoryboard — finale parity with showGameOverBanner', () =>
   test('solo complete', () => {
     const sb = buildRecapStoryboard({ gameMode: 'solo', chain: chainOf(5), winner: { isSolo: true, chainLength: 5 } });
     const f = sb[sb.length - 1].payload;
+    // kind pins the seam contract consumed by Task 1's driver
+    expect(f.kind).toBe('solo-complete');
     expect(f.winnerLine).toBe('🎬 Solo Complete!');
     expect(f.subLine).toBe('🔗 Chain Length: 5 links');
   });
   test('solo over (no solo winner)', () => {
     const sb = buildRecapStoryboard({ gameMode: 'solo', chain: chainOf(1), winner: null });
     const f = sb[sb.length - 1].payload;
+    // kind pins the seam contract consumed by Task 1's driver
+    expect(f.kind).toBe('solo-over');
     expect(f.winnerLine).toBe('🎬 Solo Over');
     expect(f.subLine).toBe('🔗 Final Chain: 1 connection');
   });
   test('team win', () => {
     const sb = buildRecapStoryboard({ gameMode: 'team', chain: chainOf(4), winner: { isTeamWin: true, name: '🔴 Red', players: ['A', 'B'], score: 12 } });
     const f = sb[sb.length - 1].payload;
+    // kind pins the seam contract consumed by Task 1's driver
+    expect(f.kind).toBe('team');
     expect(f.winnerLine).toBe('🏆 🔴 Red wins!');
     expect(f.subLine).toBe('A & B • 12 pts');
   });
   test('classic winner', () => {
     const sb = buildRecapStoryboard({ gameMode: 'classic', chain: chainOf(3), winner: { name: 'Zoe', score: 8 } });
     const f = sb[sb.length - 1].payload;
+    // kind pins the seam contract consumed by Task 1's driver
+    expect(f.kind).toBe('winner');
     expect(f.winnerLine).toBe('🏆 Zoe wins!');
     expect(f.subLine).toBe('8 pts • 3 connections');
   });
   test('no winner', () => {
     const sb = buildRecapStoryboard({ gameMode: 'classic', chain: chainOf(2), winner: null });
     const f = sb[sb.length - 1].payload;
+    // kind pins the seam contract consumed by Task 1's driver
+    expect(f.kind).toBe('none');
     expect(f.winnerLine).toBe('🎬 Game Over!');
     expect(f.subLine).toBe('2 connections total');
   });
