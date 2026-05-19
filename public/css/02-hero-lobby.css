@@ -977,6 +977,21 @@ input:disabled {
   margin-bottom: 0;
   padding: 0;
 }
+/* Phase 7.5.2: the retained pre-7.5 `#lobby-players li` card rule (1,1,0,
+   lines ~574-582) predates the seats-grid and still matches every theater
+   <li class="seat">. Scope the seat rules under #lobby-players.seats-grid so
+   they beat (1,1,0) WITHOUT editing the pre-7.5 base rule (append-only). This
+   block neutralizes the old card chrome and re-asserts the chair's own box. */
+#lobby-players.seats-grid .seat {
+  padding: 58px 0 0;     /* re-assert theater chair top-offset (0.75rem card value clobbered this) */
+  background: none;       /* neutralize var(--bg-elevated) card background */
+  border: 0;              /* neutralize 1px solid var(--border-subtle) card border */
+  border-radius: 0;       /* neutralize var(--radius-sm) card corners */
+  margin: 0;              /* neutralize 0.5rem bottom card margin */
+  font-size: inherit;     /* neutralize 0.9rem card font-size */
+  font-weight: inherit;   /* neutralize 500 card font-weight */
+}
+
 .seat {
   position: relative;
   display: flex;
@@ -985,6 +1000,22 @@ input:disabled {
   /* nameplate area (top) + clear gap + seat with avatar emerging from it */
   padding-top: 58px;
   transition: filter .35s;
+  /* Per-seat CSS variables (README §"Per-seat CSS variables" — verbatim).
+     --avatar-hue is set inline per <li> by renderLobby (Task 1) from the
+     collision-free SEAT_HUES[slot] palette. Default values apply to empty
+     seats (unsaturated dark neutral).
+     Merged from the second .seat{} block (was after .seat-svg) — no cascade
+     change: both blocks were (0,1,0) with disjoint properties. */
+  --velvet-light: #3a3441;
+  --velvet-mid:   #272230;
+  --velvet-dark:  #16131c;
+  --piping:       rgba(255,255,255,0.10);
+  --stitch:       rgba(0,0,0,0.45);
+  --arm-light:    #2d2a36;
+  --arm-mid:      #1d1b25;
+  --arm-cap:      #3b3744;
+  --cushion-top:  #2a2632;
+  --cushion-bot:  #15131b;
 }
 
 /* nameplate (above seat) */
@@ -1089,22 +1120,6 @@ input:disabled {
 }
 
 /* state colors driven by CSS vars used inside SVG fills */
-/* Per-seat CSS variables (README §"Per-seat CSS variables" — verbatim).
-   --avatar-hue is set inline per <li> by renderLobby (Task 1) from the
-   collision-free SEAT_HUES[slot] palette. Default values apply to empty
-   seats (unsaturated dark neutral). */
-.seat {
-  --velvet-light: #3a3441;
-  --velvet-mid:   #272230;
-  --velvet-dark:  #16131c;
-  --piping:       rgba(255,255,255,0.10);
-  --stitch:       rgba(0,0,0,0.45);
-  --arm-light:    #2d2a36;
-  --arm-mid:      #1d1b25;
-  --arm-cap:      #3b3744;
-  --cushion-top:  #2a2632;
-  --cushion-bot:  #15131b;
-}
 /* Occupied seat: velvet colors derived from --avatar-hue (the SEAT_HUES
    slot value set by JS). All hsl(var(--avatar-hue,...)) formulas are
    verbatim from the README — they are DERIVED colors, not new brand values
@@ -1403,15 +1418,18 @@ input:disabled {
   color: var(--accent-primary);
   box-shadow: var(--shadow-glow);
 }
-.dir-refined .mode-chip .ico {
+/* retargeted from prototype .ico → real markup .mode-chip-icon */
+.dir-refined .mode-chip .mode-chip-icon {
   font-size: 1.1rem;
 }
-.dir-refined .mode-chip .nm {
+/* retargeted from prototype .nm → real markup .mode-chip-name */
+.dir-refined .mode-chip .mode-chip-name {
   font: 700 0.66rem/1 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.dir-refined .mode-desc {
+/* retargeted from prototype .mode-desc → real markup .mode-description */
+.dir-refined .mode-description {
   margin-top: 10px;
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -1535,13 +1553,9 @@ input:disabled {
   transform: translateY(-1px);
   box-shadow: 0 8px 28px rgba(129,140,248,0.35);
 }
-.dir-refined .ref-cta .ksbd {
-  font: 600 0.68rem/1 var(--mono);
-  padding: 4px 6px;
-  background: rgba(0,0,0,0.25);
-  border-radius: 4px;
-  margin-left: 6px;
-}
+/* .dir-refined .ref-cta .ksbd — deleted: prototype used a <kbd> badge child
+   inside the Roll-Camera button; real #start-btn emits only "🎬 Roll Camera"
+   text with no keyboard-badge sub-element, so this rule can never match. */
 .dir-refined .add-bot-row {
   display: flex;
   gap: 8px;
