@@ -243,125 +243,135 @@
       </div>
 
       <div id="waiting-room" class="panel hidden lobby-panel">
-<!-- Phase 7.5.2 Theater Lobby: full #waiting-room restructure per the Claude-Design handoff. Every pre-existing id preserved (socketClient/ui-render/ui-dom query them by id); the House-Rules ledger rows wrap the REAL hidden #theme-select/#hardcore-toggle/#tv-shows-toggle so existing change-handlers fire unchanged; renderLobby fills the 8 #lobby-players seats; #team-screen untouched. -->
+        <!-- Phase 7.5.2 Theater Lobby: full #waiting-room restructure per the Claude-Design
+             handoff. Every pre-existing id preserved (socketClient/ui-render/ui-dom query
+             them by id); the House-Rules ledger rows wrap the REAL hidden
+             #theme-select/#hardcore-toggle/#tv-shows-toggle so existing change-handlers
+             fire unchanged; renderLobby fills the 8 #lobby-players seats;
+             #team-screen untouched. -->
 
-  <!-- HEADER: room code (top-left) + Public toggle (top-right) -->
-  <div class="lobby-head">
-    <div class="head-title">
-      <h2>Room: <span id="lobby-code-display" class="accent-text code"></span></h2>
-      <p>The cast is arriving — take your seats.</p>
-    </div>
-    <label class="setting-toggle public-toggle" title="List this room on the Public Matchmaking viewer">
-      <input type="checkbox" id="public-room-toggle" disabled>
-      <span>Public Room</span>
-    </label>
-  </div>
-
-  <!-- TWO-COLUMN BODY: theater | director -->
-  <div class="lobby-body">
-
-    <!-- THEATER (left column) -->
-    <section class="theater">
-      <div class="stage">
-        <div class="screen">
-          <div class="screen-eyebrow">Now Casting</div>
-          <div class="screen-headline">The cast is arriving</div>
-          <div class="screen-sub">Tonight's Feature</div>
-        </div>
-        <div class="light-cone"></div>
-      </div>
-
-      <div class="seats-wrap">
-        <!-- 2 rows × 4 seats. renderLobby fills these dynamically.       -->
-        <!-- The container is still #lobby-players for socket compat.    -->
-        <ul id="lobby-players" class="seats-grid" data-layout="two-rows">
-          <!-- renderLobby populates 8 <li class="seat"> children here -->
-        </ul>
-        <div class="theater-floor"></div>
-      </div>
-
-      <div class="theater-status" id="theater-status">
-        <span class="count"><b id="seated-count">0</b> of 8 seated</span>
-        <span id="seated-hint">Waiting for more cast…</span>
-      </div>
-    </section>
-
-    <!-- DIRECTOR (right column) -->
-    <aside class="director-shell dir-refined">
-      <div class="ref-header">
-        <div>
-          <div class="ref-eyebrow">Director</div>
-          <div class="ref-title">Set the scene</div>
-        </div>
-        <div class="ref-step-num">01 / 02</div>
-      </div>
-
-      <!-- Step 1: Game Mode (PRESERVE existing #mode-selector + chip ids) -->
-      <div id="mode-selector" class="mode-selector">
-        <div class="field-label"><span class="nu">1</span> Game Mode</div>
-        <div class="mode-chips">
-          <button class="btn mode-chip active" data-mode="classic" id="mode-chip-classic">
-            <span class="mode-chip-icon">⚔️</span>
-            <span class="mode-chip-name">Classic</span>
-          </button>
-          <button class="btn mode-chip" data-mode="team" id="mode-chip-team">
-            <span class="mode-chip-icon">🤝</span>
-            <span class="mode-chip-name">Team</span>
-          </button>
-          <button class="btn mode-chip" data-mode="solo" id="mode-chip-solo">
-            <span class="mode-chip-icon">🎯</span>
-            <span class="mode-chip-name">Solo</span>
-          </button>
-          <button class="btn mode-chip" data-mode="speed" id="mode-chip-speed">
-            <span class="mode-chip-icon">⚡</span>
-            <span class="mode-chip-name">Speed</span>
-          </button>
-        </div>
-        <p class="mode-description" id="mode-description">Last player standing wins. Timer shrinks each round.</p>
-      </div>
-
-      <!-- Step 2: House Rules (PRESERVE #lobby-settings + control ids) -->
-      <div>
-        <div class="field-label"><span class="nu">2</span> House Rules</div>
-        <div class="ledger" id="lobby-settings">
-          <div class="ledger-row">
-            <div>
-              <div class="lr-name">Theme</div>
-              <div class="lr-desc">Filter the candidate pool</div>
-            </div>
-            <div class="lr-right">
-              <select id="theme-select" class="theme-select" disabled></select>
-            </div>
+        <!-- HEADER: room code (top-left) + Public toggle (top-right) -->
+        <div class="lobby-head">
+          <div class="head-title">
+            <!-- `code` class: Task 2 CSS gives the room code the JetBrains Mono monospace treatment. -->
+            <h2>Room: <span id="lobby-code-display" class="accent-text code"></span></h2>
+            <p>The cast is arriving — take your seats.</p>
           </div>
-          <label class="ledger-row" data-toggle="hardcore">
-            <div>
-              <div class="lr-name">Hardcore</div>
-              <div class="lr-desc">No actor reuse anywhere in chain</div>
-            </div>
-            <span class="toggle-pill"></span>
-            <input type="checkbox" id="hardcore-toggle" class="ledger-checkbox" disabled>
-          </label>
-          <label class="ledger-row" data-toggle="tvshows">
-            <div>
-              <div class="lr-name">Allow TV Shows</div>
-              <div class="lr-desc">Include television series</div>
-            </div>
-            <span class="toggle-pill"></span>
-            <input type="checkbox" id="tv-shows-toggle" class="ledger-checkbox" disabled>
+          <label class="setting-toggle public-toggle" title="List this room on the Public Matchmaking viewer">
+            <input type="checkbox" id="public-room-toggle" disabled>
+            <span>Public Room</span>
           </label>
         </div>
-      </div>
 
-      <!-- Step 3: Roll -->
-      <div>
-        <button id="start-btn" class="btn btn-primary ref-cta">🎬 Roll Camera</button>
-        <div class="add-bot-row" id="add-bot-row">
-          <!-- existing host-only add-bot button + difficulty select live here.
-               renderLobby already manages this — keep that JS, just restyle. -->
+        <!-- TWO-COLUMN BODY: theater | director -->
+        <div class="lobby-body">
+
+          <!-- THEATER (left column) -->
+          <section class="theater">
+            <div class="stage">
+              <div class="screen">
+                <div class="screen-eyebrow">Now Casting</div>
+                <div class="screen-headline">The cast is arriving</div>
+                <div class="screen-sub">Tonight's Feature</div>
+              </div>
+              <div class="light-cone"></div>
+            </div>
+
+            <div class="seats-wrap">
+              <!-- 2 rows × 4 seats. renderLobby fills these dynamically.       -->
+              <!-- The container is still #lobby-players for socket compat.    -->
+              <ul id="lobby-players" class="seats-grid" data-layout="two-rows">
+                <!-- renderLobby populates 8 <li class="seat"> children here -->
+              </ul>
+              <div class="theater-floor"></div>
+            </div>
+
+            <div class="theater-status" id="theater-status">
+              <span class="count"><b id="seated-count">0</b> of 8 seated</span>
+              <span id="seated-hint">Waiting for more cast…</span>
+            </div>
+          </section>
+
+          <!-- DIRECTOR (right column) -->
+          <aside class="director-shell dir-refined">
+            <div class="ref-header">
+              <div>
+                <div class="ref-eyebrow">Director</div>
+                <div class="ref-title">Set the scene</div>
+              </div>
+              <!-- Static step indicator from the design handoff; no JS wires this (Director is single-step today). -->
+              <div class="ref-step-num">01 / 02</div>
+            </div>
+
+            <!-- Step 1: Game Mode (PRESERVE existing #mode-selector + chip ids) -->
+            <div id="mode-selector" class="mode-selector">
+              <div class="field-label"><span class="nu">1</span> Game Mode</div>
+              <div class="mode-chips">
+                <button class="btn mode-chip active" data-mode="classic" id="mode-chip-classic">
+                  <span class="mode-chip-icon">⚔️</span>
+                  <span class="mode-chip-name">Classic</span>
+                </button>
+                <button class="btn mode-chip" data-mode="team" id="mode-chip-team">
+                  <span class="mode-chip-icon">🤝</span>
+                  <span class="mode-chip-name">Team</span>
+                </button>
+                <button class="btn mode-chip" data-mode="solo" id="mode-chip-solo">
+                  <span class="mode-chip-icon">🎯</span>
+                  <span class="mode-chip-name">Solo</span>
+                </button>
+                <button class="btn mode-chip" data-mode="speed" id="mode-chip-speed">
+                  <span class="mode-chip-icon">⚡</span>
+                  <span class="mode-chip-name">Speed</span>
+                </button>
+              </div>
+              <p class="mode-description" id="mode-description">Last player standing wins. Timer shrinks each round.</p>
+            </div>
+
+            <!-- Step 2: House Rules (PRESERVE #lobby-settings + control ids) -->
+            <div>
+              <div class="field-label"><span class="nu">2</span> House Rules</div>
+              <div class="ledger" id="lobby-settings">
+                <!-- Theme row: <label> wraps #theme-select to restore the programmatic
+                     label/control association (a11y); matches Hardcore/TV rows;
+                     socketClient change handler fires on the <select> unchanged. -->
+                <label class="ledger-row">
+                  <div>
+                    <div class="lr-name">Theme</div>
+                    <div class="lr-desc">Filter the candidate pool</div>
+                  </div>
+                  <div class="lr-right">
+                    <select id="theme-select" class="theme-select" disabled></select>
+                  </div>
+                </label>
+                <label class="ledger-row" data-toggle="hardcore">
+                  <div>
+                    <div class="lr-name">Hardcore</div>
+                    <div class="lr-desc">No actor reuse anywhere in chain</div>
+                  </div>
+                  <span class="toggle-pill"></span>
+                  <input type="checkbox" id="hardcore-toggle" class="ledger-checkbox" disabled>
+                </label>
+                <label class="ledger-row" data-toggle="tvshows">
+                  <div>
+                    <div class="lr-name">Allow TV Shows</div>
+                    <div class="lr-desc">Include television series</div>
+                  </div>
+                  <span class="toggle-pill"></span>
+                  <input type="checkbox" id="tv-shows-toggle" class="ledger-checkbox" disabled>
+                </label>
+              </div>
+            </div>
+
+            <!-- Step 3: Roll -->
+            <div>
+              <button id="start-btn" class="btn btn-primary ref-cta">🎬 Roll Camera</button>
+              <div class="add-bot-row" id="add-bot-row">
+                <!-- existing host-only add-bot button + difficulty select live here.
+                     renderLobby already manages this — keep that JS, just restyle. -->
+              </div>
+            </div>
+          </aside>
         </div>
-      </div>
-    </aside>
-  </div>
       </div>
 
       <!-- TEAM ASSIGNMENT SCREEN -->
