@@ -727,254 +727,881 @@ input:disabled {
 }
 
 /* =============================================
-   PHASE 7.5 — RED CARPET LOBBY (APPEND-ONLY)
-   WHY append-only: no rule above is edited or reordered — the six-partial
-   cascade is load-bearing. Every selector here is NEW; classic lobbies
-   render byte-identically except where renderLobby now adds these classes.
-   cardEntrance is transform/opacity ONLY (compositor-safe — the vanilla
-   perf budget) and is auto-neutralised by the existing global
-   prefers-reduced-motion block in 06-states-anim.css (no per-rule handling
-   needed; the card is fully legible with zero motion).
+   PHASE 7.5.2 — THEATER LOBBY (APPEND-ONLY)
+   Supersedes the deleted 7.5 Red Carpet + 7.5.1 Seat-Table lobby sections.
+   Lifted verbatim from design_handoff_lobby/Lobby Redesign.html <style>
+   (lobby panel / header row / main grid / THEATER / .dir-refined ONLY) +
+   the README per-seat --avatar-hue velvet block + the 3 entrance @keyframes
+   + hookup + responsive @media. Adaptations (binding, spec §3.4):
+   no new color values (prototype indigo/amber -> var(--accent-primary)/
+   var(--accent-warm); chair HSL-from-(--avatar-hue) kept verbatim);
+   --avatar-hue is JS-set per seat; reduced-motion via the EXISTING global
+   06-states-anim.css block (NO per-rule reduced-motion media query here);
+   console+slate director variants dropped. Pre-7.5 (<=line 728) untouched.
    ============================================= */
 
-/* Marquee room code — theatrical "now showing" header. CSS-only treatment
-   on the index.html wrapper; #lobby-code-display keeps its id + innerText
-   (zero socketClient regression). */
-.marquee {
-  text-align: center;
-  margin-bottom: 0.5rem;
-}
-.marquee__title {
-  font-size: 1.35rem;
-  font-weight: 700;
-}
-.marquee__title #lobby-code-display {
-  display: inline-block;
-  letter-spacing: 0.26em;
-  padding-left: 0.26em; /* balance trailing letter-spacing so it stays centred */
-  /* WHY no color here: #lobby-code-display keeps its pre-existing
-     .accent-text class (retained for zero-regression) which already
-     supplies var(--accent-primary); re-declaring it would be redundant. */
-  text-shadow: var(--shadow-glow);
+/* --mono token: JetBrains Mono (loaded via index.html Google Fonts link
+   in Phase 7.5.2 Task 0) for mono section labels, seat numbers, step
+   indicators. Scoped inside the Theater section rather than :root to
+   avoid touching the pre-7.5 token file. */
+#waiting-room {
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-/* Player Entrance Card. The row is still <li> inside #lobby-players (the
-   existing #lobby-players li base rule still applies — padding/bg/border/
-   radius/margin/font); these ADD the red-carpet layer. --card-accent is
-   the per-player hue (a data value the glue sets inline, not style debt). */
-/* Phase 7.5.1 (Seat-Table redesign): the entrance-card is now a vertical
-   SEAT TILE in a grid (was a flex ROW in a list). Reworking 7.5's OWN rule
-   only — the pre-7.5 `#lobby-players li` base (padding/border/radius/margin/
-   font) is untouched. The distinct SEAT_HUES colour now drives a 4px left
-   edge + a faint same-hue tint over the token bg (contrast preserved). */
-#lobby-players li.entrance-card {
+/* ─── lobby panel ─── */
+/* WHY id-anchored: #waiting-room.lobby-panel (1,1,0) beats the pre-7.5
+   .lobby-panel (0,1,0) max-width:380px at ALL viewport widths, and never
+   collides with the ≤767 max-width:100% (05-responsive.css) since that rule
+   also uses .lobby-panel (0,1,0) — the id anchor wins. The theater two-column
+   layout requires a much wider panel than the legacy 380px cap. */
+#waiting-room.lobby-panel {
+  width: 100%;
+  max-width: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-lg);
+  padding: 32px 36px 32px;
+}
+
+/* ── header row ── */
+.lobby-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+.head-title h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+/* WHY .code on the room code span: Task 0 added class="accent-text code"
+   to #lobby-code-display. .accent-text (pre-7.5 base) supplies the indigo
+   color; .code adds the JetBrains Mono monospace treatment. */
+.head-title h2 .code {
+  color: var(--accent-primary);
+  letter-spacing: 0.32em;
+  margin-left: 0.32em;
+  padding-left: 0.32em;
+  font-family: var(--mono);
+}
+.head-title p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+/* .public-toggle: The HTML uses <label class="setting-toggle public-toggle">.
+   The pre-7.5 .setting-toggle (0,1,0) supplies display:flex/align-items/gap/
+   cursor/user-select; .public-toggle (0,1,0) same specificity loads after and
+   adds inline-flex + the indigo-on hover. No pre-7.5 rule edited. */
+.public-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+}
+.public-toggle:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+.public-toggle .box {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base);
+}
+.public-toggle.on .box {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.public-toggle.on .box::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translate(0, -1px);
+}
+
+/* ── main grid ── */
+/* Two-column body: theater (left, wider) + director (right).
+   Single-column stacks on narrow viewports (see responsive below). */
+.lobby-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(360px, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  THEATER                                                  ║
+   ╚══════════════════════════════════════════════════════════╝ */
+/* Theater wrapper: dark radial gradient behind seats, subtle accent glow.
+   rgba(129,140,248,...) are --accent-primary at reduced opacity used in
+   gradient stops — no standalone CSS syntax exists to derive opacity from
+   a color variable, so the exact rgba() values are kept verbatim (same
+   brand color, same hue as var(--accent-primary)). */
+.theater {
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 0%, rgba(129,140,248,0.06), transparent 60%),
+    linear-gradient(180deg, #0c0c10 0%, #08080b 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 28px 32px 30px;
+  position: relative;
+  overflow: hidden;
+}
+/* Subtle warm side-light glows (amber footlights effect). Same note as
+   above: rgba(245,158,11,...) = var(--accent-warm) at low opacity in
+   gradient stops; kept verbatim (brand color, no CSS variable opacity API). */
+.theater::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 8% 60%, rgba(245,158,11,0.05), transparent 18%),
+    radial-gradient(circle at 92% 60%, rgba(245,158,11,0.05), transparent 18%);
+  pointer-events: none;
+}
+.stage {
+  position: relative;
+  margin-bottom: 34px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.35rem;
-  position: relative;            /* anchor the corner kick ✕ */
-  border-left: 4px solid hsl(var(--card-accent, 240), 60%, 60%);
-  background:
-    linear-gradient(hsla(var(--card-accent, 240), 60%, 60%, 0.10),
-                    hsla(var(--card-accent, 240), 60%, 60%, 0.10)),
-    var(--bg-elevated);
+  align-items: center;
 }
-.entrance-card__emoji {
-  font-size: 1.6rem;             /* prominent on a tile (was inline-ish 1.1) */
-  line-height: 1;
-  flex: 0 0 auto;
+/* .screen: the cinema screen element at the top of the theater.
+   WHY no token here: the existing .screen class in pre-7.5 02-hero-lobby.css
+   belongs to the GAME SCREEN system (display:none / .screen.active). This
+   .theater .screen selector scopes it safely to the theater context — it
+   does NOT collide with the game .screen (which never appears inside
+   .theater). */
+.theater .screen {
+  width: 78%;
+  aspect-ratio: 22 / 6;
+  background: linear-gradient(180deg, #1a1b22 0%, #0f1015 100%);
+  border: 1px solid rgba(129,140,248,0.18);
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 0 60px rgba(129,140,248,0.12),
+    0 0 120px rgba(129,140,248,0.08);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
 }
-.entrance-card__name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere; /* long names wrap inside the fixed-width panel */
-}
-/* Phase 7.5 follow-up (user eyeball, PR #30): in the flex row the BOT badge
-   and the kick ✕ are fixed trailing chips — they must NEVER absorb the flex
-   squeeze. Without flex-shrink:0 a longer name ("Bot Hitchcock") shrank the
-   badge ("BOT · Normal" wrapped to two lines) and the 44px kick target. The
-   .entrance-card descendant scope (0,2,0) just adds these properties over the
-   base .bot-badge / .btn-kick rules (0,1,0) — no pre-existing rule edited;
-   only the name flexes/wraps now, so every row is a uniform single line. */
-.entrance-card .bot-badge {
-  flex-shrink: 0;
-  white-space: nowrap; /* keep "BOT · Normal" as one unbroken chip */
-}
-.entrance-card .btn-kick {
-  flex-shrink: 0; /* preserve the 44px Apple-HIG tap target */
-}
-/* WHY the #lobby-players li prefix: the base #lobby-players li.entrance-card
-   border-left rule carries an id (specificity 1,1,1); this override must
-   match that id (→ 1,2,1) or the "you" identity highlight is a dead rule. */
-#lobby-players li.entrance-card.is-you {
-  border-left-color: var(--accent-primary);
-}
-.entrance-card.is-entering {
-  /* Phase 7.5 follow-up (user eyeball, PR #30): the original 0.34s /
-     translateY(8px) / scale(0.97) read as a barely-there "pop". Tuned to a
-     clearer rise-and-settle premiere — STILL opacity + transform ONLY
-     (compositor-safe; the vanilla perf budget; zero layout/reflow since
-     transform never reflows). Under the global prefers-reduced-motion block
-     animation-duration is forced to ~0 so the card simply appears at its
-     natural end-state — fully legible, zero motion. `both` holds the
-     from-state only while the (near-instant under RM) animation runs. */
-  animation: cardEntrance 0.5s cubic-bezier(0.2, 0.75, 0.25, 1) both;
-}
-@keyframes cardEntrance {
-  0%   { opacity: 0; transform: translateY(16px) scale(0.92); }
-  60%  { opacity: 1; transform: translateY(-3px) scale(1.015); }
-  100% { opacity: 1; transform: translateY(0)    scale(1); }
-}
-
-/* Director panel — presentational grouping of the EXISTING host controls.
-   No new mechanic (6c dedup). Everyone sees it; controls stay disabled for
-   non-hosts via the unchanged renderLobby JS. */
-.director-panel {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg-base);
-  padding: 1rem;
-  margin-top: 1rem;
-}
-.director-panel__header {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--accent-primary);
-  margin-bottom: 0.75rem;
-}
-/* The mode-selector inside the panel no longer needs its own top divider —
-   the panel border supplies separation. Additive override scoped to the
-   panel; the base .mode-selector rule is untouched for any other context. */
-.director-panel .mode-selector {
-  border-top: none;
-  padding-top: 0;
-  margin-top: 0;
-}
-
-/* Theme select — migrated VERBATIM from the index.html inline style
-   (bounded DS-01; same element, no competing rule → identical computed
-   style). --radius-sm == 6px (exact match to the old literal). */
-.theme-select {
-  margin-left: auto;
-  padding: 0.3rem 0.5rem;
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-}
-
-/* Public-room toggle. Phase 7.5 follow-up (user eyeball, PR #30): the
-   pre-7.5 inline was position:absolute;top:0;right:0 — correct over the OLD
-   short left-aligned <h2>, but the 7.5 marquee is a WIDE centred title so the
-   absolute toggle clipped the room code. It now FLOWS as a right-aligned row
-   above the marquee instead (.setting-toggle base supplies display:flex/gap;
-   we only right-align + space + lighten it). No pre-existing rule edited; the
-   pre-existing mobile `#waiting-room .panel-header label.setting-toggle{
-   position:static}` (05-responsive.css) now simply agrees rather than
-   overriding an absolute. */
-.waiting-public-toggle {
-  justify-content: flex-end;
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem; /* secondary to the marquee — matches its prior weight */
-}
-
-/* Roll Camera — the re-voiced Start button. WHY display:block here: the
-   pre-7.5 code forced startBtn.style.display='block'; that inline write +
-   the index.html style="display:none" were removed (bounded DS-01) so this
-   additive rule restores the EXACT block layout. .btn-primary still
-   supplies all colour/sizing; this only adds the cinematic variant cue. */
-.roll-camera {
-  display: block;
-}
-/* WHY the #start-btn prefix: .btn-primary:hover (0,2,0) would otherwise
-   eclipse these variant cues (0,1,0); #start-btn.roll-camera--* (1,1,0)
-   wins so the cinematic ready/waiting shadow is correct even on hover. */
-#start-btn.roll-camera--ready {
-  box-shadow: var(--shadow-glow-strong);
-}
-#start-btn.roll-camera--waiting-host,
-#start-btn.roll-camera--waiting-cast {
-  box-shadow: none;
-}
-
-/* =============================================
-   PHASE 7.5.1 — SEAT-TABLE LAYOUT (APPEND-ONLY)
-   WHY append-only here too: no pre-7.5 rule (≤ line 728, the .bot-thinking
-   boundary) is edited/reordered/removed. This adds the Director-sidebar +
-   responsive seat-tile-grid layout around the existing #waiting-room
-   structure. The animation (cardEntrance) + the global prefers-reduced-
-   motion neutralisation in 06-states-anim.css are reused UNCHANGED
-   (compositor-safe; no new keyframes, no new timers).
-   Cascade audit (binding 7.5 C1/DS-01 lesson — all six partials checked):
-   .lobby-panel base = 02-hero-lobby.css:230 (max-width:380px); responsive
-   overrides are .lobby-panel{max-width:420px}@max-1023 (05-responsive:31)
-   and .lobby-panel{max-width:100%}@max-767 (05-responsive:86); #lobby-screen
-   {overflow-y:auto}@max-767 (05-responsive:94) already lets the stacked
-   mobile lobby scroll (Add Bot reachable). The 02-hero @max-900/@max-480
-   blocks are hero-only (no lobby selector). So: the desktop widen below is
-   id-anchored (#waiting-room.lobby-panel = 1,1,0) inside @min-768 — it beats
-   every .lobby-panel (0,1,0) rule for ≥768 and NEVER collides with the ≤767
-   max-width:100% (different media). 768px is the exact complement of the
-   codebase's 767px mobile boundary. 15rem(240px) sidebar matches the
-   codebase's recurring 240px side-panel metric. ============================ */
-
-/* Default (all widths, mobile-first): the lobby is a vertical stack — the
-   seat-tile grid, then the Director panel below it. The grid is responsive
-   via auto-fill (≈1–2 columns on a phone-width panel). */
-.lobby-stage { display: block; }
-.lobby-stage #lobby-players {
-  /* .lobby-stage #lobby-players (0,1,1) > base #lobby-players (0,1,0) — the
-     pre-7.5 base rule (list-style:none) is NOT edited; this only adds the
-     grid + overrides its margin-bottom. */
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0.6rem;
-  margin-bottom: 1rem;
-}
-/* Kick ✕ becomes a corner control on the tile. The pre-7.5 .btn-kick base
-   (06-states-anim.css) is NOT edited; this .entrance-card .btn-kick (0,2,0)
-   just adds positioning over it. NOTE: flex-shrink:0 is deliberately
-   RE-STATED here — a separate 7.5-own `.entrance-card .btn-kick{flex-shrink:0}`
-   already exists above; the append-only discipline (no pre-7.5/earlier rule
-   edited or reordered) precludes consolidating them. The repetition is
-   intentional and harmless (same selector+specificity, additive cascade),
-   NOT an oversight. */
-.entrance-card .btn-kick {
-  flex-shrink: 0;
+.theater .screen::before {
+  content: "";
   position: absolute;
-  top: 0.4rem;
-  right: 0.4rem;
+  inset: 0;
+  background:
+    repeating-linear-gradient(180deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, rgba(129,140,248,0.08), transparent 70%);
+  pointer-events: none;
 }
-/* The BOT badge sits UNDER the name on a tile (column layout). The pre-7.5
-   base .bot-badge{margin-left:8px} (untouched) was spacing for the OLD inline
-   ROW; in the column tile it mis-indents the badge 8px from the emoji/name —
-   zero it via this additive scoped override (.entrance-card .bot-badge =
-   0,2,0 beats the base 0,1,0; no pre-7.5 rule edited). #31's non-shrink/
-   nowrap intent is preserved by the base .bot-badge + the 7.5 rule. */
-.entrance-card .bot-badge {
-  align-self: flex-start;
-  margin-left: 0;
+.screen-eyebrow {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+  opacity: 0.9;
+  z-index: 1;
+}
+.screen-headline {
+  font-size: clamp(1.2rem, 2.4vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-main);
+  /* text-shadow uses rgba(129,140,248,...) = --accent-primary at opacity —
+     same brand color, kept verbatim (no CSS variable opacity syntax). */
+  text-shadow: 0 0 22px rgba(129,140,248,0.35);
+  z-index: 1;
+  text-align: center;
+  line-height: 1.1;
+}
+.screen-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  z-index: 1;
+}
+.light-cone {
+  position: absolute;
+  left: 50%;
+  top: calc(100% - 8px);
+  width: 90%;
+  height: 280px;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at top, rgba(129,140,248,0.16), transparent 65%);
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(2px);
 }
 
-/* Desktop ≥768px: Director becomes a LEFT SIDEBAR, the players list the
-   grid to its right, and the lobby panel widens to fit both. */
-@media (min-width: 768px) {
-  #waiting-room.lobby-panel { max-width: 920px; }
-  .lobby-stage {
-    display: flex;
-    gap: 1.25rem;
-    align-items: flex-start;
+/* ── seats ── */
+/* .seats-wrap: positions the flat seats-grid + theater-floor relative
+   to the stage light-cone behind it. */
+.seats-wrap {
+  position: relative;
+  z-index: 1;
+}
+/* .seats-grid: the flat <ul id="lobby-players" class="seats-grid"> that
+   Task 1 renders. The prototype used .seats-row divs (two rows of 4), but
+   the Task 1 JS renders all 8 <li class="seat"> directly into the flat UL.
+   This rule provides the equivalent 4-column grid layout — 2 rows of 4
+   emerge from a 4-column grid wrapping 8 items. The base #lobby-players
+   rule (list-style:none; margin-bottom:2rem) is NOT edited; this
+   #lobby-players.seats-grid (1,1,0) override adds the grid and resets the
+   legacy margin. */
+#lobby-players.seats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 22px;
+  margin-bottom: 0;
+  padding: 0;
+}
+.seat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* nameplate area (top) + clear gap + seat with avatar emerging from it */
+  padding-top: 58px;
+  transition: filter .35s;
+}
+
+/* nameplate (above seat) */
+/* WHY opacity:1 in base state: the entrance animation only runs on
+   .seat.occupied.entering. Non-entering seats (existing players on
+   re-render) must be immediately visible. If animation is missed/skipped
+   for any reason the player is still legible. This is the README "Critical"
+   baseline guard. */
+.nameplate {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 11px;
+  color: var(--text-main);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  /* opacity:1 = baseline legibility guard (README §"Entrance Animation" Critical) */
+  opacity: 1;
+  pointer-events: none;
+  z-index: 6;
+}
+.nameplate::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 7px;
+  height: 7px;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  transform: translateX(-50%) rotate(45deg);
+}
+.nameplate .crown {
+  color: var(--accent-warm);
+  font-size: 11px;
+}
+.nameplate .you-pill {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  /* border and background use rgba(129,140,248,...) — same brand color as
+     var(--accent-primary) at reduced opacity; kept verbatim. */
+  border: 1px solid rgba(129,140,248,0.45);
+  background: rgba(129,140,248,0.12);
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+}
+.nameplate .bot-pill {
+  font-size: 0.56rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* seat label when empty */
+.seat-num {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 600 0.6rem/1 var(--mono);
+  color: var(--text-muted);
+  opacity: 0.5;
+  letter-spacing: 0.16em;
+  pointer-events: none;
+}
+.seat.occupied .seat-num {
+  display: none;
+}
+
+/* SVG seat container */
+.seat-svg-wrap {
+  width: 100%;
+  max-width: 150px;
+  position: relative;
+  filter: drop-shadow(0 8px 14px rgba(0,0,0,0.55));
+}
+.seat-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* state colors driven by CSS vars used inside SVG fills */
+/* Per-seat CSS variables (README §"Per-seat CSS variables" — verbatim).
+   --avatar-hue is set inline per <li> by renderLobby (Task 1) from the
+   collision-free SEAT_HUES[slot] palette. Default values apply to empty
+   seats (unsaturated dark neutral). */
+.seat {
+  --velvet-light: #3a3441;
+  --velvet-mid:   #272230;
+  --velvet-dark:  #16131c;
+  --piping:       rgba(255,255,255,0.10);
+  --stitch:       rgba(0,0,0,0.45);
+  --arm-light:    #2d2a36;
+  --arm-mid:      #1d1b25;
+  --arm-cap:      #3b3744;
+  --cushion-top:  #2a2632;
+  --cushion-bot:  #15131b;
+}
+/* Occupied seat: velvet colors derived from --avatar-hue (the SEAT_HUES
+   slot value set by JS). All hsl(var(--avatar-hue,...)) formulas are
+   verbatim from the README — they are DERIVED colors, not new brand values
+   (spec §3.4 adaptation 1 explicitly keeps these verbatim). */
+.seat.occupied {
+  --velvet-light: hsl(var(--avatar-hue, 240), 32%, 32%);
+  --velvet-mid:   hsl(var(--avatar-hue, 240), 32%, 22%);
+  --velvet-dark:  hsl(var(--avatar-hue, 240), 30%, 12%);
+  --piping:       hsla(var(--avatar-hue, 240), 60%, 70%, 0.18);
+  --arm-light:    hsl(var(--avatar-hue, 240), 18%, 26%);
+  --arm-mid:      hsl(var(--avatar-hue, 240), 18%, 16%);
+  --arm-cap:      hsl(var(--avatar-hue, 240), 18%, 32%);
+  --cushion-top:  hsl(var(--avatar-hue, 240), 25%, 24%);
+  --cushion-bot:  hsl(var(--avatar-hue, 240), 25%, 12%);
+}
+/* Empty seat: slightly desaturated + darkened to distinguish from occupied */
+.seat:not(.occupied) {
+  filter: saturate(0.65) brightness(0.78);
+}
+/* .is-you: override with a fixed indigo for the local player's seat
+   (README §"Per-seat CSS variables" verbatim — these are not new brand
+   colors; they match the existing var(--accent-primary) hue family). */
+.seat.is-you {
+  --velvet-light: #3b3a6a;
+  --velvet-mid:   #272649;
+  --velvet-dark:  #161527;
+  --piping:       rgba(129,140,248,0.42);
+  --arm-light:    #2c2c4c;
+  --arm-mid:      #1c1c34;
+  --arm-cap:      #3a3a5e;
+  --cushion-top:  #262549;
+  --cushion-bot:  #13122a;
+}
+/* Local player's seat gets an extra glow — rgba(129,140,248,...) is
+   var(--accent-primary) at opacity, kept verbatim in the drop-shadow. */
+.seat.is-you .seat-svg-wrap {
+  filter: drop-shadow(0 8px 14px rgba(0,0,0,0.55)) drop-shadow(0 0 18px rgba(129,140,248,0.45));
+}
+
+/* the "person" — head + shoulders emerging from the top of the seat back.
+   positioned so the avatar emoji (the head) is centered over the seat back's
+   top edge and clearly part of the chair, with the nameplate floating above.
+   WHY opacity:1 in base state: same legibility guard as .nameplate above —
+   entrance animation only runs on .entering seats. */
+.seat-person {
+  position: absolute;
+  left: 50%;
+  top: 44px;
+  transform: translateX(-50%) translateY(0) scale(1);
+  width: 64px;
+  z-index: 3;
+  /* opacity:1 = baseline legibility guard (README §"Entrance Animation" Critical) */
+  opacity: 1;
+  pointer-events: none;
+}
+.seat-person svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+/* avatar emoji bubble — colored radial gradient from --avatar-hue */
+.seat-person .avatar-emoji {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  line-height: 1;
+  /* gradient uses hsla(var(--avatar-hue),...) — derived from the per-seat
+     hue, verbatim per README (not new brand colors). */
+  background: radial-gradient(circle at 35% 30%,
+    hsla(var(--avatar-hue, 240), 70%, 60%, 0.95),
+    hsla(var(--avatar-hue, 240), 50%, 28%, 0.95));
+  border: 2px solid rgba(255,255,255,0.18);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.22);
+  z-index: 2;
+}
+
+/* kick button */
+.seat-kick {
+  appearance: none;
+  cursor: pointer;
+  position: absolute;
+  top: 4px;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  /* background and color use var(--status-danger) (#ef4444) — existing token */
+  background: rgba(239,68,68,0.15);
+  color: var(--status-danger);
+  border: 1px solid rgba(239,68,68,0.35);
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .15s, background .15s, transform .15s;
+  z-index: 5;
+}
+.seat.occupied:not(.is-you):hover .seat-kick {
+  opacity: 1;
+}
+.seat-kick:hover {
+  background: rgba(239,68,68,0.32);
+  transform: scale(1.08);
+}
+
+/* spotlight pulse on arrival */
+.seat-spotlight {
+  position: absolute;
+  inset: -15% -15% 0 -15%;
+  /* spotlight color from --avatar-hue — derived, verbatim */
+  background: radial-gradient(ellipse 60% 35% at 50% 0%, hsla(var(--avatar-hue, 240),65%,60%,0.22), transparent 65%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── ENTRANCE ANIMATIONS — use `both` fill so the from-state is applied
+   during the delay window, and the to-state is held after the animation.
+   Run the animation only on seats that have just gained the .occupied
+   class via the .entering modifier; baseline (.occupied) renders the
+   final, visible state immediately so a missed animation never leaves
+   a player invisible.
+   NOTE: NO per-rule reduced-motion guard here — the
+   existing global block in 06-states-anim.css already neutralises all
+   animation-duration to ~0 when the user requests reduced motion,
+   making this guard double-handling. The .nameplate/.seat-person opacity:1
+   baseline above ensures legibility under zero-motion. ── */
+.seat.occupied.entering .nameplate {
+  animation: nameplate-drop .55s cubic-bezier(0.2, 0.85, 0.3, 1.05) .2s both;
+}
+.seat.occupied.entering .seat-person {
+  animation: person-sit .65s cubic-bezier(0.2, 0.8, 0.3, 1) .05s both;
+}
+.seat.occupied.entering .seat-spotlight {
+  animation: spotlight-pulse 1.1s ease-out 0s forwards;
+}
+/* Verbatim from README §"Entrance Animation" keyframes */
+@keyframes nameplate-drop {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-22px) scale(0.94); }
+  60%  { opacity: 1; transform: translateX(-50%) translateY(0)     scale(1.02); }
+  100% { opacity: 1; transform: translateX(-50%) translateY(-4px)  scale(1); }
+}
+@keyframes person-sit {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-32px) scale(0.7); }
+  55%  { opacity: 1; transform: translateX(-50%) translateY(2px)   scale(1.04); }
+  80%  { opacity: 1; transform: translateX(-50%) translateY(-1px)  scale(0.99); }
+  100% { opacity: 1; transform: translateX(-50%) translateY(0)     scale(1); }
+}
+@keyframes spotlight-pulse {
+  0%   { opacity: 0; }
+  35%  { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+/* theater floor strip */
+.theater-floor {
+  margin-top: 8px;
+  height: 14px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), transparent 90%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 28px);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  opacity: .55;
+}
+.theater-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+.theater-status .count b {
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+/* ╔══════════════════════════════════════════════════════════╗
+   ║  DIRECTOR PANELS — .dir-refined ONLY                      ║
+   ║  (console + slate exploration variants DROPPED per        ║
+   ║   spec §3.4 adaptation — reference prototype only)        ║
+   ╚══════════════════════════════════════════════════════════╝ */
+
+/* shared minimal shell for the director aside */
+.director-shell {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── A. REFINED ── (polished current style — the ONLY shipped variant) */
+.dir-refined {
+  background: linear-gradient(180deg, var(--bg-base), #0a0a0d);
+  border: 1px solid var(--border-subtle);
+  padding: 22px 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.dir-refined .ref-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.dir-refined .ref-eyebrow {
+  font: 700 0.62rem/1 var(--mono);
+  letter-spacing: 0.36em;
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dir-refined .ref-eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  background: var(--accent-primary);
+  opacity: 0.5;
+}
+.dir-refined .ref-title {
+  font: 700 1.15rem/1 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: -0.01em;
+  margin-top: 6px;
+}
+.dir-refined .ref-step-num {
+  font: 600 0.68rem/1 var(--mono);
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+.dir-refined .field-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 0.66rem/1 var(--mono);
+  letter-spacing: 0.22em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.dir-refined .field-label .nu {
+  color: var(--accent-primary);
+  border: 1px solid var(--accent-primary);
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  letter-spacing: 0;
+}
+.dir-refined .mode-chips {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.dir-refined .mode-chip {
+  appearance: none;
+  cursor: pointer;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 6px 10px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: all .2s;
+  font-family: inherit;
+}
+.dir-refined .mode-chip:hover {
+  color: var(--text-main);
+  border-color: var(--border-focus);
+  background: var(--bg-elevated);
+}
+.dir-refined .mode-chip.active {
+  border-color: var(--accent-primary);
+  background: var(--accent-glow);
+  color: var(--accent-primary);
+  box-shadow: var(--shadow-glow);
+}
+.dir-refined .mode-chip .ico {
+  font-size: 1.1rem;
+}
+.dir-refined .mode-chip .nm {
+  font: 700 0.66rem/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.dir-refined .mode-desc {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+  line-height: 1.4;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent-glow);
+}
+.dir-refined .ledger {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.015);
+  overflow: hidden;
+}
+.dir-refined .ledger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background .15s;
+}
+.dir-refined .ledger-row:last-child {
+  border-bottom: none;
+}
+.dir-refined .ledger-row:hover {
+  background: rgba(255,255,255,0.03);
+}
+.dir-refined .ledger-row .lr-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.dir-refined .ledger-row .lr-desc {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.dir-refined .ledger-row .lr-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+/* The hidden <input type="checkbox"> inside each .ledger-row label:
+   visually hidden but receives real clicks so existing change handlers fire. */
+.dir-refined .ledger-checkbox {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.dir-refined .ledger-row select {
+  appearance: none;
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 24px 6px 10px;
+  font: 500 0.78rem/1 'Plus Jakarta Sans', sans-serif;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) center, calc(100% - 7px) center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+.dir-refined .toggle-pill {
+  width: 34px;
+  height: 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  position: relative;
+  transition: all .2s;
+}
+.dir-refined .toggle-pill::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all .2s;
+}
+.dir-refined .ledger-row.on .toggle-pill {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.dir-refined .ledger-row.on .toggle-pill::after {
+  left: 18px;
+  background: #fff;
+}
+/* .ref-cta: the Roll Camera / Start button. .btn-primary (pre-7.5 base)
+   supplies color/gradient; .ref-cta adds theater-panel sizing.
+   WHY the box-shadow uses rgba(129,140,248,...): same brand color as
+   var(--accent-primary) at opacity — verbatim from prototype. */
+.dir-refined .ref-cta {
+  appearance: none;
+  cursor: pointer;
+  width: 100%;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, var(--accent-primary-hover), var(--accent-primary));
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  font: 700 0.92rem/1 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: 0.02em;
+  transition: all .2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-shadow: 0 6px 22px rgba(129,140,248,0.22);
+}
+.dir-refined .ref-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 28px rgba(129,140,248,0.35);
+}
+.dir-refined .ref-cta .ksbd {
+  font: 600 0.68rem/1 var(--mono);
+  padding: 4px 6px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 4px;
+  margin-left: 6px;
+}
+.dir-refined .add-bot-row {
+  display: flex;
+  gap: 8px;
+}
+.dir-refined .add-bot {
+  appearance: none;
+  cursor: pointer;
+  flex: 1;
+  padding: 11px 14px;
+  background: transparent;
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font: 600 0.83rem/1 'Plus Jakarta Sans', sans-serif;
+  transition: all .2s;
+}
+.dir-refined .add-bot:hover {
+  border-color: var(--border-focus);
+  background: rgba(255,255,255,0.04);
+}
+.dir-refined .bot-diff {
+  appearance: none;
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0 26px 0 10px;
+  font: 500 0.78rem/1 'Plus Jakarta Sans', sans-serif;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) center, calc(100% - 7px) center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* responsive */
+/* ≥ 1000px: two-column body (theater left + director right — default above). */
+/* < 1000px: single column; seat gap tightens; screen widens. */
+@media (max-width: 1000px) {
+  .lobby-body {
+    grid-template-columns: 1fr;
   }
-  .lobby-stage .director-panel {
-    flex: 0 0 15rem;             /* fixed left sidebar (240px) */
-    margin-top: 0;               /* override 7.5's own .director-panel{margin-top:1rem} in row context */
+  #lobby-players.seats-grid {
+    gap: 14px;
   }
-  .lobby-stage .players-list-container {
-    flex: 1 1 auto;
-    min-width: 0;                /* allow the grid to shrink within the flex row */
+  .theater .screen {
+    width: 92%;
   }
-  .lobby-stage #lobby-players { margin-bottom: 0; }
+}
+/* < 640px: seats become a 2-column grid (2×4); panel + theater padding tighten. */
+@media (max-width: 640px) {
+  #lobby-players.seats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  #waiting-room.lobby-panel {
+    padding: 18px;
+  }
+  .theater {
+    padding: 18px;
+  }
 }
