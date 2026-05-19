@@ -10,6 +10,19 @@ const logger = require('pino')();
 // Stored in-process (not Redis) because setTimeout handles are not serializable.
 const activeTurnTimeouts = new Map();
 
+// Post-game viewing window: how long a finished lobby stays 'finished'
+// before scheduleGameReset flips it back to 'waiting' (which makes every
+// client re-render the lobby and replaces the game-over banner). WHY 25s
+// (was a bare 7000 literal — user feedback): the client Chain Premiere
+// Recap storyboard runs up to ~12.55s, so a 7s reset pre-empted it AND
+// left no time to open/look at the share card before the Share button
+// (on the game-over banner) vanished. 25s comfortably covers the full
+// recap PLUS opening + reading the share card, while still returning the
+// room to the lobby on its own. A single-file named const (the
+// RECONNECT_GRACE_MS pattern — server/constants.js is reserved for values
+// duplicated across 2+ files); exported only so it is unit-testable.
+const GAME_RESET_DELAY_MS = 25000;
+
 // ---------------------------------------------------------------------------
 // HELPERS
 // ---------------------------------------------------------------------------
@@ -451,7 +464,7 @@ function scheduleGameReset(io, pubClient, id) {
     } catch (err) {
       logger.error(err, 'Game reset error');
     }
-  }, 7000).unref();
+  }, GAME_RESET_DELAY_MS).unref();
 }
 
 function resetTimer(state) {
@@ -887,4 +900,8 @@ module.exports = {
   // to flag "module-internal helper" while the public name is the
   // unprefixed alias for cross-module callers.
   settlePredictions: _settlePredictions,
+  // Exported solely so game-reset-delay.test.js can pin the post-game
+  // viewing window against the recap budget (scheduleGameReset itself is
+  // an internal .unref()'d timer and intentionally not exported).
+  GAME_RESET_DELAY_MS,
 };
