@@ -5,6 +5,13 @@
 
 // Import DOM refs — shareCanvas and shareModal are live bindings from ui-dom.js.
 import { shareCanvas, shareModal } from './ui-dom.js';
+// Phase 7.6: selectChainEntries/scoreChainEntry RELOCATED to the pure
+// zero-import chain-recap.js (its new home — keeps that engine pure & DRY).
+// Imported back for generateShareCard's internal use AND re-exported under
+// the SAME names so this module's public surface is byte-stable for every
+// existing importer (spec §3.2 / §5 ratchet).
+import { selectChainEntries, scoreChainEntry } from './chain-recap.js';
+export { selectChainEntries, scoreChainEntry };
 
 export function generateShareCard(state) {
     const W = 600, H = 720;
@@ -178,56 +185,6 @@ export function roundRect(ctx, x, y, w, h, r) {
     ctx.lineTo(x, y + r);
     ctx.arcTo(x, y, x + r, y, r);
     ctx.closePath();
-}
-
-export function scoreChainEntry(item, index, chain) {
-    if (index === 0) return -1;
-    let score = 0;
-    const prev = chain[index - 1];
-
-    if (prev.movie.mediaType && item.movie.mediaType &&
-        prev.movie.mediaType !== item.movie.mediaType) {
-        score += 3;
-    }
-
-    const actor = (item.matchedActors || [])[0];
-    if (actor) {
-        // H4: cast entries are now {id, name} objects (with legacy bare-string
-        // entries possible during the transition). Compare on the name field;
-        // matchedActors stays as bare strings for client-display compatibility.
-        const pos = (item.movie.cast || []).findIndex(c => {
-            const cName = typeof c === 'string' ? c : (c && c.name) || '';
-            return cName.toLowerCase() === actor.toLowerCase();
-        });
-        if (pos > 4) score += 2;
-    }
-
-    const prevYear = parseInt(prev.movie.year);
-    const currYear = parseInt(item.movie.year);
-    if (!isNaN(prevYear) && !isNaN(currYear)) {
-        score += Math.floor(Math.abs(currYear - prevYear) / 10);
-    }
-
-    return score;
-}
-
-export function selectChainEntries(chain) {
-    const MAX = 7;
-    if (chain.length <= MAX) return { entries: chain.map((c, i) => ({ ...c, _idx: i })), skipped: 0 };
-
-    const scored = chain.map((item, i) => ({ ...item, _idx: i, _score: scoreChainEntry(item, i, chain) }));
-
-    const first = scored[0];
-    const last = scored[scored.length - 1];
-
-    const middle = scored.slice(1, -1)
-        .sort((a, b) => b._score - a._score)
-        .slice(0, 5)
-        .sort((a, b) => a._idx - b._idx);
-
-    const entries = [first, ...middle, last];
-    const skipped = chain.length - entries.length;
-    return { entries, skipped };
 }
 
 export function openShareModal(gameState) {
