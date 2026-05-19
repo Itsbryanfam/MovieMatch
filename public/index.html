@@ -563,6 +563,19 @@
     </div>
   </div>
 
+  <!-- PHASE 7.6 — CHAIN PREMIERE RECAP OVERLAY (additive; mirrors #share-modal .modal-overlay) -->
+  <div id="recap-overlay" class="modal-overlay recap-overlay hidden" role="dialog" aria-modal="true" aria-label="Chain premiere recap">
+    <div class="modal-card recap-card">
+      <!-- glyph-only close needs an accessible name (same convention as #close-share-modal) -->
+      <button class="btn modal-close" id="recap-close" aria-label="Close recap" title="Close">✕</button>
+      <div id="recap-stage" class="recap-stage" aria-live="polite"></div>
+      <div class="recap-actions">
+        <button id="recap-skip" class="btn btn-secondary">⏭ Skip</button>
+        <button id="recap-replay" class="btn btn-primary">↻ Replay</button>
+      </div>
+    </div>
+  </div>
+
   <!-- HOW TO PLAY MODAL -->
   <div id="how-to-play-modal" class="modal-overlay hidden">
     <div class="modal-card">

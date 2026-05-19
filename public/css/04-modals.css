@@ -608,3 +608,64 @@
   transform: translateX(-50%) translateY(0);
 }
 
+/* =============================================================
+   PHASE 7.6 — CHAIN PREMIERE RECAP OVERLAY (append-only)
+   WHY: structural rules only, mirroring .share-modal-card so the
+   recap reuses the existing .modal-overlay/.modal-card system. NO
+   pre-existing rule edited; NO new colour value (existing custom
+   props / palette only). Entrance animation lives in
+   06-states-anim.css so the existing global reduced-motion handling
+   neutralizes it; recap-player.js also JS-short-circuits.
+   Token substitutions vs. plan spec:
+     --text-secondary → --text-muted  (--text-secondary does not exist)
+     --accent         → --accent-primary  (bare --accent does not exist)
+   ============================================================= */
+.recap-card {
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.recap-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.recap-beat {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.recap-intro, .recap-skipped, .recap-bridge {
+  justify-content: center;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.recap-finale {
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--bg-surface);
+}
+.recap-finale-title { font-size: 1.4rem; font-weight: 700; color: var(--accent-primary); text-align: center; }
+.recap-finale-sub { color: var(--text-muted); }
+.recap-poster {
+  width: 46px;
+  height: 69px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+.recap-poster.placeholder { background: var(--bg-base); }
+.recap-meta { display: flex; flex-direction: column; min-width: 0; }
+.recap-who { font-weight: 600; }
+.recap-title { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recap-actions { display: flex; gap: 0.75rem; }
+.recap-actions .btn-primary, .recap-actions .btn-secondary { flex: 1; }
+
