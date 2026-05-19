@@ -1,84 +1,91 @@
 /**
  * @jest-environment jsdom
  */
-
-// Coverage for renderLobby — host-only kick button visibility and click wiring.
-// The kick button is the host's only way to remove a stuck player from the
-// waiting room; mis-rendering this would either lock players out or expose
-// the action to non-hosts.
-
+// Phase 7.5.2 — renderLobby theater seats. The kick control is the host's
+// only way to remove a stuck player; mis-rendering it would lock players out
+// or expose it to non-hosts. Pins the §4 behavioural-equivalence kick
+// contract on the NEW .seat-kick element (was .btn-kick pre-7.5.2).
 const { loadIndexHtml, makeWaitingState, makePlayer } = require('./fixtures');
-
-// state.js exposes getSocket(); we replace it so we can assert what the
-// kick button emits without spinning up real Socket.io.
 const mockEmit = jest.fn();
 jest.mock('../public/js/state.js', () => ({
   getSocket: () => ({ emit: mockEmit }),
   getCurrentLobbyId: () => 'TEST01',
 }));
-
 import { initUIElements, renderLobby } from '../public/js/ui.js';
 
-describe('renderLobby — player list and kick button', () => {
-  beforeEach(() => {
-    loadIndexHtml();
-    initUIElements();
-    mockEmit.mockClear();
+describe('renderLobby — theater seats + kick wiring', () => {
+  beforeEach(() => { loadIndexHtml(); initUIElements(); mockEmit.mockClear(); });
+
+  test('always renders exactly 8 seats; first N occupied carry name + host crown', () => {
+    renderLobby(makeWaitingState(), 'host_id'); // 2 players
+    const seats = document.querySelectorAll('#lobby-players li.seat');
+    expect(seats.length).toBe(8);
+    const occ = document.querySelectorAll('#lobby-players li.seat.occupied');
+    expect(occ.length).toBe(2);
+    expect(occ[0].textContent).toContain('Host');
+    expect(occ[0].textContent).toContain('♛');
+    expect(occ[1].textContent).toContain('Guest');
+    expect(document.querySelectorAll('#lobby-players li.seat:not(.occupied)').length).toBe(6);
   });
 
-  test('renders all player names with host crown', () => {
-    const state = makeWaitingState();
-    renderLobby(state, 'host_id');
-
-    const playersList = document.getElementById('lobby-players');
-    const items = playersList.querySelectorAll('li');
-    expect(items.length).toBe(2);
-    expect(items[0].textContent).toContain('Host');
-    expect(items[0].textContent).toContain('👑');
-    expect(items[1].textContent).toContain('Guest');
+  test('host sees one .seat-kick (on the guest, not on self)', () => {
+    renderLobby(makeWaitingState(), 'host_id');
+    expect(document.querySelectorAll('#lobby-players .seat-kick').length).toBe(1);
+    const occ = document.querySelectorAll('#lobby-players li.seat.occupied');
+    expect(occ[0].querySelector('.seat-kick')).toBeNull();   // host's own seat
+    expect(occ[1].querySelector('.seat-kick')).not.toBeNull();
   });
 
-  test('host sees kick button next to non-host players', () => {
-    const state = makeWaitingState();
-    renderLobby(state, 'host_id'); // viewing AS the host
-
-    const playersList = document.getElementById('lobby-players');
-    const kickBtns = playersList.querySelectorAll('.btn-kick');
-    expect(kickBtns.length).toBe(1); // only the guest, not the host themselves
+  test('non-host sees zero .seat-kick', () => {
+    renderLobby(makeWaitingState(), 'guest_id');
+    expect(document.querySelectorAll('#lobby-players .seat-kick').length).toBe(0);
   });
 
-  test('host does NOT see a kick button next to themselves', () => {
-    const state = makeWaitingState();
-    renderLobby(state, 'host_id');
-
-    const playersList = document.getElementById('lobby-players');
-    const items = playersList.querySelectorAll('li');
-    // First li = host (the viewer); should NOT contain a kick button
-    expect(items[0].querySelector('.btn-kick')).toBeNull();
-    // Second li = guest; SHOULD contain a kick button
-    expect(items[1].querySelector('.btn-kick')).not.toBeNull();
-  });
-
-  test('non-host player sees no kick buttons at all', () => {
-    const state = makeWaitingState();
-    renderLobby(state, 'guest_id'); // viewing AS the guest
-
-    const kickBtns = document.getElementById('lobby-players').querySelectorAll('.btn-kick');
-    expect(kickBtns.length).toBe(0);
-  });
-
-  test('clicking kick button emits kickPlayer with the target ID', () => {
-    const state = makeWaitingState();
-    renderLobby(state, 'host_id');
-
-    const kickBtn = document
-      .getElementById('lobby-players')
-      .querySelector('.btn-kick');
-    kickBtn.click();
-
+  test('clicking .seat-kick emits kickPlayer with the byte-identical payload', () => {
+    renderLobby(makeWaitingState(), 'host_id');
+    document.querySelector('#lobby-players .seat-kick').click();
     expect(mockEmit).toHaveBeenCalledWith('kickPlayer', {
-      lobbyId: 'TEST01',
-      targetId: 'guest_id',
+      lobbyId: 'TEST01', targetId: 'guest_id',
     });
+  });
+
+  test('bot kick emits removeBot with the byte-identical payload', () => {
+    const state = makeWaitingState({ players: [
+      makePlayer({ id: 'host_id', name: 'Host', isHost: true }),
+      makePlayer({ id: 'bot_id', name: 'Bot Bogart', isBot: true }),
+    ]});
+    renderLobby(state, 'host_id');
+    document.querySelector('#lobby-players li.seat.occupied:nth-child(2) .seat-kick').click();
+    expect(mockEmit).toHaveBeenCalledWith('removeBot', {
+      lobbyId: 'TEST01', targetId: 'bot_id',
+    });
+  });
+
+  test('#seated-count / #seated-hint reflect roster size', () => {
+    renderLobby(makeWaitingState(), 'host_id'); // 2 players
+    expect(document.getElementById('seated-count').textContent).toBe('2');
+    expect(document.getElementById('seated-hint').textContent)
+      .toBe('Ready when the Director rolls camera.');
+    renderLobby(makeWaitingState({ players: [ makePlayer({ id: 'host_id', name: 'Host', isHost: true }) ] }), 'host_id');
+    expect(document.getElementById('seated-count').textContent).toBe('1');
+    expect(document.getElementById('seated-hint').textContent).toBe('Waiting for more cast…');
+  });
+
+  test('ledger rows mirror hardcore/tv state onto .on (drives the visible toggle-pill)', () => {
+    // WHY: the .toggle-pill slide/tint is CSS-driven by .ledger-row.on; the
+    // real .ledger-checkbox is visually hidden (position:absolute;opacity:0;
+    // width:0;height:0;pointer-events:none). renderLobby must mirror
+    // checkbox→.on or the pill is permanently stuck OFF (host sees no
+    // confirmation; guests can't see the room rules). Pins the §4
+    // visible-state wiring so it can't silently regress.
+    const onState = makeWaitingState({ hardcoreMode: true, allowTvShows: true });
+    renderLobby(onState, 'host_id');
+    expect(document.getElementById('hardcore-toggle').closest('.ledger-row').classList.contains('on')).toBe(true);
+    expect(document.getElementById('tv-shows-toggle').closest('.ledger-row').classList.contains('on')).toBe(true);
+
+    const offState = makeWaitingState({ hardcoreMode: false, allowTvShows: false });
+    renderLobby(offState, 'host_id');
+    expect(document.getElementById('hardcore-toggle').closest('.ledger-row').classList.contains('on')).toBe(false);
+    expect(document.getElementById('tv-shows-toggle').closest('.ledger-row').classList.contains('on')).toBe(false);
   });
 });

@@ -45,6 +45,85 @@ let _seenPlayerIds = new Set();
 // would suppress their entrance animation in the new room.
 let _lastLobbyId = null;
 
+// Phase 7.5.2 (Theater Lobby): the theater always has exactly 8 chairs —
+// one per SEAT_HUES slot (red-carpet.js), so a full lobby fills every
+// collision-free hue. Module-scope constant (no per-render dependency).
+const SEATS = 8;
+
+// Phase 7.5.2 (Theater Lobby): the velvet chair, verbatim from the design
+// handoff. Identical markup for every seat — recolored per-seat purely via
+// the inherited `--avatar-hue` custom property (see .seat.occupied CSS). It
+// MUST carry its OWN <defs>: the gradient <stop stop-color:var(--velvet-*)>
+// resolves the custom property against the gradient element's own computed
+// style, so a single shared <defs> would render every chair identically.
+// Constant string, zero user data — safe to inject via insertAdjacentHTML.
+const SEAT_CHAIR_SVG = `<svg class="seat-svg" viewBox="0 0 150 120" aria-hidden="true">
+  <defs>
+    <linearGradient id="seat-backG" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%"  stop-color="var(--velvet-light)"/>
+      <stop offset="55%" stop-color="var(--velvet-mid)"/>
+      <stop offset="100%" stop-color="var(--velvet-dark)"/>
+    </linearGradient>
+    <linearGradient id="seat-armG" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%"  stop-color="var(--arm-light)"/>
+      <stop offset="100%" stop-color="var(--arm-mid)"/>
+    </linearGradient>
+    <linearGradient id="seat-cushG" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%"  stop-color="var(--cushion-top)"/>
+      <stop offset="100%" stop-color="var(--cushion-bot)"/>
+    </linearGradient>
+    <radialGradient id="seat-velvetSheen" cx="50%" cy="20%" r="60%">
+      <stop offset="0%"  stop-color="rgba(255,255,255,0.10)"/>
+      <stop offset="60%" stop-color="rgba(255,255,255,0)"/>
+    </radialGradient>
+  </defs>
+
+  <ellipse cx="75" cy="116" rx="58" ry="4" fill="rgba(0,0,0,0.5)" opacity=".7"/>
+
+  <!-- cushion peeking under the backrest -->
+  <path d="M 16 86 Q 16 102 30 102 H 120 Q 134 102 134 86 V 78 H 16 Z"
+        fill="url(#seat-cushG)" stroke="rgba(255,255,255,0.04)"/>
+  <path d="M 18 80 Q 75 76 132 80" stroke="rgba(255,255,255,0.06)" fill="none"/>
+
+  <!-- left arm -->
+  <rect x="6"   y="44" width="16" height="50" rx="6" fill="url(#seat-armG)" stroke="rgba(0,0,0,0.3)" stroke-width="0.5"/>
+  <ellipse cx="14"  cy="44" rx="9" ry="3.5" fill="var(--arm-cap)" stroke="rgba(0,0,0,0.3)" stroke-width="0.5"/>
+  <ellipse cx="14"  cy="43" rx="6" ry="1.5" fill="rgba(255,255,255,0.08)"/>
+
+  <!-- right arm -->
+  <rect x="128" y="44" width="16" height="50" rx="6" fill="url(#seat-armG)" stroke="rgba(0,0,0,0.3)" stroke-width="0.5"/>
+  <ellipse cx="136" cy="44" rx="9" ry="3.5" fill="var(--arm-cap)" stroke="rgba(0,0,0,0.3)" stroke-width="0.5"/>
+  <ellipse cx="136" cy="43" rx="6" ry="1.5" fill="rgba(255,255,255,0.08)"/>
+
+  <!-- backrest -->
+  <path d="M 24 14 Q 24 4 36 4 H 114 Q 126 4 126 14 V 86 H 24 Z"
+        fill="url(#seat-backG)" stroke="rgba(0,0,0,0.4)" stroke-width="0.8"/>
+  <path d="M 24 14 Q 24 4 36 4 H 114 Q 126 4 126 14 V 86 H 24 Z"
+        fill="url(#seat-velvetSheen)"/>
+  <!-- top piping -->
+  <path d="M 24 14 Q 24 4 36 4 H 114 Q 126 4 126 14"
+        fill="none" stroke="var(--piping)" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- tuft stitching: 3 vertical channels -->
+  <line x1="50"  y1="20" x2="50"  y2="78" stroke="var(--stitch)" stroke-width="1"   stroke-dasharray="2 5"/>
+  <line x1="75"  y1="20" x2="75"  y2="78" stroke="var(--stitch)" stroke-width="1.2" stroke-dasharray="2 5"/>
+  <line x1="100" y1="20" x2="100" y2="78" stroke="var(--stitch)" stroke-width="1"   stroke-dasharray="2 5"/>
+
+  <!-- tuft buttons -->
+  <circle cx="50"  cy="32" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="50"  cy="52" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="50"  cy="72" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="75"  cy="32" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="75"  cy="52" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="75"  cy="72" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="100" cy="32" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="100" cy="52" r="1.2" fill="rgba(0,0,0,0.5)"/>
+  <circle cx="100" cy="72" r="1.2" fill="rgba(0,0,0,0.5)"/>
+
+  <!-- back/cushion seam shadow -->
+  <rect x="24" y="84" width="102" height="3" fill="rgba(0,0,0,0.45)"/>
+</svg>`;
+
 export function renderLobby(gameState, myPlayerId) {
   const amIHost = !!gameState.players.find(p => p.id === myPlayerId && p.isHost);
   const mode = gameState.gameMode || 'classic';
@@ -95,77 +174,144 @@ export function renderLobby(gameState, myPlayerId) {
   const enteringSet = new Set(entering);
 
   lobbyPlayersList.innerHTML = '';
-  // Phase 7.5.1 (Seat-Table redesign): thread the 0-based render index as
-  // the player's SEAT slot → playerCardModel maps it to a distinct SEAT_HUES
-  // colour (fixes the 7.5 hash-collision where two identities shared a hue).
-  // The server orders the host first (render-lobby.test.js pins items[0] =
-  // host) so the host is seat 0 — a stable first colour. Pure-seam: the
-  // ONLY glue change is threading `slot`; the <li>/container/label/.bot-badge
-  // /.btn-kick (same condition + emit) stay byte-identical so the sacrosanct
-  // render-lobby.test.js guard stays green.
-  gameState.players.forEach((p, slot) => {
-    // Phase 7.5: the row is now a Red Carpet "entrance card". The <li> +
-    // #lobby-players container + the textual label + the .bot-badge + the
-    // .btn-kick (same condition, same emit) are PRESERVED byte-for-byte so
-    // the existing render-lobby.test.js zero-regression guard stays green;
-    // the accent/emoji/animation are an ADDITIVE visual layer. The old
-    // inline li.style.cssText is removed — flex/align/justify now lives in
-    // the additive .entrance-card CSS (bounded DS-01, confined to the row
-    // we rewrite here).
-    const card = playerCardModel(p, { myPlayerId, slot });
+  // Phase 7.5.2 (Theater Lobby): the lobby is now a theater of 8 velvet
+  // chairs. ALWAYS render exactly 8 <li class="seat"> — the first
+  // players.length OCCUPIED, the rest EMPTY slots — so the house fills up
+  // visibly. Pure-seam REUSED UNCHANGED: playerCardModel gives name/host/you/
+  // bot/label/emoji, and card.accentHue IS SEAT_HUES[slot] (the 7.5.1
+  // collision-free palette) → fed to --avatar-hue (NEVER a per-identity hash,
+  // NEVER stableId). The .seat-kick condition + emit payload are byte-
+  // identical to the pre-7.5.2 .btn-kick (§4). Each seat embeds its OWN
+  // inline chair SVG incl. its own <defs> — a shared <defs> would break the
+  // per-seat var(--avatar-hue) recolor (the gradient stop var() resolves
+  // against the gradient element's computed style), so the duplicated ids
+  // across 8 SVGs are REQUIRED, not a defect. The SVG string is a constant
+  // (no user data) so a single innerHTML on the static wrapper is safe; all
+  // player-controlled text (name/emoji) goes through textContent only.
+  for (let slot = 0; slot < SEATS; slot++) {
+    const p = gameState.players[slot];
     const li = document.createElement('li');
-    li.className = 'entrance-card'
+
+    if (!p) {
+      // Empty seat slot.
+      li.className = 'seat';
+      li.dataset.slot = String(slot);
+      const num = document.createElement('div');
+      num.className = 'seat-num';
+      num.textContent = 'SEAT ' + String(slot + 1).padStart(2, '0');
+      li.appendChild(num);
+      const wrap = document.createElement('div');
+      wrap.className = 'seat-svg-wrap';
+      const spot = document.createElement('div');
+      spot.className = 'seat-spotlight';
+      wrap.appendChild(spot);
+      wrap.insertAdjacentHTML('beforeend', SEAT_CHAIR_SVG); // constant, no user data
+      li.appendChild(wrap);
+      lobbyPlayersList.appendChild(li);
+      continue;
+    }
+
+    const card = playerCardModel(p, { myPlayerId, slot });
+    const isEntering = enteringSet.has(p.id);
+    li.className = 'seat occupied'
       + (card.isYou ? ' is-you' : '')
       + (card.isHost ? ' is-host' : '')
       + (card.isBot ? ' is-bot' : '')
-      + (enteringSet.has(p.id) ? ' is-entering' : '');
-    // WHY a CSS custom property (not a style rule): --card-accent is a
-    // per-player DATA value (the deterministic hue), not style debt — the
-    // same pattern modal.js uses; the .entrance-card rule consumes it via
-    // hsl(var(--card-accent) ...). Room-scoped (name+socket-id), NO stableId.
-    li.style.setProperty('--card-accent', String(card.accentHue));
+      + (isEntering ? ' entering' : '');
+    li.dataset.playerId = String(p.id);
+    // WHY a CSS custom property: --avatar-hue is the per-seat DATA value (the
+    // collision-free SEAT_HUES slot hue). The .seat.occupied rule recolors the
+    // chair velvet/arm/cushion from it. Room-scoped slot index, NO stableId.
+    li.style.setProperty('--avatar-hue', String(card.accentHue));
 
-    const emoji = document.createElement('span');
-    emoji.className = 'entrance-card__emoji';
-    emoji.setAttribute('aria-hidden', 'true'); // decorative — name carries identity
-    emoji.textContent = card.accentEmoji;
-    li.appendChild(emoji);
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'entrance-card__name';
-    nameSpan.textContent = card.label; // EXACT prior label semantics
-    li.appendChild(nameSpan);
-
-    // Phase 5a (preserved verbatim): a bot is always visibly a bot — name +
-    // a BOT badge with difficulty. Separate span so the additive .bot-badge
-    // CSS styles it without touching player-row rules.
-    if (p.isBot) {
-      const badge = document.createElement('span');
-      badge.className = 'bot-badge';
-      const diff = p.difficulty || 'normal';
-      badge.textContent = `BOT · ${diff.charAt(0).toUpperCase()}${diff.slice(1)}`;
-      li.appendChild(badge);
+    const plate = document.createElement('div');
+    plate.className = 'nameplate';
+    if (card.isHost) {
+      const crown = document.createElement('span');
+      crown.className = 'crown';
+      crown.title = 'Host';
+      crown.textContent = '♛';
+      plate.appendChild(crown);
     }
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = card.label; // EXACT prior label semantics (You)/wins
+    plate.appendChild(nameSpan);
+    if (card.isYou) {
+      const youPill = document.createElement('span');
+      youPill.className = 'you-pill';
+      youPill.textContent = 'YOU';
+      plate.appendChild(youPill);
+    } else if (card.isBot) {
+      // mutually exclusive with you-pill per the handoff
+      const botPill = document.createElement('span');
+      botPill.className = 'bot-pill';
+      botPill.textContent = 'BOT';
+      plate.appendChild(botPill);
+    }
+    li.appendChild(plate);
+
+    const person = document.createElement('div');
+    person.className = 'seat-person';
+    const av = document.createElement('div');
+    av.className = 'avatar-emoji';
+    av.setAttribute('aria-hidden', 'true'); // decorative; name carries identity
+    av.textContent = card.accentEmoji;
+    person.appendChild(av);
+    li.appendChild(person);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'seat-svg-wrap';
+    const spot = document.createElement('div');
+    spot.className = 'seat-spotlight';
+    wrap.appendChild(spot);
+    wrap.insertAdjacentHTML('beforeend', SEAT_CHAIR_SVG); // constant, no user data
 
     if (amIHost && p.id !== myPlayerId) {
       const kickBtn = document.createElement('button');
-      kickBtn.className = 'btn-kick';
-      kickBtn.title = 'Remove from lobby';
+      kickBtn.className = 'seat-kick';
+      kickBtn.title = 'Kick';
+      kickBtn.dataset.kickId = String(p.id);
       kickBtn.textContent = '✕';
       kickBtn.addEventListener('click', () => {
-        // Phase 5a (preserved verbatim): bots → removeBot, humans →
-        // kickPlayer. Same ✕ affordance, same emit payload.
+        // §4 byte-identical: bots → removeBot, humans → kickPlayer, same
+        // payload + condition as the pre-7.5.2 .btn-kick.
         if (p.isBot) {
           getSocket().emit('removeBot', { lobbyId: gameState.id, targetId: p.id });
         } else {
           getSocket().emit('kickPlayer', { lobbyId: gameState.id, targetId: p.id });
         }
       });
-      li.appendChild(kickBtn);
+      wrap.appendChild(kickBtn);
     }
+    li.appendChild(wrap);
 
+    if (isEntering) {
+      // README entrance: add `entering`, strip after 1400ms keyed by id so an
+      // idempotent re-render never re-triggers (diffArrivals already only
+      // returns truly-new ids in `entering`; this just clears the one-shot
+      // class). Reduced-motion is handled by the global 06-states-anim.css
+      // block (its `* { animation-duration: 0.01ms }` rule will cover the Task-2
+      // `.seat.entering` keyframe) — the seat is fully legible at its
+      // end-state regardless (the `.entering` class has no CSS effect until
+      // Task 2 appends the keyframes).
+      const id = p.id;
+      setTimeout(() => {
+        const el = lobbyPlayersList.querySelector('li.seat[data-player-id="' + id + '"]');
+        if (el) el.classList.remove('entering');
+      }, 1400);
+    }
     lobbyPlayersList.appendChild(li);
-  });
+  }
+
+  // Theater status line.
+  const seatedCount = document.getElementById('seated-count');
+  if (seatedCount) seatedCount.textContent = String(gameState.players.length);
+  const seatedHint = document.getElementById('seated-hint');
+  if (seatedHint) {
+    seatedHint.textContent = gameState.players.length < 2
+      ? 'Waiting for more cast…'
+      : 'Ready when the Director rolls camera.';
+  }
 
   // Phase 7.5 (bounded DS-01): the inline `lobbySettings.style.display =
   // 'flex'` write + the index.html style="display:none;" are removed (and
@@ -203,8 +349,17 @@ export function renderLobby(gameState, myPlayerId) {
 
   hardcoreToggle.checked = gameState.hardcoreMode || false;
   hardcoreToggle.disabled = !amIHost;
+  // Phase 7.5.2 (Theater Lobby): the ledger's visible .toggle-pill is
+  // CSS-driven by `.ledger-row.on` (the real .ledger-checkbox is visually
+  // hidden: position:absolute;opacity:0;width:0;height:0;pointer-events:none).
+  // The React prototype set `.on` in JSX; vanilla must mirror checkbox→.on
+  // here or the pill is permanently OFF (host gets no confirmation, guests
+  // can't see the room rules). The emit/change-handler path is unchanged —
+  // this only reflects state visually. ?. guards against a missing row.
+  hardcoreToggle.closest('.ledger-row')?.classList.toggle('on', gameState.hardcoreMode || false);
   tvShowsToggle.checked = gameState.allowTvShows || false;
   tvShowsToggle.disabled = !amIHost;
+  tvShowsToggle.closest('.ledger-row')?.classList.toggle('on', gameState.allowTvShows || false);
   if (publicRoomToggle) {
     publicRoomToggle.checked = gameState.isPublic || false;
     publicRoomToggle.disabled = !amIHost || mode === 'solo';
