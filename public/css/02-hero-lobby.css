@@ -934,18 +934,30 @@ input:disabled {
   gap: 0.6rem;
   margin-bottom: 1rem;
 }
-/* Kick ✕ becomes a corner control on the tile (the pre-7.5 .btn-kick base
-   in 06-states-anim.css is NOT edited; .entrance-card .btn-kick = 0,2,0 just
-   adds positioning over it; flex-shrink:0 from the #31 fix is preserved). */
+/* Kick ✕ becomes a corner control on the tile. The pre-7.5 .btn-kick base
+   (06-states-anim.css) is NOT edited; this .entrance-card .btn-kick (0,2,0)
+   just adds positioning over it. NOTE: flex-shrink:0 is deliberately
+   RE-STATED here — a separate 7.5-own `.entrance-card .btn-kick{flex-shrink:0}`
+   already exists above; the append-only discipline (no pre-7.5/earlier rule
+   edited or reordered) precludes consolidating them. The repetition is
+   intentional and harmless (same selector+specificity, additive cascade),
+   NOT an oversight. */
 .entrance-card .btn-kick {
   flex-shrink: 0;
   position: absolute;
   top: 0.4rem;
   right: 0.4rem;
 }
-/* The BOT badge sits under the name on a tile; keep the #31 no-shrink/nowrap
-   intent so "BOT · Normal" never wraps. */
-.entrance-card .bot-badge { align-self: flex-start; }
+/* The BOT badge sits UNDER the name on a tile (column layout). The pre-7.5
+   base .bot-badge{margin-left:8px} (untouched) was spacing for the OLD inline
+   ROW; in the column tile it mis-indents the badge 8px from the emoji/name —
+   zero it via this additive scoped override (.entrance-card .bot-badge =
+   0,2,0 beats the base 0,1,0; no pre-7.5 rule edited). #31's non-shrink/
+   nowrap intent is preserved by the base .bot-badge + the 7.5 rule. */
+.entrance-card .bot-badge {
+  align-self: flex-start;
+  margin-left: 0;
+}
 
 /* Desktop ≥768px: Director becomes a LEFT SIDEBAR, the players list the
    grid to its right, and the lobby panel widens to fit both. */
