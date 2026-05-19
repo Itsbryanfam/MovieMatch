@@ -6,6 +6,7 @@
 // (the client only offers free swatches; the server is the arbiter).
 const lobbySystem = require('./lobbySystem');
 const redisUtils = require('../redisUtils');
+const gameLogic = require('../gameLogic');
 const { SEAT_HUES } = require('../constants');
 jest.mock('../redisUtils');
 
@@ -29,7 +30,7 @@ beforeEach(() => {
   redisUtils.withLobbyLock.mockImplementation(async (_p, _id, fn) => {
     const r = global.__room; await fn(r); return r;
   });
-  broadcast = jest.spyOn(require('../gameLogic'), 'broadcastState').mockImplementation(() => {});
+  broadcast = jest.spyOn(gameLogic, 'broadcastState').mockImplementation(() => {});
 });
 afterEach(() => broadcast.mockRestore());
 

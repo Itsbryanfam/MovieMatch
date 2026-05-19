@@ -12,7 +12,7 @@ const posterCache = require('../posterCache');
 const telemetry = require('../telemetry');
 const dailySystem = require('./dailySystem');
 // Player hard-cap constant (single source of truth — see server/constants.js).
-const { MAX_PLAYERS_PER_LOBBY } = require('../constants');
+const { MAX_PLAYERS_PER_LOBBY, SEAT_HUES } = require('../constants');
 // Phase 5a: bot factory + in-process bot-timer cleanup (lobbySystem→botSystem
 // is a plain acyclic top-level require — botSystem only top-level-requires
 // fs/path — so no lazy-require / cycle concern here).
@@ -293,7 +293,6 @@ async function assignTeam(ctx, socket, { lobbyId, teamId }) {
 // toClientState ships it via ...rest with no projection change.
 async function selectColor(ctx, socket, { lobbyId, hue }) {
   const { io, pubClient } = ctx;
-  const { SEAT_HUES } = require('../constants');
   if (!Number.isInteger(hue) || !SEAT_HUES.includes(hue)) return;
   let changed = false;
   const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
@@ -301,7 +300,7 @@ async function selectColor(ctx, socket, { lobbyId, hue }) {
     const meIdx = r.players.findIndex(p => p.id === socket.id);
     if (meIdx === -1) return false;
     const taken = r.players.some((p, i) => {
-      if (i === meIdx) return false; // not blocked by my own current hue
+      if (i === meIdx) return false; // own seat — skip (not a blocker; `some` reads false as "continue")
       const eff = (Number.isInteger(p.colorHue) && SEAT_HUES.includes(p.colorHue))
         ? p.colorHue
         : SEAT_HUES[((i % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];

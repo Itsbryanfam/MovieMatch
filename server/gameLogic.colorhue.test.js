@@ -4,6 +4,7 @@
 // BYTE-IDENTICAL (the §5 ratchet) while pinning the additive-field invariant.
 // toClientState is pure — no redis/socket needed.
 // ============================================================================
+// toClientState is the pure client-safe projection — imported directly (no redis/socket needed for this pure-function pin).
 const { toClientState } = require('./gameLogic');
 
 test('toClientState carries colorHue on each player and strips stableId', () => {
