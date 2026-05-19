@@ -133,8 +133,8 @@ export function playerCardModel(player, opts) {
   // Phase 7.5.3 (Pick-Your-Own-Colour): an explicitly-claimed, in-palette
   // colorHue overrides the slot default so the player SEES their own
   // choice. Anything else (absent / non-int / off-palette) falls back to
-  // the 7.5.1 collision-free slot hue → a player who never picks is
-  // byte-identical to 7.5.2. ZERO identity: colorHue is a frozen-palette
+  // the 7.5.1 collision-free slot hue → a player who never picks gets the
+  // SAME accentHue as 7.5.2 (hasPickedColor is an additive field). ZERO identity: colorHue is a frozen-palette
   // integer, NEVER derived from stableId/name/socket-id (sentinel-tested).
   const hasPickedColor =
     Number.isInteger(p.colorHue) && SEAT_HUES.includes(p.colorHue);

@@ -132,9 +132,9 @@ describe('playerCardModel', () => {
   });
   test('isYou/isHost/isBot/wins derivation', () => {
     expect(playerCardModel({ id: 'me', name: 'Me', isHost: true, isBot: false, wins: 2 },
-      { myPlayerId: 'me' })).toMatchObject({ isYou: true, isHost: true, isBot: false, wins: 2, name: 'Me' });
+      { myPlayerId: 'me' })).toMatchObject({ isYou: true, isHost: true, isBot: false, wins: 2, name: 'Me', hasPickedColor: false });
     expect(playerCardModel({ id: 'b', name: 'B', isBot: true, wins: -4 }, {}))
-      .toMatchObject({ isBot: true, wins: 0 });
+      .toMatchObject({ isBot: true, wins: 0, hasPickedColor: false });
   });
   test('SECURITY sentinel: a stableId on the input never affects the model', () => {
     const base = { id: 's1', name: 'Ada', isHost: true, wins: 1 };
@@ -167,7 +167,7 @@ describe('SEAT_HUES — exact literal pin (must match server/constants.js)', () 
 });
 
 describe('playerCardModel — Phase 7.5.3 colorHue prefer/fallback', () => {
-  test('no colorHue → slot hue + hasPickedColor false (byte-identical to 7.5.2)', () => {
+  test('no colorHue → slot hue + hasPickedColor false (accentHue unchanged from 7.5.2)', () => {
     const m = playerCardModel({ id: 's1', name: 'Ada' }, { slot: 3 });
     expect(m.accentHue).toBe(SEAT_HUES[3]);
     expect(m.hasPickedColor).toBe(false);
