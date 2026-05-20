@@ -552,46 +552,48 @@ export function cancelTurnMotion() {
   if (_turnMotionTimer) { clearTimeout(_turnMotionTimer); _turnMotionTimer = null; }
 }
 
-// Drive the now-playing node's per-turn choreography. reducedMotion (incl.
-// jsdom: no matchMedia) → instant settled (no timers), the recap-player.js
-// accessibility-safe precedent. Animated → a single cancellable setTimeout
-// chain over buildTurnTimeline()'s schedule. The clutch burst is purely
-// additive presentation — the settled DOM is behaviour-equivalent either way.
+// Drive the now-playing node's per-turn presentation.
+//
+// POST-MERGE FIX (2026-05-19, after PR#39): users reported that "guesses
+// take a long time to validate connections." The cause was the per-turn
+// motion timeline below — .phase-reveal's CSS animation `reelRevealRise`
+// uses `animation-fill-mode: both` with `from { opacity: 0 }`, which snaps
+// the freshly-revealed poster to opacity:0 the frame after it appears,
+// then fades in over 600ms, then runs a 500ms .phase-impact scale-lock
+// (1.1s total). That stretched the visual confirmation of an accepted
+// guess from a snappy beat into a noticeable wait. The settled DOM is
+// already painted by renderChainItems, so we now ALWAYS short-circuit to
+// the settled end-state (matching the previous reduced-motion / jsdom path
+// — see render-chain.test.js L171 "settled end-state, no pending timers")
+// and skip the phase-reveal/phase-impact timeline entirely. The clutch
+// flash + .clutch glow still fire on actual clutch saves (the intended
+// cinematic moment), so the user-earned surprise is preserved.
+//
+// buildTurnTimeline + cancelTurnMotion + _turnMotionTimer remain available
+// in this module: buildTurnTimeline is independently tested as a pure
+// engine (turn-motion.test.js) and may be reused for future cinematic
+// passes; keeping the cancel + timer handle preserves the leak-safe
+// contract if a later patch reintroduces a scheduled phase.
 function choreographTurn(heroNode, gameState, clutch) {
   if (!heroNode) return;
   if (clutch) {
-    // Append the .clutch class + one .clutch-flash child for that render only.
-    // The CSS animation (appended in 06-states-anim.css) fades it out — the
-    // DOM node persists harmlessly until the next render replaces the filmstrip.
+    // Clutch save IS the cinematic moment — keep the glow + flash overlay.
+    // The .clutch-flash CSS animation in 06-states-anim.css fades it out
+    // on its own; the DOM node persists harmlessly until the next render
+    // replaces the filmstrip.
     heroNode.classList.add('clutch');
     const flash = document.createElement('div');
     flash.className = 'clutch-flash';
     flash.textContent = 'CLUTCH SAVE';
     heroNode.appendChild(flash);
   }
-  // Treat absent/broken matchMedia (jsdom, old Android WebView) as reduced-motion
-  // — instant settled, zero timers. Belt-and-suspenders with the CSS @media block.
-  const reduced = (typeof window === 'undefined') || !window.matchMedia ||
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reduced) { heroNode.classList.add('settled'); return; }
-
-  // Animated path: derive the reveal→impact tail from buildTurnTimeline and
-  // walk it as a single cancellable chain. We skip the handoff/think phases
-  // (those belong to the prior turn and the live timer bar — spec §3.1).
-  const thinkMs = (gameState && typeof gameState.turnDurationMs === 'number')
-    ? gameState.turnDurationMs : 0;
-  const timeline = buildTurnTimeline({ thinkMs, clutch });
+  // Instant settled end-state for ALL turns — restores the pre-PR#39
+  // "instant" feel users expect when validating connections. No phase
+  // classes added, no timers scheduled. Cancel any in-flight phase timer
+  // from a prior render so a stale tick can never re-apply a phase class
+  // to the freshly-rebuilt filmstrip.
   cancelTurnMotion();
-  const tail = timeline.filter(p => p.name === 'reveal' || p.name === 'impact');
-  let i = 0;
-  const tick = () => {
-    if (i >= tail.length) { _turnMotionTimer = null; return; }
-    const phase = tail[i];
-    heroNode.classList.add(`phase-${phase.name}`);
-    i++;
-    _turnMotionTimer = setTimeout(tick, phase.durMs);
-  };
-  _turnMotionTimer = setTimeout(tick, 0);
+  heroNode.classList.add('settled');
 }
 
 export function renderGame(gameState, myPlayerId, isSpectator = false) {
