@@ -1703,6 +1703,28 @@ input:disabled {
    ║  --avatar-hue strategy is simpler and zero-new-colors.       ║
    ╚══════════════════════════════════════════════════════════════╝ */
 
+/* ── (a0) Wrapper width release (regression fix 2026-05-20) ── */
+/* WHY this rule exists: T1 placed .lobby-panel class on #team-screen for
+   visual parity with classic, but the .lobby-panel base rule (L230) sets
+   max-width:380px. Classic #waiting-room.lobby-panel escapes that via an
+   ID-anchored override (L757) — without an equivalent rule the 3-col team
+   theater grid below is squeezed into a 380px center column and every
+   piece of director-panel text clips. This override is structurally
+   identical to the classic one: same width/padding/border-radius/shadow,
+   so both lobby panels share the same wide-shell envelope. ID-anchored
+   #team-screen.lobby-panel (1,1,0) beats both the pre-7.5 .lobby-panel
+   (0,1,0) at all widths and 05-responsive.css's .lobby-panel rules
+   (also 0,1,0) — same precedence reasoning as #waiting-room. */
+#team-screen.lobby-panel {
+  width: 100%;
+  max-width: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-lg);
+  padding: 32px 36px 32px;
+}
+
 /* ── (a) 3-column body layout ── */
 /* WHY separate class from .lobby-body: the classic lobby stays 2-column
    (theater + director). Team mode needs 3 equal columns: red theater,
