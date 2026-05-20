@@ -456,6 +456,9 @@ export function renderTeamScreen(gameState, myPlayerId, amIHost) {
     teamStartBtn.style.display = (amIHost && teamsReady) ? 'block' : 'none';
   }
 
+  // WHY duplicate (not extracted): operates on different elements (-team suffix)
+  // than the classic block above. A shared helper would need an element-ref
+  // parameter and is deferred to DS-01 pass 2 — both paths can be unified there.
   // House Rules ledger — sync the team-suffixed controls + .ledger-row.on.
   // Mirrors the classic renderLobby ledger sync block (hardcoreToggle, etc.)
   // but targets the -team element ids introduced in the Phase 7.8b HTML update.
