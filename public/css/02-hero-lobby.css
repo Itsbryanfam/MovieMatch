@@ -1687,14 +1687,20 @@ input:disabled {
    ║  Implements:                                                  ║
    ║    (a) 3-column .lobby-body.team-lobby-body grid             ║
    ║        (red theater | blue theater | director panel)         ║
-   ║    (b) Higher-specificity team-color overrides for           ║
-   ║        .team-theater .seat.team-red / .team-blue             ║
-   ║        — chair velvet vars, avatar bubble, nameplate ring,   ║
-   ║          spotlight color — all via --seat-team-color set     ║
-   ║          by T1 buildSeatNode.                                ║
-   ║    (c) Mobile stacking <1000px; seat tightening <640px.      ║
-   ║  No new color tokens — reuses --team-red / --team-blue       ║
-   ║  family from 01-base.css.                                    ║
+   ║    (b) Team-color chair tints via --avatar-hue strategy:     ║
+   ║        .seat.team-red  gets --avatar-hue:0   (red family)    ║
+   ║        .seat.team-blue gets --avatar-hue:220 (blue family)   ║
+   ║        The existing .seat.occupied HSL derivation chain      ║
+   ║        (L1127-1137) automatically produces all velvet/arm/   ║
+   ║        cushion/avatar/spotlight shades. ZERO new colors.     ║
+   ║    (c) Cinema-screen tint layers --team-red-bg /             ║
+   ║        --team-blue-bg OVER the base indigo glow (§3.6).     ║
+   ║    (d) Mobile stacking <1000px; seat tightening <640px.      ║
+   ║  --seat-team-color (set inline by T1 buildSeatNode) is a     ║
+   ║  forward-compatible hook for any future team-color treatment  ║
+   ║  that needs the raw token directly (e.g. a custom badge or   ║
+   ║  non-chair element). T2 does not consume it — the            ║
+   ║  --avatar-hue strategy is simpler and zero-new-colors.       ║
    ╚══════════════════════════════════════════════════════════════╝ */
 
 /* ── (a) 3-column body layout ── */
@@ -1719,132 +1725,64 @@ input:disabled {
   padding: 20px 18px 22px;
 }
 
-/* ── Cinema screen team tints ── */
-/* WHY preserve base indigo glow: the `.theater .screen` box-shadow already
-   provides the cinema "glow" effect (spec §6 "preserves base indigo glow").
-   We layer a team-colored radial gradient ON TOP of the existing background
-   gradient (which comes from the inherited .theater .screen rule) using an
-   additional gradient layer. No existing rule is edited — the new
-   .team-theater.team-red .screen selector has higher specificity (0,3,0)
-   vs .theater .screen (0,2,0). */
+/* ── Cinema screen team tints (Finding 3 fix) ── */
+/* WHY background-image instead of background: background-image LAYERS atop
+   the existing background-color (which .theater .screen doesn't set, so the
+   dark page bg shows through). The SECOND gradient stop preserves the
+   rgba(129,140,248,0.10) indigo accent that .theater .screen uses for its
+   glow (confirmed in .theater .screen at L890-916 — same value as the
+   ::before radial-gradient stop, reused verbatim per spec §3.6).
+   --team-red-bg and --team-blue-bg are existing tokens from 01-base.css.
+   No hand-computed rgba values. Specificity (0,3,0) beats .theater .screen
+   (0,2,0) — no existing rule is edited. */
 .team-theater.team-red .screen {
-  /* red tint overlay atop the base #1a1b22→#0f1015 gradient.
-     rgba(248,113,113,…) = --team-red (#f87171) at opacity — kept verbatim
-     (no CSS variable-opacity API for arbitrary tokens). */
-  background: linear-gradient(180deg,
-    rgba(248,113,113,0.12) 0%,
-    rgba(248,113,113,0.04) 50%,
-    transparent 100%),
-    linear-gradient(180deg, #1a1b22 0%, #0f1015 100%);
-  border-color: rgba(248,113,113,0.22);
-  /* preserve the base glow + add red tint in the outer glow */
-  box-shadow:
-    0 0 0 1px rgba(255,255,255,0.04) inset,
-    0 0 60px rgba(248,113,113,0.14),
-    0 0 120px rgba(248,113,113,0.08);
+  /* Layer 1: team-red tint on top; Layer 2: preserved indigo base glow. */
+  background-image:
+    linear-gradient(180deg, var(--team-red-bg), transparent 60%),
+    linear-gradient(180deg, rgba(129, 140, 248, 0.10), transparent);
+  border-color: var(--team-red-border);
 }
 .team-theater.team-blue .screen {
-  /* blue tint overlay — rgba(96,165,250,…) = --team-blue (#60a5fa) at opacity. */
-  background: linear-gradient(180deg,
-    rgba(96,165,250,0.12) 0%,
-    rgba(96,165,250,0.04) 50%,
-    transparent 100%),
-    linear-gradient(180deg, #1a1b22 0%, #0f1015 100%);
-  border-color: rgba(96,165,250,0.22);
-  box-shadow:
-    0 0 0 1px rgba(255,255,255,0.04) inset,
-    0 0 60px rgba(96,165,250,0.14),
-    0 0 120px rgba(96,165,250,0.08);
+  /* Layer 1: team-blue tint on top; Layer 2: preserved indigo base glow. */
+  background-image:
+    linear-gradient(180deg, var(--team-blue-bg), transparent 60%),
+    linear-gradient(180deg, rgba(129, 140, 248, 0.10), transparent);
+  border-color: var(--team-blue-border);
 }
 
-/* ── (b) Team seat color overrides ── */
-/* WHY higher-specificity approach (no !important): adding .team-theater +
-   .seat.team-red to each selector raises specificity to (0,3,0) or (0,4,0),
-   beating the existing (0,2,0) / (0,1,0) rules without needing !important
-   and without touching any existing rule (spec §8.7 append-only). */
-
-/* Chair velvet recolor — override the occupied-seat vars (0,2,0) that use
-   --avatar-hue. In team mode --avatar-hue is never set; these vars would
-   fall to the unoccupied defaults. Instead, derive velvet shades from the
-   team color hex directly. WHY hardcoded derivation: CSS has no built-in
-   "darken this color token by X%" so we use the same manual approach the
-   classic occupied rule already uses for --avatar-hue. */
+/* ── (b) Team seat chair color via --avatar-hue (Finding 1 fix) ── */
+/* WHY --avatar-hue instead of hand-computing velvet/arm/cushion hex values:
+   The existing .seat.occupied rule (L1127-1137) already derives ALL chair
+   color vars (--velvet-light/mid/dark, --piping, --arm-*, --cushion-*,
+   avatar bubble gradient, seat-spotlight gradient) via HSL math from a
+   single --avatar-hue value. Setting --avatar-hue here on the seat element
+   causes the .seat.occupied machinery to produce a fully coherent
+   red (hue=0) or blue (hue=220) chair automatically.
+   ZERO new color values. The .seat.occupied rules fire because team seats
+   with occupants also carry the .occupied class (set by renderTeamSeats).
+   Specificity (0,3,0) beats .seat.occupied (0,2,0) — wins cleanly. */
 .team-theater .seat.team-red {
-  --velvet-light: #5a2828;   /* red mid-dark — distinct occupied velvet */
-  --velvet-mid:   #3d1a1a;
-  --velvet-dark:  #220e0e;
-  --piping:       rgba(248,113,113,0.28);   /* red piping seam */
-  --arm-light:    #3a2222;
-  --arm-mid:      #261515;
-  --arm-cap:      #4a2b2b;
-  --cushion-top:  #3a1f1f;
-  --cushion-bot:  #1c0f0f;
+  /* Red family: hue 0 → the occupied derivation chain produces red velvet,
+     arm, cushion, avatar bubble, and spotlight tones automatically. */
+  --avatar-hue: 0;
 }
 .team-theater .seat.team-blue {
-  --velvet-light: #1e3a5a;   /* blue mid-dark */
-  --velvet-mid:   #132540;
-  --velvet-dark:  #0b1626;
-  --piping:       rgba(96,165,250,0.28);    /* blue piping seam */
-  --arm-light:    #1b2e42;
-  --arm-mid:      #111e2c;
-  --arm-cap:      #223650;
-  --cushion-top:  #192c40;
-  --cushion-bot:  #0c1620;
+  /* Blue family: hue 220 → blue velvet, arm, cushion, avatar, spotlight. */
+  --avatar-hue: 220;
 }
 
-/* Avatar emoji bubble — override the radial gradient background that uses
-   --avatar-hue (spec §AC5: use --seat-team-color for avatar fill).
-   Specificity: (0,4,0) beats existing .seat-person .avatar-emoji (0,2,0). */
-.team-theater .seat.team-red .seat-person .avatar-emoji {
-  /* Solid team-color bubble; radial highlight retained for depth.
-     var(--seat-team-color) = var(--team-red) set inline by buildSeatNode. */
-  background: radial-gradient(circle at 35% 30%,
-    rgba(248,113,113,0.95),
-    rgba(180,50,50,0.95));
-  border-color: rgba(248,113,113,0.35);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.22),
-              0 0 12px rgba(248,113,113,0.3);
-}
-.team-theater .seat.team-blue .seat-person .avatar-emoji {
-  background: radial-gradient(circle at 35% 30%,
-    rgba(96,165,250,0.95),
-    rgba(37,99,190,0.95));
-  border-color: rgba(96,165,250,0.35);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.22),
-              0 0 12px rgba(96,165,250,0.3);
-}
-
-/* Nameplate ring — override border + box-shadow for team identity.
+/* Nameplate ring — use existing border tokens for team identity.
+   box-shadow glow uses --team-*-bg (existing tokens) for the ring tint.
    Existing .nameplate: (0,1,0). New selector: (0,3,0) — wins cleanly. */
 .team-theater .seat.team-red .nameplate {
+  /* --team-red-border from 01-base.css; --team-red-bg reused for ring glow. */
   border-color: var(--team-red-border);
-  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px rgba(248,113,113,0.18);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px var(--team-red-bg);
 }
 .team-theater .seat.team-blue .nameplate {
+  /* --team-blue-border from 01-base.css; --team-blue-bg reused for ring glow. */
   border-color: var(--team-blue-border);
-  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px rgba(96,165,250,0.18);
-}
-
-/* Spotlight background — override the --avatar-hue radial gradient.
-   Existing .seat-spotlight: (0,1,0). New selector: (0,3,0) — wins cleanly. */
-.team-theater .seat.team-red .seat-spotlight {
-  background: radial-gradient(ellipse 60% 35% at 50% 0%,
-    rgba(248,113,113,0.28), transparent 65%);
-}
-.team-theater .seat.team-blue .seat-spotlight {
-  background: radial-gradient(ellipse 60% 35% at 50% 0%,
-    rgba(96,165,250,0.28), transparent 65%);
-}
-
-/* ── Join-team button anchored under seats ── */
-/* WHY full-width: in the narrow per-team column the button should span the
-   available space so it's an obvious tap target. The existing .btn-join-team
-   rule (0,1,0) already has width:100% — this (0,2,0) rule reinforces it
-   within the team-theater context and can override margin/display if needed. */
-.team-theater .btn-join-team {
-  display: block;
-  width: 100%;
-  margin-top: 0.75rem;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px var(--team-blue-bg);
 }
 
 /* ── (c) Responsive — mobile stacking ── */
