@@ -37,6 +37,46 @@ import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute, pr
 import { runTutorial, runTutorialThenContinue } from './tutorial.js';
 
 // ============================================================================
+// LOBBY SETTINGS CHANGE HANDLERS — exported for unit testing
+// ============================================================================
+
+/**
+ * Phase 7.8b: register the classic AND team-suffixed House Rules change
+ * handlers on the document. Extracted so tests can call this directly with a
+ * fake socket without triggering the full DOMContentLoaded initialiser.
+ *
+ * Each control's change event emits the SAME socket event + payload as its
+ * classic counterpart — only one control is visible at a time (mode dispatch
+ * in renderLobby), so no double-emit occurs in practice. Server payload and
+ * event names are UNCHANGED (spec §8 guardrail 1: client-only, no new events).
+ *
+ * @param {object}   socket      Socket.IO socket (or any { emit } mock).
+ * @param {Function} getLobbyId  Returns the current lobby id string.
+ */
+export function initLobbySettingsHandlers(socket, getLobbyId) {
+  // Theme picker: classic + team. setTheme payload: { lobbyId, theme }.
+  ['theme-select', 'theme-select-team'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', (e) => {
+      socket.emit('setTheme', { lobbyId: getLobbyId(), theme: e.target.value });
+    });
+  });
+
+  // Hardcore toggle: classic + team. toggleHardcore payload: { lobbyId, state }.
+  ['hardcore-toggle', 'hardcore-toggle-team'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', (e) => {
+      socket.emit('toggleHardcore', { lobbyId: getLobbyId(), state: e.target.checked });
+    });
+  });
+
+  // TV Shows toggle: classic + team. toggleTvShows payload: { lobbyId, state }.
+  ['tv-shows-toggle', 'tv-shows-toggle-team'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', (e) => {
+      socket.emit('toggleTvShows', { lobbyId: getLobbyId(), state: e.target.checked });
+    });
+  });
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -398,12 +438,12 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.emit('startLobby', getCurrentLobbyId());
   });
 
-  // L1: Theme picker change emits setTheme. Server validates the theme
-  // id against the whitelist so an injected option value can't bypass
-  // the picker — if it does, the server simply drops the change.
-  document.getElementById('theme-select')?.addEventListener('change', (e) => {
-    socket.emit('setTheme', { lobbyId: getCurrentLobbyId(), theme: e.target.value });
-  });
+  // L1/7.8b: House Rules change handlers for both classic and team-suffixed
+  // controls. Extracted to initLobbySettingsHandlers (above) so it is unit-
+  // testable without triggering the full DOMContentLoaded initialiser.
+  // Server validates the theme id against the whitelist so an injected option
+  // value can't bypass the picker — if it does, the server simply drops it.
+  initLobbySettingsHandlers(socket, getCurrentLobbyId);
 
   // L3: Spectator prediction vote buttons. Disabled after click so the
   // spectator can't double-vote within the same turn (the server's rate
@@ -427,19 +467,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('spec-pred-yes')?.addEventListener('click', () => emitPrediction('yes'));
   document.getElementById('spec-pred-no')?.addEventListener('click', () => emitPrediction('no'));
 
-  hardcoreToggle?.addEventListener('change', (e) => {
-    socket.emit('toggleHardcore', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
-  });
-
   if (publicRoomToggle) {
     publicRoomToggle.addEventListener('change', (e) => {
       socket.emit('togglePublic', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
     });
   }
-
-  tvShowsToggle?.addEventListener('change', (e) => {
-    socket.emit('toggleTvShows', { lobbyId: getCurrentLobbyId(), state: e.target.checked });
-  });
 
   // =========================================================================
   // MOVIE SUBMISSION

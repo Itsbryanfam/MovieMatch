@@ -374,31 +374,102 @@
         </div>
       </div>
 
-      <!-- TEAM ASSIGNMENT SCREEN -->
-      <div id="team-screen" class="panel hidden lobby-panel team-screen-panel">
-        <div class="panel-header">
-          <h2>🤝 Team Battle</h2>
-          <p>Pick your side — Room: <span id="team-lobby-code" class="accent-text"></span></p>
+      <!-- TEAM ASSIGNMENT SCREEN — Phase 7.8b Theater parity. Cinema-screen
+           header, per-team seat-style chairs, full Director panel mirror
+           (House Rules + Start Match). IDs preserved for socket-handler
+           continuity: #team-lobby-code, #team-red-list, #team-blue-list,
+           #join-red-btn, #join-blue-btn, #team-start-btn, #team-back-btn. -->
+      <div id="team-screen" class="panel hidden lobby-panel team-lobby">
+        <!-- HEADER (same shape as classic .lobby-head) -->
+        <div class="lobby-head">
+          <div class="head-title">
+            <h2>Room: <span id="team-lobby-code" class="accent-text code"></span></h2>
+            <p>Pick your side — the rivals are taking the stage.</p>
+          </div>
         </div>
-        <div class="team-columns">
-          <div class="team-column team-red">
-            <div class="team-column-header">🔴 Red</div>
-            <ul class="team-player-list" id="team-red-list"></ul>
-            <!-- Phase 4: .btn additive base (cursor:pointer already on btn-join-team); zero visual change. -->
+
+        <!-- 3-COLUMN BODY: red theater | blue theater | director shell -->
+        <div class="lobby-body team-lobby-body">
+
+          <!-- RED THEATER -->
+          <section class="theater team-theater team-red">
+            <div class="stage">
+              <div class="screen team-screen-red">
+                <div class="screen-eyebrow">Red Team</div>
+                <div class="screen-headline">🔴 Take the floor</div>
+              </div>
+              <div class="light-cone"></div>
+            </div>
+            <div class="seats-wrap">
+              <ul id="team-red-list" class="seats-grid team-seats" data-layout="team"></ul>
+            </div>
             <button class="btn btn-join-team" id="join-red-btn">◀ Join Red</button>
-          </div>
-          <div class="team-column team-blue">
-            <div class="team-column-header">🔵 Blue</div>
-            <ul class="team-player-list" id="team-blue-list"></ul>
-            <!-- Phase 4: .btn additive base (cursor:pointer already on btn-join-team); zero visual change. -->
+          </section>
+
+          <!-- BLUE THEATER -->
+          <section class="theater team-theater team-blue">
+            <div class="stage">
+              <div class="screen team-screen-blue">
+                <div class="screen-eyebrow">Blue Team</div>
+                <div class="screen-headline">🔵 Take the floor</div>
+              </div>
+              <div class="light-cone"></div>
+            </div>
+            <div class="seats-wrap">
+              <ul id="team-blue-list" class="seats-grid team-seats" data-layout="team"></ul>
+            </div>
             <button class="btn btn-join-team" id="join-blue-btn">Join Blue ▶</button>
-          </div>
-        </div>
-        <p class="team-hint" id="team-hint">Teams need at least 1 player each.</p>
-        <div class="team-actions">
-          <!-- Phase 4: .btn additive base (cursor:pointer already on btn-secondary/btn-primary); zero visual change. -->
-          <button id="team-back-btn" class="btn btn-secondary">← Back</button>
-          <button id="team-start-btn" class="btn btn-primary" style="display:none;">Start Match</button>
+          </section>
+
+          <!-- DIRECTOR SHELL (mirrors classic .director-shell) -->
+          <aside class="director-shell dir-refined">
+            <div class="ref-header">
+              <div>
+                <div class="ref-eyebrow">Director</div>
+                <div class="ref-title">Set the scene</div>
+              </div>
+              <div class="ref-step-num">Team Battle</div>
+            </div>
+
+            <div>
+              <div class="field-label"><span class="nu">1</span> House Rules</div>
+              <div class="ledger" id="lobby-settings-team">
+                <label class="ledger-row">
+                  <div>
+                    <div class="lr-name">Theme</div>
+                    <div class="lr-desc">Filter the candidate pool</div>
+                  </div>
+                  <div class="lr-right">
+                    <select id="theme-select-team" class="theme-select" disabled></select>
+                  </div>
+                </label>
+                <label class="ledger-row" data-toggle="hardcore">
+                  <div>
+                    <div class="lr-name">Hardcore</div>
+                    <div class="lr-desc">No actor reuse anywhere in chain</div>
+                  </div>
+                  <span class="toggle-pill"></span>
+                  <input type="checkbox" id="hardcore-toggle-team" class="ledger-checkbox" disabled>
+                </label>
+                <label class="ledger-row" data-toggle="tvshows">
+                  <div>
+                    <div class="lr-name">Allow TV Shows</div>
+                    <div class="lr-desc">Include television series</div>
+                  </div>
+                  <span class="toggle-pill"></span>
+                  <input type="checkbox" id="tv-shows-toggle-team" class="ledger-checkbox" disabled>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <button id="team-start-btn" class="btn btn-primary ref-cta" style="display:none;">🎬 Start Match</button>
+              <div class="add-bot-row" id="add-bot-row-team"></div>
+              <button id="team-back-btn" class="btn btn-secondary team-back">← Back to mode</button>
+              <p class="team-hint" id="team-hint">Teams need at least 1 player each.</p>
+            </div>
+          </aside>
+
         </div>
       </div>
     </div>

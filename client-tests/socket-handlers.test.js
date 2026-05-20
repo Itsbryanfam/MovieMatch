@@ -80,6 +80,9 @@ jest.mock('../public/js/state.js', () => {
 import * as state from '../public/js/state.js';
 import { initUIElements } from '../public/js/ui.js';
 import { initSocket } from '../public/js/socketClient.js';
+// Phase 7.8b: testable lobby-settings change-handler factory (exported from
+// app.js so we can call it directly without triggering DOMContentLoaded).
+import { initLobbySettingsHandlers } from '../public/js/app.js';
 
 // Build a fresh fake socket per test
 function createFakeSocket() {
@@ -284,5 +287,57 @@ describe('socketClient handlers — screen transitions', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+// --- Phase 7.8b: team-suffixed ledger change handlers ---
+// initLobbySettingsHandlers registers change listeners on BOTH the classic
+// and team-suffixed ledger controls (visible one at a time per renderLobby's
+// mode dispatch). These tests verify the team-suffixed controls emit the same
+// event + payload as their classic counterparts.
+describe('team-mode ledger change handlers (Phase 7.8b)', () => {
+  let mockSocket;
+
+  beforeEach(() => {
+    loadIndexHtml();
+    initUIElements();
+    mockSocket = { emit: jest.fn() };
+    // Register handlers on the current DOM (loadIndexHtml resets the DOM
+    // including the new team-screen controls added in Phase 7.8b).
+    initLobbySettingsHandlers(mockSocket, () => 'TEST01');
+  });
+
+  test('#hardcore-toggle-team change emits toggleHardcore with state:true', () => {
+    const el = document.getElementById('hardcore-toggle-team');
+    el.checked = true;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(mockSocket.emit).toHaveBeenCalledWith('toggleHardcore', {
+      lobbyId: 'TEST01',
+      state: true,
+    });
+  });
+
+  test('#tv-shows-toggle-team change emits toggleTvShows with state:true', () => {
+    const el = document.getElementById('tv-shows-toggle-team');
+    el.checked = true;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(mockSocket.emit).toHaveBeenCalledWith('toggleTvShows', {
+      lobbyId: 'TEST01',
+      state: true,
+    });
+  });
+
+  test('#theme-select-team change emits setTheme with the selected theme value', () => {
+    const el = document.getElementById('theme-select-team');
+    // Add an option so we can set a non-empty value.
+    const opt = document.createElement('option');
+    opt.value = 'horror'; opt.textContent = 'Horror';
+    el.appendChild(opt);
+    el.value = 'horror';
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(mockSocket.emit).toHaveBeenCalledWith('setTheme', {
+      lobbyId: 'TEST01',
+      theme: 'horror',
+    });
   });
 });
