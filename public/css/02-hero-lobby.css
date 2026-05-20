@@ -1739,14 +1739,14 @@ input:disabled {
   /* Layer 1: team-red tint on top; Layer 2: preserved indigo base glow. */
   background-image:
     linear-gradient(180deg, var(--team-red-bg), transparent 60%),
-    linear-gradient(180deg, rgba(129, 140, 248, 0.10), transparent);
+    linear-gradient(180deg, rgba(129, 140, 248, 0.08), transparent);
   border-color: var(--team-red-border);
 }
 .team-theater.team-blue .screen {
   /* Layer 1: team-blue tint on top; Layer 2: preserved indigo base glow. */
   background-image:
     linear-gradient(180deg, var(--team-blue-bg), transparent 60%),
-    linear-gradient(180deg, rgba(129, 140, 248, 0.10), transparent);
+    linear-gradient(180deg, rgba(129, 140, 248, 0.08), transparent);
   border-color: var(--team-blue-border);
 }
 
