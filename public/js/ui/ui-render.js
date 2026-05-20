@@ -700,6 +700,16 @@ function renderChainItems(gameState, myPlayerId) {
   // the §4.8 test pins).
   if (chain.length === 0 && gameState.status === 'playing') {
     displayEl.querySelector('.filmstrip')?.remove();
+    // Sweep fix (issue 4): when a new game starts (e.g. Solo "Play Again"
+    // or host re-start), the previous game's `.game-over-banner` was left
+    // sitting at the top of #chain-display above the new "The board is
+    // empty" hint. The status-conditional cleanup below (L737) only ran
+    // on a NON-empty chain, so the empty-→-playing edge missed it.
+    // Clearing it here covers the new-game edge without affecting the
+    // legit finished-state persistence (banners MUST stay through
+    // finished-state re-renders — §4.8 / spec §1.7; status is 'playing'
+    // here so we are NOT in that case).
+    displayEl.querySelector('.game-over-banner')?.remove();
     if (!displayEl.querySelector('.empty-board-hint')) {
       const hint = document.createElement('div');
       hint.className = 'empty-board-hint';

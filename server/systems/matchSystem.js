@@ -136,7 +136,7 @@ async function autocompleteSearch(ctx, socket, { query, lobbyId }) {
 //   7. Release lock
 // ---------------------------------------------------------------------------
 
-async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
+async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType, posterHint }) {
   const { io, pubClient, TMDB_HEADERS, logger } = ctx;
 
   // Pre-lock quick-reject (avoids contending on the lock when clearly invalid)
@@ -220,6 +220,24 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType }) {
 
       // Step 2: Fetch credits for each candidate
       const candidateMovies = await enrichWithCredits(topCandidates, pubClient, TMDB_HEADERS, logger);
+
+      // Sweep fix (issue 3): if the client provided a posterHint from the
+      // autocomplete result — where the SEARCH endpoint's poster_path was
+      // known to exist (the user just saw the poster in the dropdown) —
+      // and the direct-details fetch above came back with a null poster
+      // (a known TMDB quirk where /movie/{id}?language=en-US can return
+      // null for titles whose primary poster lacks an English-tagged
+      // variant, e.g. Dune: Part Two), use the hint as a fallback so the
+      // chain entry doesn't render the empty-frame placeholder for a
+      // movie that demonstrably has a poster. SECURITY: validate the
+      // hint matches the EXACT canonical shape this server emits
+      // (https://image.tmdb.org/t/p/<size>/<path>) so a hostile client
+      // can't inject an arbitrary off-TMDB URL into the broadcast chain.
+      if (_isValidPosterHint(posterHint)) {
+        for (const c of candidateMovies) {
+          if (!c.poster) c.poster = posterHint;
+        }
+      }
 
       // Step 3: Re-read room (may have changed during async fetches)
       room = await redisUtils.getLobby(pubClient, lobbyId);
@@ -382,6 +400,24 @@ function _validatedDirectLookup(room, tmdbId, mediaType) {
   if (mediaType !== 'movie' && mediaType !== 'tv') return null;
   if (mediaType === 'tv' && !room.allowTvShows) return null;
   return { id: idNum, mediaType };
+}
+
+// Sweep fix (issue 3): whitelist the autocomplete-passed posterHint so a
+// hostile client can't inject an arbitrary URL into the broadcast chain.
+// Accepts ONLY the canonical TMDB image shape this server itself emits:
+//   https://image.tmdb.org/t/p/<size>/<path>.<ext>
+// where <size> is a TMDB image-config token (w92/w154/w185/w342/original/…
+// — TMDB-defined; we allow any [a-z0-9_]+) and <path> is the leading-slash
+// poster_path (single segment, [A-Za-z0-9_-]+ + optional extension). Length
+// is capped so a giant string can't be smuggled into Redis storage even if
+// the regex were ever relaxed.
+const _POSTER_HINT_RE = /^https:\/\/image\.tmdb\.org\/t\/p\/[a-z0-9_]+\/[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/;
+const _POSTER_HINT_MAX_LEN = 200;
+function _isValidPosterHint(hint) {
+  return typeof hint === 'string'
+    && hint.length > 0
+    && hint.length <= _POSTER_HINT_MAX_LEN
+    && _POSTER_HINT_RE.test(hint);
 }
 
 // Phase 5b: a fallback entry → the EXACT candidate shape resolveCandidates'
@@ -957,4 +993,7 @@ module.exports = {
   // the shared cast-trim helper so both elimination paths produce the same shape.
   _computeCouldHavePlayed,
   topCastNames,
+  // Sweep fix (issue 3): exported so the security whitelist for the
+  // autocomplete-passed posterHint can be unit-tested in isolation.
+  _isValidPosterHint,
 };

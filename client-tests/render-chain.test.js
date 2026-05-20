@@ -165,6 +165,25 @@ describe('filmstrip — §4 behavioural-equivalence', () => {
     expect(display().querySelector('.filmstrip')).toBeNull();
     expect(display().querySelector('.empty-board-hint')).not.toBeNull();
   });
+
+  test('sweep fix (issue 4): new game (empty + playing) clears the previous .game-over-banner', () => {
+    // Simulate a stale game-over-banner left over from the finished game
+    // (showGameOverBanner appendChild()s into #chain-display directly).
+    // The bug pre-fix: the empty-→-playing edge in renderChainItems only
+    // removed `.filmstrip` and built `.empty-board-hint`, leaving the
+    // banner sitting on top of the new game's empty board.
+    const banner = document.createElement('div');
+    banner.className = 'game-over-banner';
+    banner.dataset.testid = 'stale-banner';
+    display().appendChild(banner);
+    expect(display().querySelector('.game-over-banner')).not.toBeNull();
+
+    // New game starts: empty chain + status==='playing'.
+    renderGame(makePlayingState({ chain: [] }), 'host_id', false);
+
+    expect(display().querySelector('.game-over-banner')).toBeNull();
+    expect(display().querySelector('.empty-board-hint')).not.toBeNull();
+  });
 });
 
 describe('filmstrip — Task 2 wired contract', () => {

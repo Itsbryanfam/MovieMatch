@@ -785,3 +785,54 @@ describe('submitMovie — post-enrich object-graph + catch null-guard (Phase 5a 
     expect(redisUtils.releaseSubmitLock).toHaveBeenCalledTimes(1);
   });
 });
+
+// ============================================================================
+// Sweep fix (issue 3): _isValidPosterHint whitelist + posterHint fallback.
+// The autocomplete-passed posterHint lets the server recover from the known
+// TMDB quirk where /movie/{id}?language=en-US returns null poster_path even
+// though the /search endpoint had a poster (the live-observed Dune: Part Two
+// case). _isValidPosterHint MUST be strict — it gates a user-supplied URL
+// that ends up in the broadcast chain everyone sees, so anything that
+// doesn't match the canonical TMDB image shape this server itself emits
+// MUST be rejected.
+// ============================================================================
+describe('matchSystem._isValidPosterHint — security whitelist', () => {
+  const { _isValidPosterHint } = matchSystem;
+
+  test('accepts canonical TMDB poster URLs across image sizes', () => {
+    // Mirrors the shape `${TMDB_POSTER_BASE}${poster_path}` produces with
+    // TMDB_POSTER_BASE='https://image.tmdb.org/t/p/w92' — and tolerates the
+    // other documented size tokens in case TMDB_POSTER_BASE is later widened.
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w92/abc123.jpg')).toBe(true);
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w185/Xyz_1-2.jpg')).toBe(true);
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/original/AbCdEf.png')).toBe(true);
+  });
+
+  test('rejects non-string / empty / oversized inputs', () => {
+    expect(_isValidPosterHint(undefined)).toBe(false);
+    expect(_isValidPosterHint(null)).toBe(false);
+    expect(_isValidPosterHint('')).toBe(false);
+    expect(_isValidPosterHint(123)).toBe(false);
+    expect(_isValidPosterHint({})).toBe(false);
+    // 201 chars (max is 200) — even with a passing shape, length cap wins.
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w92/' + 'a'.repeat(170) + '.jpg')).toBe(false);
+  });
+
+  test('rejects URLs from other hosts and protocols', () => {
+    expect(_isValidPosterHint('http://image.tmdb.org/t/p/w92/abc.jpg')).toBe(false); // http
+    expect(_isValidPosterHint('https://evil.tmdb.org/t/p/w92/abc.jpg')).toBe(false); // subdomain spoof
+    expect(_isValidPosterHint('https://image.tmdb.org.evil.com/t/p/w92/abc.jpg')).toBe(false); // suffix spoof
+    expect(_isValidPosterHint('https://attacker.com/t/p/w92/abc.jpg')).toBe(false);
+    expect(_isValidPosterHint('javascript:alert(1)')).toBe(false);
+    expect(_isValidPosterHint('data:image/png;base64,AAA')).toBe(false);
+  });
+
+  test('rejects malformed paths', () => {
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w92/')).toBe(false);             // no filename
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w92/abc')).toBe(false);          // no extension
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w92/../etc/passwd.jpg')).toBe(false); // traversal
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w92/a/b.jpg')).toBe(false);      // multi-segment path
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/W92/abc.jpg')).toBe(false);      // wrong-case size token
+    expect(_isValidPosterHint('https://image.tmdb.org/t/p/w92/abc.jpg?x=1')).toBe(false);  // query string
+  });
+});
