@@ -37,7 +37,12 @@ import { clearGhostAttempt, renderPendingGhost } from './ui-notifications.js';
 // SEAT_HUES added Phase 7.5.3: renderLobby mirrors the claim-only mutex
 // client-side (compute every OTHER player's effective hue) so taken
 // swatches render disabled — the server is still the arbiter.
-import { diffArrivals, playerCardModel, rollCameraLabel, SEAT_HUES } from './red-carpet.js';
+import { diffArrivals, playerCardModel, seatModel, rollCameraLabel, SEAT_HUES } from './red-carpet.js';
+// Phase 7.8b: shared DOM builder — single source of truth for the seat <li>
+// shape, used by both renderLobby (classic) and renderTeamScreen (team).
+// WHY NOT via ui.js barrel: ui-render.js is itself re-exported by that barrel,
+// so a barrel import would be a cycle (7.3 DAG discipline).
+import { buildSeatNode, buildEmptySeatNode } from './ui-seat.js';
 
 // Phase 7.7: per-turn motion timeline engine — buildTurnTimeline schedules
 // the reveal→impact choreography phases; imported here (NOT via the ./ui.js
@@ -58,6 +63,13 @@ let _seenPlayerIds = new Set();
 // would suppress their entrance animation in the new room.
 let _lastLobbyId = null;
 
+// Phase 7.8b: team-mode lobby arrival tracking — mirrors the classic
+// _seenPlayerIds/_lastLobbyId pattern so the entrance animation plays once per
+// real arrival per lobby, idempotent across re-renders. Separate state from the
+// classic set because both modes may run in the same page session (mode switch).
+let _seenTeamPlayerIds = new Set();
+let _lastTeamLobbyId   = null;
+
 // Phase 7.5.2 (Theater Lobby): the theater always has exactly 8 chairs —
 // one per SEAT_HUES slot (red-carpet.js), so a full lobby fills every
 // collision-free hue. Module-scope constant (no per-render dependency).
@@ -70,6 +82,9 @@ const SEATS = 8;
 // resolves the custom property against the gradient element's own computed
 // style, so a single shared <defs> would render every chair identically.
 // Constant string, zero user data — safe to inject via insertAdjacentHTML.
+// Phase 7.8b note: a byte-identical copy lives in public/js/ui/ui-seat.js
+// (the shared buildSeatNode also injects this SVG). Keep both copies in
+// sync until the DS-01 pass 2 dedupes them.
 const SEAT_CHAIR_SVG = `<svg class="seat-svg" viewBox="0 0 150 120" aria-hidden="true">
   <defs>
     <linearGradient id="seat-backG" x1="0" x2="0" y1="0" y2="1">
@@ -190,194 +205,56 @@ export function renderLobby(gameState, myPlayerId) {
   // Phase 7.5.2 (Theater Lobby): the lobby is now a theater of 8 velvet
   // chairs. ALWAYS render exactly 8 <li class="seat"> — the first
   // players.length OCCUPIED, the rest EMPTY slots — so the house fills up
-  // visibly. Pure-seam REUSED UNCHANGED: playerCardModel gives name/host/you/
-  // bot/label/emoji, and card.accentHue IS SEAT_HUES[slot] (the 7.5.1
-  // collision-free palette) → fed to --avatar-hue (NEVER a per-identity hash,
-  // NEVER stableId). The .seat-kick condition + emit payload are byte-
-  // identical to the pre-7.5.2 .btn-kick (§4). Each seat embeds its OWN
-  // inline chair SVG incl. its own <defs> — a shared <defs> would break the
-  // per-seat var(--avatar-hue) recolor (the gradient stop var() resolves
-  // against the gradient element's computed style), so the duplicated ids
-  // across 8 SVGs are REQUIRED, not a defect. The SVG string is a constant
-  // (no user data) so a single innerHTML on the static wrapper is safe; all
-  // player-controlled text (name/emoji) goes through textContent only.
+  // visibly.
+  // Phase 7.8b: seat DOM delegated to the shared ui-seat.js builder
+  // (buildSeatNode / buildEmptySeatNode). Output is byte-identical to the
+  // pre-7.8b inline block — the unedited render-lobby.test.js and
+  // red-carpet-seat-table.test.js suites are the regression proof.
   for (let slot = 0; slot < SEATS; slot++) {
     const p = gameState.players[slot];
-    const li = document.createElement('li');
 
     if (!p) {
-      // Empty seat slot.
-      li.className = 'seat';
-      li.dataset.slot = String(slot);
-      const num = document.createElement('div');
-      num.className = 'seat-num';
-      num.textContent = 'SEAT ' + String(slot + 1).padStart(2, '0');
-      li.appendChild(num);
-      const wrap = document.createElement('div');
-      wrap.className = 'seat-svg-wrap';
-      const spot = document.createElement('div');
-      spot.className = 'seat-spotlight';
-      wrap.appendChild(spot);
-      wrap.insertAdjacentHTML('beforeend', SEAT_CHAIR_SVG); // constant, no user data
-      li.appendChild(wrap);
-      lobbyPlayersList.appendChild(li);
+      // Empty seat slot — shared builder (classic mode only).
+      lobbyPlayersList.appendChild(buildEmptySeatNode(slot));
       continue;
     }
 
-    const card = playerCardModel(p, { myPlayerId, slot });
+    // Build the classic model (SEAT_HUES slot hue, optional pick override).
+    const model = seatModel(p, { mode: 'classic', slot, myPlayerId });
     const isEntering = enteringSet.has(p.id);
-    li.className = 'seat occupied'
-      + (card.isYou ? ' is-you' : '')
-      + (card.isHost ? ' is-host' : '')
-      + (card.isBot ? ' is-bot' : '')
-      + (isEntering ? ' entering' : '')
-      // Phase 7.5.3: .has-picked lifts the .seat.is-you fixed-indigo
-      // override (CSS scoped to :not(.has-picked)) so the local picker
-      // SEES their own claimed hue; un-picked "you" stays 7.5.2-indigo.
-      + (card.hasPickedColor ? ' has-picked' : '');
-    li.dataset.playerId = String(p.id);
-    // WHY a CSS custom property: --avatar-hue is the per-seat DATA value (the
-    // collision-free SEAT_HUES slot hue). The .seat.occupied rule recolors the
-    // chair velvet/arm/cushion from it. Room-scoped slot index, NO stableId.
-    li.style.setProperty('--avatar-hue', String(card.accentHue));
 
-    const plate = document.createElement('div');
-    plate.className = 'nameplate';
-    if (card.isHost) {
-      const crown = document.createElement('span');
-      crown.className = 'crown';
-      crown.title = 'Host';
-      crown.textContent = '♛';
-      plate.appendChild(crown);
-    }
-    // Phase 7.6.1 fix: the nameplate already renders dedicated .crown (host),
-    // .you-pill (you) and .bot-pill (bot) badges, so re-baking the legacy
-    // " 👑"/" (You)" suffixes from card.label DUPLICATED the host crown (two
-    // crowns) and overflowed the 160px .nameplate so the name/🏆 got ellipsis-
-    // clipped. Compose the visible text from the structured fields (bare name
-    // + the byte-identical " • N 🏆" wins fragment, same > 0 guard as the
-    // seam). The pure seam's card.label is intentionally left UNTOUCHED (its
-    // tested byte-identical contract / future consumers stay intact — we just
-    // stop CONSUMING the bundled string here). .seat-name classes it like its
-    // .crown/.you-pill siblings; no .seat-name CSS rule exists → zero visual
-    // change, a test/style hook only.
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'seat-name';
-    nameSpan.textContent = card.name + (card.wins > 0 ? ` • ${card.wins} 🏆` : '');
-    plate.appendChild(nameSpan);
-    if (card.isYou) {
-      const youPill = document.createElement('span');
-      youPill.className = 'you-pill';
-      youPill.textContent = 'YOU';
-      plate.appendChild(youPill);
-    } else if (card.isBot) {
-      // mutually exclusive with you-pill per the handoff
-      const botPill = document.createElement('span');
-      botPill.className = 'bot-pill';
-      botPill.textContent = 'BOT';
-      plate.appendChild(botPill);
-    }
-    li.appendChild(plate);
-
-    const person = document.createElement('div');
-    person.className = 'seat-person';
-    const av = document.createElement('div');
-    av.className = 'avatar-emoji';
-    av.setAttribute('aria-hidden', 'true'); // decorative; name carries identity
-    av.textContent = card.accentEmoji;
-    person.appendChild(av);
-    li.appendChild(person);
-
-    // Phase 7.5.3 (Pick-Your-Own-Colour): the local player's OWN occupied
-    // seat gets a swatch strip to claim a free palette hue. Claim-only:
-    // a hue that is another player's EFFECTIVE hue (their explicit
-    // colorHue, else SEAT_HUES[their slot]) renders disabled; the player's
-    // own current effective hue is .is-selected (not re-claimable). A free
-    // click emits the server-authoritative selectColor — NO optimistic
-    // local mutation; the next stateUpdate is the source of truth (mirrors
-    // the .seat-kick emit discipline). Built with createElement (no
-    // innerHTML for anything dynamic — file convention).
-    if (card.isYou) {
-      const takenByOthers = new Set();
+    // Compute takenByOthers for the swatch strip — only needed when isYou
+    // since buildSeatNode gates on cbs.onPickHue + model.isYou.
+    let takenByOthers;
+    if (model.isYou) {
+      takenByOthers = new Set();
       gameState.players.forEach((op, oi) => {
-        if (oi === slot) return; // own seat — skip myself when collecting the hues OTHER players hold
+        if (oi === slot) return; // own slot — skip when collecting other players' hues
         const eff = (Number.isInteger(op.colorHue) && SEAT_HUES.includes(op.colorHue))
           ? op.colorHue
           : SEAT_HUES[((oi % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
         takenByOthers.add(eff);
       });
-      const myEff = card.accentHue; // already prefer-colorHue-else-slot
-      const strip = document.createElement('div');
-      strip.className = 'seat-swatches';
-      strip.setAttribute('role', 'group');
-      strip.setAttribute('aria-label', 'Pick your seat colour');
-      SEAT_HUES.forEach(hue => {
-        const sw = document.createElement('button');
-        sw.type = 'button';
-        sw.className = 'swatch';
-        // Dot colour is the same hsl(var(--avatar-hue),…) derived family
-        // as the chairs — no new colour values (spec §3.5).
-        sw.style.setProperty('--avatar-hue', String(hue));
-        sw.setAttribute('aria-label', 'Seat colour ' + hue);
-        if (hue === myEff) {
-          sw.classList.add('is-selected');
-          sw.disabled = true;            // already mine — not re-claimable
-          sw.setAttribute('aria-pressed', 'true');
-        } else if (takenByOthers.has(hue)) {
-          sw.classList.add('is-taken');
-          sw.disabled = true;            // claim-only: another player holds it
-        } else {
-          sw.addEventListener('click', () => {
-            getSocket().emit('selectColor', { lobbyId: gameState.id, hue });
-          });
-        }
-        strip.appendChild(sw);
-      });
-      li.appendChild(strip);
     }
 
-    const wrap = document.createElement('div');
-    wrap.className = 'seat-svg-wrap';
-    const spot = document.createElement('div');
-    spot.className = 'seat-spotlight';
-    wrap.appendChild(spot);
-    wrap.insertAdjacentHTML('beforeend', SEAT_CHAIR_SVG); // constant, no user data
-
-    if (amIHost && p.id !== myPlayerId) {
-      const kickBtn = document.createElement('button');
-      kickBtn.className = 'seat-kick';
-      kickBtn.title = 'Kick';
-      kickBtn.dataset.kickId = String(p.id);
-      kickBtn.textContent = '✕';
-      kickBtn.addEventListener('click', () => {
-        // §4 byte-identical: bots → removeBot, humans → kickPlayer, same
-        // payload + condition as the pre-7.5.2 .btn-kick.
-        if (p.isBot) {
-          getSocket().emit('removeBot', { lobbyId: gameState.id, targetId: p.id });
-        } else {
-          getSocket().emit('kickPlayer', { lobbyId: gameState.id, targetId: p.id });
-        }
-      });
-      wrap.appendChild(kickBtn);
-    }
-    li.appendChild(wrap);
-
-    if (isEntering) {
-      // README entrance: add `entering`, strip after 1400ms keyed by id so an
-      // idempotent re-render never re-triggers (diffArrivals already only
-      // returns truly-new ids in `entering`; this just clears the one-shot
-      // class). Reduced-motion is handled by the global 06-states-anim.css
-      // block (its `* { animation-duration: 0.01ms }` rule will cover the Task-2
-      // `.seat.entering` keyframe) — the seat is fully legible at its
-      // end-state regardless (the `.entering` class has no CSS effect until
-      // Task 2 appends the keyframes).
-      const id = p.id;
-      setTimeout(() => {
-        const el = lobbyPlayersList.querySelector('li.seat[data-player-id="' + id + '"]');
-        if (el) el.classList.remove('entering');
-      }, 1400);
-    }
-    lobbyPlayersList.appendChild(li);
+    const node = buildSeatNode(
+      model,
+      {
+        // onKick / onRemoveBot only provided to host (caller gating — classic §4).
+        onKick:      amIHost ? (id) => getSocket().emit('kickPlayer',  { lobbyId: gameState.id, targetId: id }) : null,
+        onRemoveBot: amIHost ? (id) => getSocket().emit('removeBot',   { lobbyId: gameState.id, targetId: id }) : null,
+        // onPickHue provided for local player only — swatches require isYou.
+        onPickHue:   model.isYou ? (hue) => getSocket().emit('selectColor', { lobbyId: gameState.id, hue }) : null,
+      },
+      {
+        playerId: p.id,
+        isEntering,
+        takenByOthers,
+        allHues: SEAT_HUES,
+        containerForCleanup: lobbyPlayersList,
+      }
+    );
+    lobbyPlayersList.appendChild(node);
   }
 
   // Theater status line.
@@ -465,63 +342,107 @@ export function renderLobby(gameState, myPlayerId) {
   startBtn.textContent = roll.text;
   startBtn.disabled = roll.disabled;
 
-  // Phase 5a: host-only "Add Bot" + difficulty selector. Only classic/speed
-  // (mirrors the server gate so the UI never offers an action the server
-  // rejects). Built from elements (no innerHTML) consistent with this file.
+  // Phase 5a / 7.8b: host-only "Add Bot" + difficulty selector. Only classic/
+  // speed (mirrors the server gate so the UI never offers an action the server
+  // rejects). Extracted to shared helper so renderTeamScreen can reuse it.
   const botModeOk = gameState.gameMode === 'classic' || gameState.gameMode === 'speed';
   if (amIHost && botModeOk) {
-    const botRow = document.createElement('div');
-    botRow.className = 'add-bot-row';
-    const sel = document.createElement('select');
-    sel.className = 'bot-diff-select';
-    // a11y: the select has no visible <label>; the adjacent button gives
-    // sighted context but screen readers need an explicit name.
-    sel.setAttribute('aria-label', 'Bot difficulty');
-    // Default to 'Normal' first so it's the pre-selected value when the host
-    // opens the lobby; easy/hard are secondary choices.
-    [['normal', 'Normal'], ['easy', 'Easy'], ['hard', 'Hard']].forEach(([v, label]) => {
-      const o = document.createElement('option');
-      o.value = v; o.textContent = label;
-      sel.appendChild(o);
-    });
-    const addBtn = document.createElement('button');
-    addBtn.className = 'btn btn-secondary'; // reuse Phase 4 additive .btn
-    addBtn.textContent = '+ Add Bot';
-    addBtn.addEventListener('click', () => {
-      getSocket().emit('addBot', { lobbyId: gameState.id, difficulty: sel.value });
-    });
-    botRow.appendChild(addBtn);
-    botRow.appendChild(sel);
-    // insertAdjacentElement places botRow directly after the Start button
-    // in the existing host-controls flow — no new wrapper element needed.
-    startBtn.insertAdjacentElement('afterend', botRow);
+    const botRow = buildAddBotRow(amIHost, gameState.id);
+    if (botRow) startBtn.insertAdjacentElement('afterend', botRow);
   }
 }
 
+// Phase 7.8b: shared host-only "Add Bot" row builder. Extracted from the
+// renderLobby inline block so both renderLobby (classic/speed) and
+// renderTeamScreen (team) can call the same builder — single source of truth
+// for the row shape and the addBot emit payload. Existing socket event +
+// payload unchanged (spec §8 guardrail 8).
+//
+// @param {boolean} host     True when the local player is the host.
+// @param {string}  lobbyId  The current lobby id (passed in — no state read).
+// @returns {HTMLDivElement|null}  The row element, or null when host is falsy.
+function buildAddBotRow(host, lobbyId) {
+  if (!host) return null;
+  const botRow = document.createElement('div');
+  botRow.className = 'add-bot-row';
+  const sel = document.createElement('select');
+  sel.className = 'bot-diff-select';
+  // a11y: the select has no visible <label>; the adjacent button provides
+  // sighted context, so screen readers need an explicit name here.
+  sel.setAttribute('aria-label', 'Bot difficulty');
+  // Default to 'Normal' so it's the pre-selected value when the host opens
+  // the lobby; easy/hard are secondary choices.
+  [['normal', 'Normal'], ['easy', 'Easy'], ['hard', 'Hard']].forEach(([v, label]) => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = label;
+    sel.appendChild(o);
+  });
+  const addBtn = document.createElement('button');
+  addBtn.className = 'btn btn-secondary'; // reuse Phase 4 additive .btn
+  addBtn.textContent = '+ Add Bot';
+  addBtn.addEventListener('click', () => {
+    getSocket().emit('addBot', { lobbyId, difficulty: sel.value });
+  });
+  botRow.appendChild(addBtn);
+  botRow.appendChild(sel);
+  return botRow;
+}
+
+// Phase 7.8b — team-mode lobby rewritten to full parity with the classic
+// Theater Lobby: cinema-screen headers, seat-style chairs (one team color
+// per side via --seat-team-color), Director shell mirroring House Rules +
+// Start Match. Calls the same buildSeatNode the classic lobby uses (single
+// source of truth). Existing socket emit paths unchanged (spec §8).
 export function renderTeamScreen(gameState, myPlayerId, amIHost) {
   if (!teamLobbyCode || !teamRedList || !teamBlueList) return;
   teamLobbyCode.innerText = gameState.id || '';
+
+  // Arrival diff — mirrors the classic _seenPlayerIds/_lastLobbyId pattern.
+  // A NEW lobby id (same socket, different room) resets the seen-set so
+  // everyone "arrives" once in the new room.
+  if (gameState.id !== _lastTeamLobbyId) {
+    _seenTeamPlayerIds = new Set();
+    _lastTeamLobbyId   = gameState.id;
+  }
+  const { entering, seen } = diffArrivals(_seenTeamPlayerIds, gameState.players);
+  const enteringSet = new Set(entering);
+  _seenTeamPlayerIds = new Set(seen);
+
   const myTeamId = gameState.players.find(p => p.id === myPlayerId)?.teamId;
 
-  [teamRedList, teamBlueList].forEach((list, teamId) => {
+  // Build per-team seat rows using the shared DOM builder.
+  // No empty placeholder seats — team roster is variable length (spec §3.5).
+  [teamRedList, teamBlueList].forEach((list, teamIdNum) => {
     list.innerHTML = '';
-    gameState.players.filter(p => p.teamId === teamId).forEach(p => {
-      const li = document.createElement('li');
-      li.className = 'team-player-chip' + (p.id === myPlayerId ? ' is-me' : '');
-      li.textContent = p.name + (p.id === myPlayerId ? ' (You)' : '');
-      if (p.isHost) {
-        const crown = document.createElement('span');
-        crown.className = 'chip-host';
-        crown.textContent = ' 👑';
-        li.appendChild(crown);
-      }
-      list.appendChild(li);
-    });
+    const teamName = teamIdNum === 0 ? 'red' : 'blue';
+    gameState.players
+      .filter(p => p.teamId === teamIdNum)
+      .forEach(p => {
+        const model = seatModel(p, { mode: 'team', team: teamName, myPlayerId });
+        const node  = buildSeatNode(
+          model,
+          {
+            // Kick callbacks host-only, as in classic mode.
+            onKick:      amIHost ? (id) => getSocket().emit('kickPlayer', { lobbyId: gameState.id, targetId: id }) : null,
+            onRemoveBot: amIHost ? (id) => getSocket().emit('removeBot',  { lobbyId: gameState.id, targetId: id }) : null,
+            // No onPickHue — team mode has one color per side (spec §1 decision 1).
+            onPickHue: null,
+          },
+          {
+            playerId:          p.id,
+            isEntering:        enteringSet.has(p.id),
+            containerForCleanup: list,
+          }
+        );
+        list.appendChild(node);
+      });
   });
 
-  if (joinRedBtn) joinRedBtn.disabled = myTeamId === 0;
-  if (joinBlueBtn) joinBlueBtn.disabled = myTeamId === 1;
+  // Join button disabled-state — preserved verbatim from pre-7.8b.
+  if (joinRedBtn)  joinRedBtn.disabled  = (myTeamId === 0);
+  if (joinBlueBtn) joinBlueBtn.disabled = (myTeamId === 1);
 
+  // Start gating + hint — preserved verbatim.
   const team0 = gameState.players.filter(p => p.teamId === 0);
   const team1 = gameState.players.filter(p => p.teamId === 1);
   const teamsReady = team0.length >= 1 && team1.length >= 1;
@@ -531,10 +452,61 @@ export function renderTeamScreen(gameState, myPlayerId, amIHost) {
       : 'Teams need at least 1 player each.';
   }
   if (teamStartBtn) {
+    // WHY inline style (not class): mirrors the pre-7.8b contract exactly —
+    // the test pins .style.display directly and the start btn ships with
+    // style="display:none" in index.html. Changing to a CSS class would
+    // require a new CSS rule and editing the test, which is out of scope.
+    teamStartBtn.style.display = (amIHost && teamsReady) ? 'block' : 'none';
+  }
+
+  // WHY duplicate (not extracted): operates on different elements (-team suffix)
+  // than the classic block above. A shared helper would need an element-ref
+  // parameter and is deferred to DS-01 pass 2 — both paths can be unified there.
+  // House Rules ledger — sync the team-suffixed controls + .ledger-row.on.
+  // Mirrors the classic renderLobby ledger sync block (hardcoreToggle, etc.)
+  // but targets the -team element ids introduced in the Phase 7.8b HTML update.
+  const themeSelTeam = document.getElementById('theme-select-team');
+  if (themeSelTeam) {
+    const themes = Array.isArray(window.__mmThemes)
+      ? window.__mmThemes
+      : [{ id: 'any', label: '🎬 Any (no theme)' }];
+    const expectedIds = themes.map(t => t.id).join('|');
+    if (themeSelTeam.dataset.themeIds !== expectedIds) {
+      themeSelTeam.textContent = '';
+      themes.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.label;
+        if (t.description) opt.title = t.description;
+        themeSelTeam.appendChild(opt);
+      });
+      themeSelTeam.dataset.themeIds = expectedIds;
+    }
+    themeSelTeam.value    = gameState.theme || 'any';
+    themeSelTeam.disabled = !amIHost;
+  }
+  const hcTeam = document.getElementById('hardcore-toggle-team');
+  if (hcTeam) {
+    hcTeam.checked  = gameState.hardcoreMode || false;
+    hcTeam.disabled = !amIHost;
+    hcTeam.closest('.ledger-row')?.classList.toggle('on', gameState.hardcoreMode || false);
+  }
+  const tvTeam = document.getElementById('tv-shows-toggle-team');
+  if (tvTeam) {
+    tvTeam.checked  = gameState.allowTvShows || false;
+    tvTeam.disabled = !amIHost;
+    tvTeam.closest('.ledger-row')?.classList.toggle('on', gameState.allowTvShows || false);
+  }
+
+  // Add Bot row — host-only, shared helper. WHY innerHTML='': we clear the
+  // container and re-insert each render so the bot row stays idempotent (the
+  // same pattern renderLobby uses for startBtn.querySelector('.add-bot-row')).
+  const botContainer = document.getElementById('add-bot-row-team');
+  if (botContainer) {
+    botContainer.innerHTML = '';
     if (amIHost) {
-      teamStartBtn.style.display = teamsReady ? 'block' : 'none';
-    } else {
-      teamStartBtn.style.display = 'none';
+      const row = buildAddBotRow(amIHost, gameState.id);
+      if (row) botContainer.appendChild(row);
     }
   }
 }

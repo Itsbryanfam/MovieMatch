@@ -83,17 +83,94 @@ function _djb2(str) {
 }
 
 /**
- * Pure per-player card model for the Red Carpet entrance card.
+ * Phase 7.8b — unified pure per-seat model for both classic AND team mode.
  *
- * The accent has two device-local keys (Phase 7.5.1): the COLOUR
- * (accentHue) is the player's seat SLOT only (no identity at all — see
- * SEAT_HUES); the EMOJI (accentEmoji) is keyed by `name + ':' + id` where
- * `id` is the ROOM-SCOPED socket id (rotates per connection — already the
- * client render identity key). This function MUST NOT read any persistent
- * id: stableId is stripped server-side (gameLogic.js toClientState, the
- * Phase-1 leak fix) and is
- * structurally absent here — passing an object that happens to carry a
- * stableId must not change the output (sentinel-tested).
+ * WHY ONE seam not two: the seat <li> shape is identical in both modes
+ * (nameplate / crown / you-pill / bot-pill / avatar / kick). Only the
+ * color treatment differs — classic has a per-seat SEAT_HUES slot hue
+ * (with optional pick-your-own override), team has a single per-team
+ * color. The pre-existing playerCardModel is now a thin wrapper around
+ * seatModel({...opts, mode:'classic'}), preserving its byte-identical
+ * contract for every existing consumer (sentinel-tested + the unedited
+ * red-carpet.test.js suite is the proof).
+ *
+ * ZERO-stableId discipline: same as playerCardModel — reads no persistent
+ * identifier. Sentinel-tested.
+ *
+ * opts.mode === 'classic' → fields: name, isHost, isYou, isBot, wins, label,
+ *   accentHue, accentEmoji, hasPickedColor.
+ * opts.mode === 'team'    → fields: name, isHost, isYou, isBot, wins, label,
+ *   team, accentEmoji.
+ */
+export function seatModel(player, opts) {
+  const p = player || {};
+  const o = opts || {};
+  // WHY default to 'classic': every caller that omits mode gets classic
+  // behaviour — seatModel is fully backwards-compatible as a drop-in.
+  const mode = o.mode === 'team' ? 'team' : 'classic';
+  const myPlayerId = o.myPlayerId;
+
+  const name = String(p.name == null ? '' : p.name);
+  const id = String(p.id == null ? '' : p.id);
+  const isHost = !!p.isHost;
+  // WHY exact `===` mirror of pre-7.5 ui-render.js:63 (not a != null guard):
+  // behaviour-identical label for every real (id, myPlayerId) pair.
+  const isYou = p.id === myPlayerId;
+  const isBot = !!p.isBot;
+  // WHY same guard as playerCardModel: maps malformed wins to 0 (strict
+  // intentional superset of pre-7.5 behaviour — byte-identical for real data).
+  const wins = (Number.isFinite(p.wins) && p.wins > 0) ? p.wins : 0;
+
+  // Accent emoji unchanged from playerCardModel (room-scoped name+':'+id hash
+  // ONLY — NEVER stableId). Shared by both modes as a secondary visual cue.
+  const hash = _djb2(name + ':' + id);
+  const accentEmoji = ACCENT_EMOJI[hash % ACCENT_EMOJI.length];
+
+  let label = name;
+  if (isYou) label += ' (You)';
+  if (isHost) label += ' 👑';
+  if (wins > 0) label += ` • ${wins} 🏆`;
+
+  const base = { name, isHost, isYou, isBot, wins, accentEmoji, label };
+
+  if (mode === 'team') {
+    // Team mode: single team color per side — no per-seat hue, no color pick.
+    // WHY defensive collapse to 'red': only 'red'/'blue' are valid team ids;
+    // anything else degrades gracefully without throwing. Server cannot emit a
+    // third team id so the branch is unreachable in real data but pinned for
+    // safety. No accentHue, no hasPickedColor on the returned object.
+    const team = o.team === 'blue' ? 'blue' : 'red';
+    return { ...base, team };
+  }
+
+  // Classic mode: per-seat SEAT_HUES slot hue with optional pick-your-color
+  // override. Defensive layers (Number.isInteger + double-modulo) preserved
+  // verbatim from the pre-7.8b playerCardModel body.
+  // WHY Number.isInteger guard: collapses a non-finite / non-integer /
+  // absent / null-opts slot to 0. WHY double-modulo: wraps a NEGATIVE integer
+  // into range. Together they always yield a valid in-range index (never
+  // undefined, never throws). >7 is unreachable (server caps lobby at 8) but
+  // degrades gracefully.
+  const rawSlot = Number.isInteger(o.slot) ? o.slot : 0;
+  const slotHue =
+    SEAT_HUES[((rawSlot % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
+  // WHY hasPickedColor check: an explicitly-claimed, in-palette colorHue
+  // overrides the slot default (Phase 7.5.3 pick-your-own-colour). Anything
+  // else (absent / non-int / off-palette) falls back to the collision-free
+  // slot hue. ZERO identity: colorHue is a frozen-palette integer, NEVER
+  // derived from stableId/name/socket-id (sentinel-tested).
+  const hasPickedColor =
+    Number.isInteger(p.colorHue) && SEAT_HUES.includes(p.colorHue);
+  const accentHue = hasPickedColor ? p.colorHue : slotHue;
+
+  return { ...base, accentHue, hasPickedColor };
+}
+
+/**
+ * Phase 7.5/7.5.1/7.5.3 pure per-player card model. Now a thin wrapper
+ * around seatModel({mode:'classic',...}) — preserves the byte-identical
+ * output contract for every consumer (red-carpet.test.js + the wrapper-
+ * equivalence sentinel in seat-builder.test.js are the regression proof).
  *
  * `label` is byte-identical to pre-7.5 ui-render.js for the only `wins`
  * values the server ever emits — always a non-negative integer — so the
@@ -104,54 +181,11 @@ function _djb2(str) {
  * (NaN / Infinity / negative / non-numeric) to "no trophy badge" instead of
  * mirroring pre-7.5's implicit coercion. For real server data the two are
  * byte-identical; this is a strict intentional superset, not an oversight.
- * The emoji/accent are an additive visual layer on top.
  */
 export function playerCardModel(player, opts) {
-  const p = player || {};
-  const myPlayerId = opts && opts.myPlayerId;
-  const name = String(p.name == null ? '' : p.name);
-  const id = String(p.id == null ? '' : p.id);
-  const isHost = !!p.isHost;
-  // WHY exact `===` mirror of pre-7.5 ui-render.js:63 (not a != null guard):
-  // behaviour-identical label for every real (id, myPlayerId) pair.
-  const isYou = p.id === myPlayerId;
-  const isBot = !!p.isBot;
-  const wins = (Number.isFinite(p.wins) && p.wins > 0) ? p.wins : 0;
-
-  // Phase 7.5.1: the accent COLOUR is the player's seat-slot hue (distinct
-  // per seat — fixes the 7.5 hash-collision where two identities shared a
-  // colour). `slot` is the 0-based render index (renderLobby passes it; host
-  // = players[0] = seat 0 → a stable first colour). DEFENSIVE in two layers:
-  // (1) the Number.isInteger guard collapses a non-finite / non-integer /
-  // absent / null-opts slot to 0; (2) the double-modulo wraps a NEGATIVE
-  // integer into range. Together they always yield a valid in-range index
-  // (never undefined, never throws). >7 is unreachable (server caps the
-  // lobby at 8) but degrades gracefully.
-  const rawSlot = Number.isInteger(opts && opts.slot) ? opts.slot : 0;
-  const slotHue =
-    SEAT_HUES[((rawSlot % SEAT_HUES.length) + SEAT_HUES.length) % SEAT_HUES.length];
-  // Phase 7.5.3 (Pick-Your-Own-Colour): an explicitly-claimed, in-palette
-  // colorHue overrides the slot default so the player SEES their own
-  // choice. Anything else (absent / non-int / off-palette) falls back to
-  // the 7.5.1 collision-free slot hue → a player who never picks gets the
-  // SAME accentHue as 7.5.2 (hasPickedColor is an additive field). ZERO identity: colorHue is a frozen-palette
-  // integer, NEVER derived from stableId/name/socket-id (sentinel-tested).
-  const hasPickedColor =
-    Number.isInteger(p.colorHue) && SEAT_HUES.includes(p.colorHue);
-  const accentHue = hasPickedColor ? p.colorHue : slotHue;
-  // The emoji is UNCHANGED 7.5 behaviour: a secondary cue still derived from
-  // the room-scoped name+':'+socket-id ONLY (NEVER stableId). The user
-  // flagged colour only; re-indexing the emoji would be needless churn/risk
-  // (YAGNI) and emoji repetition is not a defect.
-  const hash = _djb2(name + ':' + id);
-  const accentEmoji = ACCENT_EMOJI[hash % ACCENT_EMOJI.length];
-
-  let label = name;
-  if (isYou) label += ' (You)';
-  if (isHost) label += ' 👑';
-  if (wins > 0) label += ` • ${wins} 🏆`;
-
-  return { name, isHost, isYou, isBot, wins, accentHue, accentEmoji, label, hasPickedColor };
+  // WHY the wrapper merges mode:'classic' last: if a caller somehow passes
+  // mode in opts it is overridden, guaranteeing the wrapper is always classic.
+  return seatModel(player, { ...(opts || {}), mode: 'classic' });
 }
 
 /**

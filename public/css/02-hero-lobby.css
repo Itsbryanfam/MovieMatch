@@ -1680,3 +1680,137 @@ input:disabled {
      the selected swatch is the player's own, not a blocked choice. */
   cursor: default;
 }
+
+/* ╔══════════════════════════════════════════════════════════════╗
+   ║  === Phase 7.8b — Team Theater Lobby ===                     ║
+   ║  Appended (append-only per spec §8.7). Zero deletions.       ║
+   ║  Implements:                                                  ║
+   ║    (a) 3-column .lobby-body.team-lobby-body grid             ║
+   ║        (red theater | blue theater | director panel)         ║
+   ║    (b) Team-color chair tints via --avatar-hue strategy:     ║
+   ║        .seat.team-red  gets --avatar-hue:0   (red family)    ║
+   ║        .seat.team-blue gets --avatar-hue:220 (blue family)   ║
+   ║        The existing .seat.occupied HSL derivation chain      ║
+   ║        (L1127-1137) automatically produces all velvet/arm/   ║
+   ║        cushion/avatar/spotlight shades. ZERO new colors.     ║
+   ║    (c) Cinema-screen tint layers --team-red-bg /             ║
+   ║        --team-blue-bg OVER the base indigo glow (§3.6).     ║
+   ║    (d) Mobile stacking <1000px; seat tightening <640px.      ║
+   ║  --seat-team-color (set inline by T1 buildSeatNode) is a     ║
+   ║  forward-compatible hook for any future team-color treatment  ║
+   ║  that needs the raw token directly (e.g. a custom badge or   ║
+   ║  non-chair element). T2 does not consume it — the            ║
+   ║  --avatar-hue strategy is simpler and zero-new-colors.       ║
+   ╚══════════════════════════════════════════════════════════════╝ */
+
+/* ── (a) 3-column body layout ── */
+/* WHY separate class from .lobby-body: the classic lobby stays 2-column
+   (theater + director). Team mode needs 3 equal columns: red theater,
+   blue theater, director panel. .team-lobby-body is added alongside
+   .lobby-body on the same wrapper element, giving us a clean override
+   without touching the classic 2-column rule above. */
+.lobby-body.team-lobby-body {
+  /* 1fr red | 1fr blue | 1.1fr director — director column slightly wider
+     to accommodate the movie-picker and settings controls. */
+  grid-template-columns: 1fr 1fr 1.1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+/* ── (b) Team theater wrapper ── */
+/* WHY tighter padding: team theaters are narrower than the classic single
+   theater — 3 columns share the same viewport width, so horizontal breathing
+   room is traded for seat legibility. */
+.team-theater {
+  padding: 20px 18px 22px;
+}
+
+/* ── Cinema screen team tints (Finding 3 fix) ── */
+/* WHY background-image instead of background: background-image LAYERS atop
+   the existing background-color (which .theater .screen doesn't set, so the
+   dark page bg shows through). The SECOND gradient stop preserves the
+   rgba(129,140,248,0.08) indigo accent that .theater .screen uses for its
+   glow (confirmed in .theater .screen at L890-916 — same value as the
+   ::before radial-gradient stop, reused verbatim per spec §3.6).
+   --team-red-bg and --team-blue-bg are existing tokens from 01-base.css.
+   No hand-computed rgba values. Specificity (0,3,0) beats .theater .screen
+   (0,2,0) — no existing rule is edited. */
+.team-theater.team-red .screen {
+  /* Layer 1: team-red tint on top; Layer 2: preserved indigo base glow. */
+  background-image:
+    linear-gradient(180deg, var(--team-red-bg), transparent 60%),
+    linear-gradient(180deg, rgba(129, 140, 248, 0.08), transparent);
+  border-color: var(--team-red-border);
+}
+.team-theater.team-blue .screen {
+  /* Layer 1: team-blue tint on top; Layer 2: preserved indigo base glow. */
+  background-image:
+    linear-gradient(180deg, var(--team-blue-bg), transparent 60%),
+    linear-gradient(180deg, rgba(129, 140, 248, 0.08), transparent);
+  border-color: var(--team-blue-border);
+}
+
+/* ── (b) Team seat chair color via --avatar-hue (Finding 1 fix) ── */
+/* WHY --avatar-hue instead of hand-computing velvet/arm/cushion hex values:
+   The existing .seat.occupied rule (L1127-1137) already derives ALL chair
+   color vars (--velvet-light/mid/dark, --piping, --arm-*, --cushion-*,
+   avatar bubble gradient, seat-spotlight gradient) via HSL math from a
+   single --avatar-hue value. Setting --avatar-hue here on the seat element
+   causes the .seat.occupied machinery to produce a fully coherent
+   red (hue=0) or blue (hue=220) chair automatically.
+   ZERO new color values. The .seat.occupied rules fire because team seats
+   with occupants also carry the .occupied class (set by buildSeatNode in
+   ui-seat.js, called from renderTeamScreen).
+   Specificity (0,3,0) beats .seat.occupied (0,2,0) — wins cleanly. */
+.team-theater .seat.team-red {
+  /* Red family: hue 0 → the occupied derivation chain produces red velvet,
+     arm, cushion, avatar bubble, and spotlight tones automatically. */
+  --avatar-hue: 0;
+}
+.team-theater .seat.team-blue {
+  /* Blue family: hue 220 → the occupied derivation chain produces blue velvet,
+     arm, cushion, avatar bubble, and spotlight tones automatically. */
+  --avatar-hue: 220;
+}
+
+/* Nameplate ring — use existing border tokens for team identity.
+   box-shadow glow uses --team-*-bg (existing tokens) for the ring tint.
+   Existing .nameplate: (0,1,0). New selector: (0,3,0) — wins cleanly. */
+.team-theater .seat.team-red .nameplate {
+  /* --team-red-border from 01-base.css; --team-red-bg reused for ring glow. */
+  border-color: var(--team-red-border);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px var(--team-red-bg);
+}
+.team-theater .seat.team-blue .nameplate {
+  /* --team-blue-border from 01-base.css; --team-blue-bg reused for ring glow. */
+  border-color: var(--team-blue-border);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px var(--team-blue-bg);
+}
+
+/* ── (c) Responsive — mobile stacking ── */
+/* WHY separate from the existing @media (max-width:1000px): that block edits
+   .lobby-body. Overriding .lobby-body.team-lobby-body inside the SAME media
+   query would require editing that block (violates spec §8.7). A new media
+   block is an append — it doesn't edit any existing rule.
+   WHY 999px (not 1000px): keeps the team-mode stack breakpoint one pixel
+   below the classic 1000px break so the two independent layout changes
+   have non-overlapping trigger points (at exactly 1000px the team rule
+   does not fire, only the classic rule does). */
+@media (max-width: 999px) {
+  .lobby-body.team-lobby-body {
+    /* Stack: red theater → blue theater → director panel */
+    grid-template-columns: 1fr;
+  }
+}
+
+/* WHY 639px (not 640px): keeps the team breakpoint one pixel below the
+   classic breakpoint so the two independent grid changes have independent
+   trigger points. The classic rule targets #lobby-players.seats-grid (ID-
+   scoped); this T2 rule targets .team-theater .seats-grid (ancestor-
+   scoped) — both use the SAME .seats-grid class, but the disjoint ancestor
+   scopes prevent overlap. */
+@media (max-width: 639px) {
+  .team-theater .seats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
