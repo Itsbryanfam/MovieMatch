@@ -126,6 +126,25 @@ describe('renderTeamScreen — team theater parity', () => {
     expect(document.getElementById('hardcore-toggle-team').closest('.ledger-row').classList.contains('on')).toBe(false);
   });
 
+  // Regression: T1 put .lobby-panel class on #team-screen but missed that the
+  // classic .lobby-panel base rule (02-hero-lobby.css L230) sets max-width:380px
+  // — classic #waiting-room.lobby-panel escapes via an ID-anchored override
+  // (max-width:none at L757). Without an equivalent override the 3-col team
+  // theater shell gets squished into a 380px column with text clipping in
+  // every column. jsdom can't compute layout so this is a string-grep pin
+  // on the CSS rule itself — the only signal we have that the escape exists.
+  test('regression: #team-screen.lobby-panel must escape the 380px lobby-panel clamp', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const css = fs.readFileSync(
+      path.join(__dirname, '..', 'public', 'css', '02-hero-lobby.css'),
+      'utf-8'
+    );
+    // Pattern: an ID-anchored override on #team-screen.lobby-panel that sets
+    // max-width:none. Mirrors classic #waiting-room.lobby-panel at L757.
+    expect(css).toMatch(/#team-screen\.lobby-panel\s*\{[^}]*max-width:\s*none/);
+  });
+
   test('idempotent re-render does NOT re-apply .entering (arrival-diff)', () => {
     // Use a unique lobby id so the module-level _seenTeamPlayerIds resets
     // (the set is keyed to _lastTeamLobbyId; a new id triggers a fresh set).
