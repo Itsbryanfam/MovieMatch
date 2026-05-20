@@ -951,11 +951,17 @@
   margin-left: 2rem;
   margin-top: 0.5rem;
   padding: 0.6rem 0.85rem;
-  background: rgba(239, 68, 68, 0.06);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  /* Post-7.7 fix: the Constellation board's full-width cast panel pushed
+     the ghost-attempt card further down inside #chain-display, where the
+     pre-7.7 opacity 0.75 + low-alpha red background was easy to miss
+     altogether on busy backgrounds. Bumped to full opacity + a slightly
+     stronger red tint so the failed-attempt card reads as the deliberate
+     notification it always was. */
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.28);
   border-left: 3px solid var(--status-danger);
   border-radius: var(--radius-md);
-  opacity: 0.75;
+  opacity: 1;
   animation: ghostAttemptEnter 0.25s ease-out forwards;
   font-size: 0.85rem;
   max-width: calc(100% - 2rem);
@@ -997,7 +1003,7 @@
 
 @keyframes ghostAttemptEnter {
   from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 0.75; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); } /* Post-7.7 fix: was 0.75 — bumped for prominence on busy boards */
 }
 
 /* Mobile: less indent so card doesn't get cramped */

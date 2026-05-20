@@ -525,7 +525,20 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   /* Sweep fix (issue 1): the reel is now the horizontal scroll container. */
   overflow-x: auto;
-  overflow-y: hidden;
+  /* Post-#41 fix (clutch effect): the original `overflow-y: hidden` cropped
+     two Phase 7.7 effects that intentionally extend ABOVE the .reel-node —
+     (1) `.clutch-flash` positioned at `top: -1.4rem` and (2) the .clutch
+     glow `box-shadow: 0 0 34px` ring on the now-playing poster. Both got
+     visually cut off by the .reel's own clipping. Switch to `overflow-y:
+     clip` (still clips, never establishes a scroll container, so we keep
+     overflow-x:auto's horizontal-only scroll behaviour) and use
+     `overflow-clip-margin` to push the y-axis clip edge 3rem outward —
+     enough room for the 1.4rem flash offset + the 2.125rem box-shadow
+     blur on the top edge. Browser support: Chrome 90+, FF 102+, Safari
+     16+; older browsers ignore `clip`/the margin and fall back to the
+     current clipping (no regression vs PR#41). */
+  overflow-y: clip;
+  overflow-clip-margin: 3rem;
   /* Sweep fix (issue 2): branded scrollbar tuned to the lobby/recap
      aesthetic — same indigo accent rgba(129,140,248,…) the .now-playing
      border + .recap-poster.placeholder inset use, on a barely-visible

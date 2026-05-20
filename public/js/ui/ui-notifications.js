@@ -291,7 +291,17 @@ export function showGhostAttempt({ playerName, movieTitle, reason }) {
   ghost.appendChild(body);
 
   chainDisplay.appendChild(ghost);
-  chainDisplay.scrollTop = chainDisplay.scrollHeight;
+  // Post-7.7 fix: the legacy `scrollTop = scrollHeight` pattern races
+  // the freshly-appended ghost's layout — `scrollHeight` may read the
+  // pre-insert value, and on the Phase 7.7 Constellation board the
+  // full-width cast panel below the reel can already fill the column,
+  // leaving the ghost just below the viewport. scrollIntoView is
+  // layout-aware and respects modern scroll-anchoring, so the freshly
+  // appended ghost is guaranteed to be in view. `block: 'nearest'` so
+  // we never overshoot (the ghost is short — no need to pin it to a
+  // corner). `behavior: 'smooth'` so the scroll feels intentional, not
+  // jarring.
+  ghost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   ghostAttemptTimer = setTimeout(clearGhostAttempt, 8000);
 }

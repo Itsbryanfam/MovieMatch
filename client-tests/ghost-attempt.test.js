@@ -73,6 +73,29 @@ describe('ghost attempt rendering', () => {
     expect(document.querySelector('.ghost-attempt')).toBeNull();
   });
 
+  test('post-7.7 fix: appended ghost is scrolled into view (not pre-layout scrollTop)', () => {
+    // The pre-fix path was `chainDisplay.scrollTop = chainDisplay.scrollHeight`,
+    // which raced the freshly-appended child's layout (scrollHeight was the
+    // pre-insert value) and on the Phase 7.7 board left the ghost just below
+    // the viewport when the full-width cast panel had already filled the
+    // column. scrollIntoView is layout-aware. Instrument Element.prototype to
+    // verify the ghost's own scrollIntoView is what fired (not e.g. a
+    // chainDisplay scrollIntoView, which would not target the ghost).
+    const calls = [];
+    const real = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (opts) {
+      calls.push({ tag: this.tagName, classes: this.className, opts });
+    };
+    try {
+      showGhostAttempt({ playerName: 'Bryan', movieTitle: 'Top Gun', reason: 'No shared cast.' });
+    } finally {
+      Element.prototype.scrollIntoView = real;
+    }
+    const ghostCall = calls.find(c => /\bghost-attempt\b/.test(c.classes));
+    expect(ghostCall).toBeDefined();
+    expect(ghostCall.opts).toEqual({ behavior: 'smooth', block: 'nearest' });
+  });
+
   test('escapes HTML in player name and movie title', () => {
     showGhostAttempt({
       playerName: '<script>alert(1)</script>',
