@@ -82,6 +82,9 @@ const SEATS = 8;
 // resolves the custom property against the gradient element's own computed
 // style, so a single shared <defs> would render every chair identically.
 // Constant string, zero user data — safe to inject via insertAdjacentHTML.
+// Phase 7.8b note: a byte-identical copy lives in public/js/ui/ui-seat.js
+// (the shared buildSeatNode also injects this SVG). Keep both copies in
+// sync until the DS-01 pass 2 dedupes them.
 const SEAT_CHAIR_SVG = `<svg class="seat-svg" viewBox="0 0 150 120" aria-hidden="true">
   <defs>
     <linearGradient id="seat-backG" x1="0" x2="0" y1="0" y2="1">

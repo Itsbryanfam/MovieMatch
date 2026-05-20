@@ -1759,7 +1759,8 @@ input:disabled {
    causes the .seat.occupied machinery to produce a fully coherent
    red (hue=0) or blue (hue=220) chair automatically.
    ZERO new color values. The .seat.occupied rules fire because team seats
-   with occupants also carry the .occupied class (set by renderTeamSeats).
+   with occupants also carry the .occupied class (set by buildSeatNode in
+   ui-seat.js, called from renderTeamScreen).
    Specificity (0,3,0) beats .seat.occupied (0,2,0) — wins cleanly. */
 .team-theater .seat.team-red {
   /* Red family: hue 0 → the occupied derivation chain produces red velvet,
