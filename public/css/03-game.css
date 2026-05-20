@@ -507,8 +507,12 @@
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  /* Sweep fix (issue 1): horizontal overflow now lives on .reel, NOT on
+     .filmstrip. Before: when the chain reached ~4 movies the whole
+     filmstrip scrolled — including the cast panel below — so the now-
+     playing cast list was pushed offscreen as the user scrolled to see
+     earlier posters. Now: only the reel scrolls; the cast panel stays
+     anchored full-width. */
 }
 .filmstrip .reel {
   display: flex;
@@ -519,6 +523,32 @@
   max-width: 100%;
   padding-bottom: 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  /* Sweep fix (issue 1): the reel is now the horizontal scroll container. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Sweep fix (issue 2): branded scrollbar tuned to the lobby/recap
+     aesthetic — same indigo accent rgba(129,140,248,…) the .now-playing
+     border + .recap-poster.placeholder inset use, on a barely-visible
+     dark track. Standard (Firefox) + WebKit (Chrome/Safari/Edge). */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(129, 140, 248, 0.45) rgba(255, 255, 255, 0.04);
+}
+/* WebKit/Chromium scrollbar — same brand accent, slim 6px rail so it
+   reads as a hairline cue under the reel rather than a chunky desktop bar. */
+.filmstrip .reel::-webkit-scrollbar {
+  height: 6px;
+}
+.filmstrip .reel::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+}
+.filmstrip .reel::-webkit-scrollbar-thumb {
+  background: rgba(129, 140, 248, 0.45);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+.filmstrip .reel::-webkit-scrollbar-thumb:hover {
+  background: rgba(129, 140, 248, 0.7);
 }
 .reel-node {
   flex-shrink: 0;
@@ -545,7 +575,23 @@
   box-shadow: 0 0 24px rgba(129, 140, 248, 0.55);
 }
 .reel-poster.placeholder {
+  /* Sweep fix (issue 3, safety net): the placeholder now reads as a
+     deliberate empty film-frame rather than an undifferentiated grey
+     block — the same inset-accent treatment .recap-poster.placeholder
+     in 04-modals.css uses (verbatim brand rgba, no new colour token).
+     Centred 🎞️ glyph so even a poster-less link still telegraphs "this
+     is a movie slot." */
   display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.22);
+  color: rgba(129, 140, 248, 0.55);
+  font-size: 1.1rem; /* glyph size; harmless when ::before is unused */
+}
+.reel-poster.placeholder::before {
+  content: '🎞️';
+  opacity: 0.85;
 }
 .reel-who {
   font-size: 0.7rem;
@@ -620,7 +666,9 @@
   .filmstrip .reel {
     width: 100%;
     margin: 0;
-    overflow-x: auto;
+    /* overflow-x:auto + branded scrollbar are now inherited from the
+       base .filmstrip .reel rule above (sweep fix issue 1/2). Mobile-
+       only overrides remain: full-width, left-aligned, scroll-snap. */
     scroll-snap-type: x proximity;
     justify-content: flex-start;
   }

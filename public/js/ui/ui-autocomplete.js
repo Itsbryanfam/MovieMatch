@@ -79,7 +79,20 @@ export function renderAutocompleteResults(results) {
             lobbyId: lobbyId,
             movie: title,
             tmdbId: parseInt(id),
-            mediaType: mediaType
+            mediaType: mediaType,
+            // Sweep fix (issue 3): forward the autocomplete-known poster URL
+            // so the server can fall back to it when /movie/{id}?language=en-US
+            // returns null poster_path (a known TMDB quirk that left e.g.
+            // Dune: Part Two with an empty-frame placeholder despite the
+            // search endpoint having had a poster). Only set when the
+            // current item actually rendered a TMDB poster — keeps the wire
+            // payload empty for placeholder picks so the server's existing
+            // null-poster pathway still wins for genuinely poster-less
+            // titles. Server-side validates the URL (matchSystem
+            // _isValidPosterHint) so a hostile client can't inject garbage.
+            posterHint: (typeof movie.poster === 'string'
+              && movie.poster.startsWith('https://image.tmdb.org/'))
+              ? movie.poster : undefined,
           });
 
           if (movieInput) {
