@@ -934,87 +934,11 @@
 .btn-kick:hover { background: rgba(248, 113, 113, 0.15); }
 .btn-kick:active { background: rgba(248, 113, 113, 0.25); }
 
-/* =============================================
-   GHOST ATTEMPT — transient failed-submission card
-   =============================================
-   Appears below the current chain head when someone makes an invalid
-   submission. Visually distinct from chain items via four signals so
-   it's never mistaken for actual chain content:
-     1. Indented (margin-left) so it visibly hangs off the chain
-     2. Dimmed (opacity) so it reads as secondary
-     3. Red-tinted left border vs. the chain's accent color
-     4. Smaller font + italic title vs. the chain's regular text */
-.ghost-attempt {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  margin-left: 2rem;
-  margin-top: 0.5rem;
-  padding: 0.6rem 0.85rem;
-  /* Post-7.7 fix: the Constellation board's full-width cast panel pushed
-     the ghost-attempt card further down inside #chain-display, where the
-     pre-7.7 opacity 0.75 + low-alpha red background was easy to miss
-     altogether on busy backgrounds. Bumped to full opacity + a slightly
-     stronger red tint so the failed-attempt card reads as the deliberate
-     notification it always was. */
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.28);
-  border-left: 3px solid var(--status-danger);
-  border-radius: var(--radius-md);
-  opacity: 1;
-  animation: ghostAttemptEnter 0.25s ease-out forwards;
-  font-size: 0.85rem;
-  max-width: calc(100% - 2rem);
-}
-
-.ghost-attempt-icon {
-  color: var(--status-danger);
-  font-weight: 700;
-  flex-shrink: 0;
-  font-size: 0.95rem;
-  line-height: 1.4;
-}
-
-.ghost-attempt-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
-.ghost-attempt-title {
-  color: var(--text-main);
-  font-style: italic;
-  line-height: 1.35;
-}
-
-.ghost-attempt-title em {
-  font-weight: 600;
-  font-style: italic;
-}
-
-.ghost-attempt-reason {
-  color: var(--status-danger);
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  opacity: 0.85;
-}
-
-@keyframes ghostAttemptEnter {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); } /* Post-7.7 fix: was 0.75 — bumped for prominence on busy boards */
-}
-
-/* Mobile: less indent so card doesn't get cramped */
-@media (max-width: 767px) {
-  .ghost-attempt {
-    margin-left: 0.75rem;
-    max-width: calc(100% - 0.75rem);
-    padding: 0.5rem 0.7rem;
-    font-size: 0.8rem;
-  }
-}
+/* Phase 7.8 — Ghost reel-node now lives in 03-game.css alongside the
+   other Constellation board structural rules. The pre-7.8 .ghost-attempt
+   sliver-card (an out-of-band sibling of the filmstrip) has been replaced
+   by an in-reel `.reel-node-ghost` + `.reel-bridge-broken` so the failed
+   attempt reads as part of the chain narrative. See 03-game.css. */
 
 /* =============================================
    ACCESSIBILITY — REDUCED MOTION

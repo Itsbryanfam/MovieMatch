@@ -649,6 +649,74 @@
   padding: 0.05rem 0.3rem;
   pointer-events: none;
 }
+
+/* Phase 7.8 — GHOST REEL-NODE: a faded reel-node that visually integrates
+   a failed attempt into the Constellation board. Borrows .reel-node's
+   column-flex layout so the broken movie sits in the same horizontal
+   cadence as the chain entries, then layers grayscale + a dashed red
+   border + a big ✗ stamp so the failed attempt is unmistakable. */
+.reel-node-ghost {
+  position: relative;
+  opacity: 0.85;
+  animation: ghostNodeEnter 0.3s ease-out;
+}
+.reel-node-ghost .reel-poster {
+  filter: grayscale(0.85) brightness(0.55);
+  border: 1.5px dashed var(--status-danger);
+  border-radius: var(--radius-xs);
+}
+.reel-node-ghost .reel-who {
+  color: var(--status-danger);
+  font-weight: 700;
+}
+.reel-node-ghost .reel-title {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.reel-ghost-stamp {
+  /* Big red ✗ overlay centred on the poster — sits above (z-index) the
+     grayscale poster so it reads as a stamp, not a visual layer of the
+     image. text-shadow gives it punch on light/dark posters alike. */
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 2.4rem;
+  font-weight: 900;
+  color: var(--status-danger);
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.9), 0 0 16px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  line-height: 1;
+  z-index: 2;
+}
+.reel-ghost-reason {
+  font-size: 0.65rem;
+  color: var(--status-danger);
+  font-style: italic;
+  margin-top: 0.15rem;
+  max-width: 96px;
+  opacity: 0.9;
+  line-height: 1.25;
+}
+/* Broken bridge — sits between the now-playing hero and the ghost reel-
+   node. Red ✗ instead of the normal indigo "↔ <actor>", visually
+   telegraphing "this is where the chain breaks". */
+.reel-bridge-broken {
+  color: var(--status-danger);
+  font-weight: 800;
+  font-size: 0.85rem;
+  /* Subtle pulse to draw attention to the break point — fades in with
+     the ghost node itself, then settles. */
+  animation: ghostBridgeEnter 0.3s ease-out;
+}
+@keyframes ghostNodeEnter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 0.85; transform: translateY(0); }
+}
+@keyframes ghostBridgeEnter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 .now-cast { width: 100%; }
 .now-cast-head { margin-bottom: 0.5rem; }
 .now-cast-link {

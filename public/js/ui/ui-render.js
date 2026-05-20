@@ -25,7 +25,11 @@ import {
 } from './ui-dom.js';
 // Import clearGhostAttempt — renderChainItems removes the ghost card when a
 // new chain entry arrives, which lives in the notifications module.
-import { clearGhostAttempt } from './ui-notifications.js';
+// Phase 7.8: renderPendingGhost re-attaches the ghost reel-node after every
+// reel rebuild (the ghost is now visually integrated into the reel, so it
+// must survive the rebuild-on-every-stateUpdate pattern — see
+// ui-notifications.js for the full architecture comment).
+import { clearGhostAttempt, renderPendingGhost } from './ui-notifications.js';
 // Phase 7.5: pure Red Carpet seams. Direct sibling import (NOT via the
 // ./ui.js barrel) — ui-render.js is itself re-exported by that barrel, so a
 // barrel import here would be a cycle (7.3 DAG discipline; mirrors the 7.4
@@ -836,6 +840,16 @@ function renderChainItems(gameState, myPlayerId) {
     reel.appendChild(node);
   }
   film.appendChild(reel);
+
+  // Phase 7.8: re-attach the pending ghost (if any) at the end of the reel
+  // so it survives the rebuild-on-every-stateUpdate pattern. The ghost is
+  // visually integrated into the chain narrative — a faded reel-node with
+  // a broken `✗` bridge — instead of the legacy red sliver appended below
+  // the filmstrip. No-op when no ghost is pending. (`clearGhostAttempt`
+  // was already called above on `grew`, so the only ghost that survives
+  // here is one from an attemptFailed that hasn't been overtaken by a
+  // valid play yet.)
+  renderPendingGhost(reel);
 
   // The now-playing cast panel — full-width, FULL names, EVERY member,
   // ungated (spec §1.2 — identical data to the 1.0 .movie-cast; the §4 hinge).
