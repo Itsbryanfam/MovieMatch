@@ -1680,3 +1680,194 @@ input:disabled {
      the selected swatch is the player's own, not a blocked choice. */
   cursor: default;
 }
+
+/* ╔══════════════════════════════════════════════════════════════╗
+   ║  === Phase 7.8b — Team Theater Lobby ===                     ║
+   ║  Appended (append-only per spec §8.7). Zero deletions.       ║
+   ║  Implements:                                                  ║
+   ║    (a) 3-column .lobby-body.team-lobby-body grid             ║
+   ║        (red theater | blue theater | director panel)         ║
+   ║    (b) Higher-specificity team-color overrides for           ║
+   ║        .team-theater .seat.team-red / .team-blue             ║
+   ║        — chair velvet vars, avatar bubble, nameplate ring,   ║
+   ║          spotlight color — all via --seat-team-color set     ║
+   ║          by T1 buildSeatNode.                                ║
+   ║    (c) Mobile stacking <1000px; seat tightening <640px.      ║
+   ║  No new color tokens — reuses --team-red / --team-blue       ║
+   ║  family from 01-base.css.                                    ║
+   ╚══════════════════════════════════════════════════════════════╝ */
+
+/* ── (a) 3-column body layout ── */
+/* WHY separate class from .lobby-body: the classic lobby stays 2-column
+   (theater + director). Team mode needs 3 equal columns: red theater,
+   blue theater, director panel. .team-lobby-body is added alongside
+   .lobby-body on the same wrapper element, giving us a clean override
+   without touching the classic 2-column rule above. */
+.lobby-body.team-lobby-body {
+  /* 1fr red | 1fr blue | 1.1fr director — director column slightly wider
+     to accommodate the movie-picker and settings controls. */
+  grid-template-columns: 1fr 1fr 1.1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+/* ── (b) Team theater wrapper ── */
+/* WHY tighter padding: team theaters are narrower than the classic single
+   theater — 3 columns share the same viewport width, so horizontal breathing
+   room is traded for seat legibility. */
+.team-theater {
+  padding: 20px 18px 22px;
+}
+
+/* ── Cinema screen team tints ── */
+/* WHY preserve base indigo glow: the `.theater .screen` box-shadow already
+   provides the cinema "glow" effect (spec §6 "preserves base indigo glow").
+   We layer a team-colored radial gradient ON TOP of the existing background
+   gradient (which comes from the inherited .theater .screen rule) using an
+   additional gradient layer. No existing rule is edited — the new
+   .team-theater.team-red .screen selector has higher specificity (0,3,0)
+   vs .theater .screen (0,2,0). */
+.team-theater.team-red .screen {
+  /* red tint overlay atop the base #1a1b22→#0f1015 gradient.
+     rgba(248,113,113,…) = --team-red (#f87171) at opacity — kept verbatim
+     (no CSS variable-opacity API for arbitrary tokens). */
+  background: linear-gradient(180deg,
+    rgba(248,113,113,0.12) 0%,
+    rgba(248,113,113,0.04) 50%,
+    transparent 100%),
+    linear-gradient(180deg, #1a1b22 0%, #0f1015 100%);
+  border-color: rgba(248,113,113,0.22);
+  /* preserve the base glow + add red tint in the outer glow */
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 0 60px rgba(248,113,113,0.14),
+    0 0 120px rgba(248,113,113,0.08);
+}
+.team-theater.team-blue .screen {
+  /* blue tint overlay — rgba(96,165,250,…) = --team-blue (#60a5fa) at opacity. */
+  background: linear-gradient(180deg,
+    rgba(96,165,250,0.12) 0%,
+    rgba(96,165,250,0.04) 50%,
+    transparent 100%),
+    linear-gradient(180deg, #1a1b22 0%, #0f1015 100%);
+  border-color: rgba(96,165,250,0.22);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 0 60px rgba(96,165,250,0.14),
+    0 0 120px rgba(96,165,250,0.08);
+}
+
+/* ── (b) Team seat color overrides ── */
+/* WHY higher-specificity approach (no !important): adding .team-theater +
+   .seat.team-red to each selector raises specificity to (0,3,0) or (0,4,0),
+   beating the existing (0,2,0) / (0,1,0) rules without needing !important
+   and without touching any existing rule (spec §8.7 append-only). */
+
+/* Chair velvet recolor — override the occupied-seat vars (0,2,0) that use
+   --avatar-hue. In team mode --avatar-hue is never set; these vars would
+   fall to the unoccupied defaults. Instead, derive velvet shades from the
+   team color hex directly. WHY hardcoded derivation: CSS has no built-in
+   "darken this color token by X%" so we use the same manual approach the
+   classic occupied rule already uses for --avatar-hue. */
+.team-theater .seat.team-red {
+  --velvet-light: #5a2828;   /* red mid-dark — distinct occupied velvet */
+  --velvet-mid:   #3d1a1a;
+  --velvet-dark:  #220e0e;
+  --piping:       rgba(248,113,113,0.28);   /* red piping seam */
+  --arm-light:    #3a2222;
+  --arm-mid:      #261515;
+  --arm-cap:      #4a2b2b;
+  --cushion-top:  #3a1f1f;
+  --cushion-bot:  #1c0f0f;
+}
+.team-theater .seat.team-blue {
+  --velvet-light: #1e3a5a;   /* blue mid-dark */
+  --velvet-mid:   #132540;
+  --velvet-dark:  #0b1626;
+  --piping:       rgba(96,165,250,0.28);    /* blue piping seam */
+  --arm-light:    #1b2e42;
+  --arm-mid:      #111e2c;
+  --arm-cap:      #223650;
+  --cushion-top:  #192c40;
+  --cushion-bot:  #0c1620;
+}
+
+/* Avatar emoji bubble — override the radial gradient background that uses
+   --avatar-hue (spec §AC5: use --seat-team-color for avatar fill).
+   Specificity: (0,4,0) beats existing .seat-person .avatar-emoji (0,2,0). */
+.team-theater .seat.team-red .seat-person .avatar-emoji {
+  /* Solid team-color bubble; radial highlight retained for depth.
+     var(--seat-team-color) = var(--team-red) set inline by buildSeatNode. */
+  background: radial-gradient(circle at 35% 30%,
+    rgba(248,113,113,0.95),
+    rgba(180,50,50,0.95));
+  border-color: rgba(248,113,113,0.35);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.22),
+              0 0 12px rgba(248,113,113,0.3);
+}
+.team-theater .seat.team-blue .seat-person .avatar-emoji {
+  background: radial-gradient(circle at 35% 30%,
+    rgba(96,165,250,0.95),
+    rgba(37,99,190,0.95));
+  border-color: rgba(96,165,250,0.35);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.22),
+              0 0 12px rgba(96,165,250,0.3);
+}
+
+/* Nameplate ring — override border + box-shadow for team identity.
+   Existing .nameplate: (0,1,0). New selector: (0,3,0) — wins cleanly. */
+.team-theater .seat.team-red .nameplate {
+  border-color: var(--team-red-border);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px rgba(248,113,113,0.18);
+}
+.team-theater .seat.team-blue .nameplate {
+  border-color: var(--team-blue-border);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5), 0 0 0 1px rgba(96,165,250,0.18);
+}
+
+/* Spotlight background — override the --avatar-hue radial gradient.
+   Existing .seat-spotlight: (0,1,0). New selector: (0,3,0) — wins cleanly. */
+.team-theater .seat.team-red .seat-spotlight {
+  background: radial-gradient(ellipse 60% 35% at 50% 0%,
+    rgba(248,113,113,0.28), transparent 65%);
+}
+.team-theater .seat.team-blue .seat-spotlight {
+  background: radial-gradient(ellipse 60% 35% at 50% 0%,
+    rgba(96,165,250,0.28), transparent 65%);
+}
+
+/* ── Join-team button anchored under seats ── */
+/* WHY full-width: in the narrow per-team column the button should span the
+   available space so it's an obvious tap target. The existing .btn-join-team
+   rule (0,1,0) already has width:100% — this (0,2,0) rule reinforces it
+   within the team-theater context and can override margin/display if needed. */
+.team-theater .btn-join-team {
+  display: block;
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+/* ── (c) Responsive — mobile stacking ── */
+/* WHY separate from the existing @media (max-width:1000px): that block edits
+   .lobby-body. Overriding .lobby-body.team-lobby-body inside the SAME media
+   query would require editing that block (violates spec §8.7). A new media
+   block is an append — it doesn't edit any existing rule. At (max-width:999px)
+   (one pixel narrower to avoid any specificity tie with the existing 1000px
+   break) the three team columns stack to a single column. */
+@media (max-width: 999px) {
+  .lobby-body.team-lobby-body {
+    /* Stack: red theater → blue theater → director panel */
+    grid-template-columns: 1fr;
+  }
+}
+
+/* WHY separate from the existing @media (max-width:640px): same append-only
+   reason. At <640px the team seats-grid tightens to 2 columns (mirrors the
+   existing classic seats rule's intent). The existing rule targets
+   #lobby-players.seats-grid; team mode uses .team-seats-grid, so there is
+   no conflict — this rule covers both via the class selector alone. */
+@media (max-width: 639px) {
+  .team-theater .seats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
