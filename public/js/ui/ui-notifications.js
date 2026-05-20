@@ -5,7 +5,11 @@
 // audit or replace the feedback layer without touching render paths.
 
 // Import notification DOM refs — live bindings written by initUIElements().
-import { notificationOverlay, notificationText, chainDisplay } from './ui-dom.js';
+// Phase 7.8: attachPosterFallback is now used by the ghost-attempt card,
+// which renders a faded reel-node with a real TMDB poster (when available)
+// inside the Constellation reel. The same broken-image → designed-placeholder
+// fallback the chain entries use applies here.
+import { notificationOverlay, notificationText, chainDisplay, attachPosterFallback } from './ui-dom.js';
 
 let notificationTimeout = null;
 export function showNotification(msg) {
@@ -247,63 +251,48 @@ export function showConfetti() {
 }
 
 // ---------------------------------------------------------------------------
-// GHOST ATTEMPT — transient card showing a player's failed submission so
-// other players can see what was tried. Auto-clears after 8s, replaced if
-// another attempt fails, and removed when the chain advances (handled by
-// renderChainItems — see clearGhostAttempt call there).
+// GHOST ATTEMPT (Phase 7.8) — REDESIGNED for the Constellation board.
+//
+// The pre-7.8 ghost was a red sliver appended below the chainDisplay's
+// filmstrip + cast panel. With the Phase 7.7 Constellation board its full-
+// width cast panel pushed the sliver off-screen on common viewports, and
+// even when visible the card lived OUTSIDE the new visual language users
+// just learned for the chain.
+//
+// 7.8 lifts the ghost INTO the chain itself: a faded reel-node + a broken
+// `✗` bridge appended at the end of the reel, immediately after the now-
+// playing hero. The narrative reads as a movie history:
+//   [Movie1] ↔ [Movie2] ↔ [Movie3 NOW] ✗ [Ghost: what they tried]
+// The ghost reel-node reuses the chain-entry shape (poster, name, title),
+// so the visual language stays consistent — but it's grayscale-filtered
+// with a dashed red border and a big ✗ stamp, so it's unmistakable as a
+// failed attempt rather than another link in the chain.
+//
+// Architecture: showGhostAttempt stores the payload in module-state and
+// (re-)renders the node into the live reel. renderChainItems rebuilds the
+// reel from chain data on every stateUpdate, so it calls renderPendingGhost
+// AFTER appending the chain nodes to keep the ghost stable across the
+// dozen-times-per-turn re-renders triggered by chat/reactions/joins.
+// Clearing happens on (a) 8s auto-timer, (b) a new attemptFailed
+// replacing it, or (c) the chain growing (handled by renderChainItems).
 // ---------------------------------------------------------------------------
 let ghostAttemptTimer = null;
+let _pendingGhost = null; // {playerName, movieTitle, year, poster, reason}
 
-export function showGhostAttempt({ playerName, movieTitle, reason }) {
+export function showGhostAttempt({ playerName, movieTitle, year, poster, reason }) {
   if (!chainDisplay) return;
-  // Replace any existing ghost so only the latest attempt is visible
-  clearGhostAttempt();
-
-  const ghost = document.createElement('div');
-  ghost.className = 'ghost-attempt';
-
-  const icon = document.createElement('span');
-  icon.className = 'ghost-attempt-icon';
-  icon.textContent = '✗';
-
-  const body = document.createElement('div');
-  body.className = 'ghost-attempt-body';
-
-  const title = document.createElement('div');
-  title.className = 'ghost-attempt-title';
-  // Audit finding #9: structural DOM instead of innerHTML interpolation.
-  // "<playerName> tried <em><movieTitle></em>" built from text nodes + a
-  // real <em> element — no HTML string assembled from user-controlled data.
-  const emTitle = document.createElement('em');
-  emTitle.textContent = movieTitle;
-  title.append(
-    document.createTextNode(playerName + ' tried '),
-    emTitle
-  );
-
-  const reasonEl = document.createElement('div');
-  reasonEl.className = 'ghost-attempt-reason';
-  reasonEl.textContent = reason || 'Invalid connection';
-
-  body.appendChild(title);
-  body.appendChild(reasonEl);
-  ghost.appendChild(icon);
-  ghost.appendChild(body);
-
-  chainDisplay.appendChild(ghost);
-  // Post-7.7 fix: the legacy `scrollTop = scrollHeight` pattern races
-  // the freshly-appended ghost's layout — `scrollHeight` may read the
-  // pre-insert value, and on the Phase 7.7 Constellation board the
-  // full-width cast panel below the reel can already fill the column,
-  // leaving the ghost just below the viewport. scrollIntoView is
-  // layout-aware and respects modern scroll-anchoring, so the freshly
-  // appended ghost is guaranteed to be in view. `block: 'nearest'` so
-  // we never overshoot (the ghost is short — no need to pin it to a
-  // corner). `behavior: 'smooth'` so the scroll feels intentional, not
-  // jarring.
-  ghost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
+  // Cancel any in-flight auto-clear so the new 8s window starts fresh.
+  if (ghostAttemptTimer) clearTimeout(ghostAttemptTimer);
+  // Stash payload so renderChainItems can re-attach the ghost on every
+  // stateUpdate-driven reel rebuild (chat, reactions, etc.) — without
+  // this, the next innocent stateUpdate would wipe the ghost.
+  _pendingGhost = { playerName, movieTitle, year, poster, reason };
   ghostAttemptTimer = setTimeout(clearGhostAttempt, 8000);
+
+  // Try to render into the current reel immediately (don't wait for the
+  // next stateUpdate — the failed attempt should feel instant).
+  const reel = chainDisplay.querySelector('.filmstrip .reel');
+  if (reel) renderPendingGhost(reel);
 }
 
 export function clearGhostAttempt() {
@@ -311,7 +300,89 @@ export function clearGhostAttempt() {
     clearTimeout(ghostAttemptTimer);
     ghostAttemptTimer = null;
   }
-  chainDisplay?.querySelectorAll('.ghost-attempt').forEach(el => el.remove());
+  _pendingGhost = null;
+  // Sweep both the new constellation-integrated ghost AND any lingering
+  // legacy .ghost-attempt nodes in case an old session still has one in
+  // its DOM (defensive — the new code never emits .ghost-attempt).
+  chainDisplay?.querySelectorAll('.reel-node-ghost, .reel-bridge-broken, .ghost-attempt')
+    .forEach(el => el.remove());
+}
+
+// Called by renderChainItems (ui-render.js) AFTER it rebuilds the .reel's
+// chain nodes, so the pending ghost survives the rebuild-on-every-
+// stateUpdate pattern. Idempotent: removes any existing ghost in the reel
+// before re-attaching, so calling this twice in a row doesn't double up.
+// Exported so it lives in the same module as the ghost lifecycle (and the
+// payload it consumes), not in ui-render.js — ui-render has the reel
+// rebuild plumbing, but the ghost feature owns its own DOM contract here.
+export function renderPendingGhost(reel) {
+  if (!reel) return;
+  // Always wipe any stale ghost first — the reel was just rebuilt, so any
+  // ghost in it is from a previous render and may have a different payload.
+  reel.querySelectorAll('.reel-node-ghost, .reel-bridge-broken').forEach(el => el.remove());
+  if (!_pendingGhost) return;
+
+  const { playerName, movieTitle, year, poster, reason } = _pendingGhost;
+
+  // Broken bridge — visual cue that the connection failed. Sits between
+  // the now-playing hero and the ghost reel-node.
+  const bridge = document.createElement('div');
+  bridge.className = 'reel-bridge reel-bridge-broken';
+  bridge.textContent = '✗';
+  reel.appendChild(bridge);
+
+  // Ghost reel-node — borrows the .reel-node layout so the failed attempt
+  // sits in the same horizontal cadence as the chain entries.
+  const node = document.createElement('div');
+  node.className = 'reel-node reel-node-ghost';
+
+  // Poster: same TMDB-URL gate the chain entries use, with the same
+  // attachPosterFallback so a broken poster degrades to the designed
+  // placeholder rather than a broken-image glyph.
+  if (poster && typeof poster === 'string' && poster.startsWith('https://image.tmdb.org/')) {
+    const img = document.createElement('img');
+    img.src = poster;
+    img.alt = '';
+    img.className = 'reel-poster';
+    img.loading = 'lazy';
+    attachPosterFallback(img, 'reel-poster');
+    node.appendChild(img);
+  } else {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'reel-poster placeholder';
+    node.appendChild(placeholder);
+  }
+
+  // Big ✗ stamp overlay on the poster — unmistakable failure mark.
+  const stamp = document.createElement('div');
+  stamp.className = 'reel-ghost-stamp';
+  stamp.textContent = '✗';
+  node.appendChild(stamp);
+
+  // Player name + "tried" — borrows the .reel-who slot from chain entries.
+  const who = document.createElement('div');
+  who.className = 'reel-who';
+  who.textContent = `${playerName} tried`;
+  node.appendChild(who);
+
+  // Movie title (with year if available) — borrows .reel-title.
+  const title = document.createElement('div');
+  title.className = 'reel-title';
+  title.textContent = year ? `${movieTitle} (${year})` : movieTitle;
+  node.appendChild(title);
+
+  // Reason — a small red footnote below the title.
+  const reasonEl = document.createElement('div');
+  reasonEl.className = 'reel-ghost-reason';
+  reasonEl.textContent = reason || 'Invalid connection';
+  node.appendChild(reasonEl);
+
+  reel.appendChild(node);
+
+  // Auto-focus the freshly-appended ghost (same scrollIntoView pattern
+  // PR#43 introduced for the legacy ghost). `inline: 'end'` keeps the
+  // newest content at the right of the horizontal reel, matching PR#42.
+  node.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
 }
 
 // Phase 7.2 (MI-01): showToast gains an optional variant so the feedback

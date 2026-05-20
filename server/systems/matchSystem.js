@@ -268,6 +268,15 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType, pos
         io.to(lobbyId).emit('attemptFailed', {
           playerName: player.name,
           movieTitle: triedTitle,
+          // Phase 7.8: include poster + year so the client can render the
+          // ghost as a faded reel-node visually integrated into the
+          // Constellation board (a broken-bridge "what they tried" card at
+          // the end of the reel), rather than the legacy red-sliver below
+          // the cast panel. poster is the same TMDB image URL the chain
+          // entries use (null when TMDB had no poster_path for this title
+          // and the PR#41 posterHint fallback didn't fill it in).
+          poster: candidateMovies[0]?.poster || null,
+          year: candidateMovies[0]?.year || '',
           reason: result.reason,
         });
 
@@ -942,7 +951,18 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
         // means a stale/edge pick. Broadcast the failed attempt (room-wide,
         // bot-safe) then eliminate the bot — no private socket payload.
         const triedTitle = candidateMovies[0]?.title || 'Unknown';
-        io.to(lobbyId).emit('attemptFailed', { playerName: botPlayer.name, movieTitle: triedTitle, reason: result.reason });
+        // Phase 7.8: same payload extension as the player path above —
+        // poster + year so the bot's failed attempt also surfaces as a
+        // ghost reel-node in the Constellation board rather than the
+        // legacy red sliver. Wire format identical to the player path so
+        // a single client handler covers both.
+        io.to(lobbyId).emit('attemptFailed', {
+          playerName: botPlayer.name,
+          movieTitle: triedTitle,
+          poster: candidateMovies[0]?.poster || null,
+          year: candidateMovies[0]?.year || '',
+          reason: result.reason,
+        });
         room.isValidating = false;
         await redisUtils.saveLobby(pubClient, lobbyId, room);
         await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, result.reason);
