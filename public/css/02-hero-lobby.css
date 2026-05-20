@@ -1729,7 +1729,7 @@ input:disabled {
 /* WHY background-image instead of background: background-image LAYERS atop
    the existing background-color (which .theater .screen doesn't set, so the
    dark page bg shows through). The SECOND gradient stop preserves the
-   rgba(129,140,248,0.10) indigo accent that .theater .screen uses for its
+   rgba(129,140,248,0.08) indigo accent that .theater .screen uses for its
    glow (confirmed in .theater .screen at L890-916 — same value as the
    ::before radial-gradient stop, reused verbatim per spec §3.6).
    --team-red-bg and --team-blue-bg are existing tokens from 01-base.css.
@@ -1767,7 +1767,8 @@ input:disabled {
   --avatar-hue: 0;
 }
 .team-theater .seat.team-blue {
-  /* Blue family: hue 220 → blue velvet, arm, cushion, avatar, spotlight. */
+  /* Blue family: hue 220 → the occupied derivation chain produces blue velvet,
+     arm, cushion, avatar bubble, and spotlight tones automatically. */
   --avatar-hue: 220;
 }
 
@@ -1789,9 +1790,11 @@ input:disabled {
 /* WHY separate from the existing @media (max-width:1000px): that block edits
    .lobby-body. Overriding .lobby-body.team-lobby-body inside the SAME media
    query would require editing that block (violates spec §8.7). A new media
-   block is an append — it doesn't edit any existing rule. At (max-width:999px)
-   (one pixel narrower to avoid any specificity tie with the existing 1000px
-   break) the three team columns stack to a single column. */
+   block is an append — it doesn't edit any existing rule.
+   WHY 999px (not 1000px): keeps the team-mode stack breakpoint one pixel
+   below the classic 1000px break so the two independent layout changes
+   have non-overlapping trigger points (at exactly 1000px the team rule
+   does not fire, only the classic rule does). */
 @media (max-width: 999px) {
   .lobby-body.team-lobby-body {
     /* Stack: red theater → blue theater → director panel */
@@ -1799,11 +1802,12 @@ input:disabled {
   }
 }
 
-/* WHY separate from the existing @media (max-width:640px): same append-only
-   reason. At <640px the team seats-grid tightens to 2 columns (mirrors the
-   existing classic seats rule's intent). The existing rule targets
-   #lobby-players.seats-grid; team mode uses .team-seats-grid, so there is
-   no conflict — this rule covers both via the class selector alone. */
+/* WHY 639px (not 640px): keeps the team breakpoint one pixel below the
+   classic breakpoint so the two independent grid changes have independent
+   trigger points. The classic rule targets #lobby-players.seats-grid (ID-
+   scoped); this T2 rule targets .team-theater .seats-grid (ancestor-
+   scoped) — both use the SAME .seats-grid class, but the disjoint ancestor
+   scopes prevent overlap. */
 @media (max-width: 639px) {
   .team-theater .seats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
