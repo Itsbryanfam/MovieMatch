@@ -880,7 +880,15 @@ function renderChainItems(gameState, myPlayerId) {
   // Newest pinned right — the horizontal analog of the 1.0
   // `chainDisplay.scrollTop = scrollHeight`. A ONE-TIME scroll-position set,
   // NOT a rAF loop (spec §1.10). No-op under jsdom (no layout) — harmless.
-  film.scrollLeft = film.scrollWidth;
+  //
+  // Post-PR#41 follow-up: PR#41 (sweep fix issue 1) moved overflow-x from
+  // .filmstrip onto .filmstrip .reel so the cast panel below would stop
+  // scrolling with the posters. That left this line targeting `film` —
+  // which no longer has overflow — so `film.scrollLeft = …` became a
+  // silent no-op and the reel sat at its default scrollLeft of 0 (the
+  // FIRST poster, left edge), instead of being auto-focused on the
+  // newest hero at the right. Retarget to the actual scroll container.
+  reel.scrollLeft = reel.scrollWidth;
 
   // A new entry by another player still chimes (preserved from the 1.0
   // L722-724) — gated on growth so idempotent re-renders never spam it.
