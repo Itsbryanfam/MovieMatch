@@ -166,6 +166,42 @@ describe('filmstrip — §4 behavioural-equivalence', () => {
     expect(display().querySelector('.empty-board-hint')).not.toBeNull();
   });
 
+  test('post-PR#41 fix: auto-scroll on render targets .reel (not .filmstrip)', () => {
+    // jsdom returns 0 for scrollWidth/scrollLeft regardless of content, so
+    // we instrument the prototype setter to log every assignment and assert
+    // the auto-focus line lands on the .reel (the actual scroll container
+    // post-PR#41). Before the fix, the line targeted .filmstrip — which
+    // PR#41 stripped of overflow-x — leaving the reel at scrollLeft=0
+    // (first poster on the left) instead of pinned to the newest hero.
+    const setterLog = [];
+    const real = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollLeft')
+      || { configurable: true, get() { return 0; }, set() {} };
+    Object.defineProperty(Element.prototype, 'scrollLeft', {
+      configurable: true,
+      get: real.get,
+      set(v) {
+        setterLog.push({ classes: this.className || '', value: v });
+        if (real.set) real.set.call(this, v);
+      },
+    });
+    try {
+      const chain = [
+        makeChainItem(),
+        makeChainItem({ matchedActors: ['x'] }),
+        makeChainItem({ matchedActors: ['y'] }),
+      ];
+      renderGame(makePlayingState({ chain }), 'host_id', false);
+    } finally {
+      Object.defineProperty(Element.prototype, 'scrollLeft', real);
+    }
+    // The auto-focus assignment must target a `.reel`, never a bare
+    // `.filmstrip` (which would be the pre-fix no-op).
+    const reelHits = setterLog.filter(s => /\breel\b/.test(s.classes));
+    const filmStripBareHits = setterLog.filter(s => /\bfilmstrip\b/.test(s.classes) && !/\breel\b/.test(s.classes));
+    expect(reelHits.length).toBeGreaterThan(0);
+    expect(filmStripBareHits.length).toBe(0);
+  });
+
   test('sweep fix (issue 4): new game (empty + playing) clears the previous .game-over-banner', () => {
     // Simulate a stale game-over-banner left over from the finished game
     // (showGameOverBanner appendChild()s into #chain-display directly).
