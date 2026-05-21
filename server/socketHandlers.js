@@ -67,6 +67,10 @@ const RATE_LIMITS = {
   //                       clicking through options is never blocked, but a
   //                       toggle-flood across any mix of them is still capped.
   //   requestPosters   — pure cache read, but still a free socket round-trip.
+  // Phase 7.9: Playable Hero — pre-room request the hero mount fires
+  // exactly once on page load. 5/30s tolerates legit page-refresh bursts
+  // and rejects any kind of automated spin loop.
+  heroPuzzleRequest: { limit: 5, windowMs: 30000 },
   rejoinLobby:   { limit: 10, windowMs: 10000 },
   publicLobbies: { limit: 12, windowMs: 10000 },
   lobbyConfig:   { limit: 30, windowMs: 10000 },
@@ -322,6 +326,59 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // Phase 5a: mirror addBot — same lobbyConfig bucket throttles remove-spam.
       if (await lobbyConfigLimited()) return;
       await lobbySystem.removeBot(ctx, socket, data || {});
+    });
+
+    // -----------------------------------------------------------------------
+    // PHASE 7.9 — PLAYABLE HERO (pre-room; no lobby state, no game state)
+    // -----------------------------------------------------------------------
+    // The hero landing page lets a first-time visitor try one move of the
+    // chain mechanic before joining a room. These handlers CANNOT route
+    // through matchSystem.autocompleteSearch (matchSystem.js:93-95 requires
+    // an existing lobby + socket-in-lobby membership). Hero is pre-room.
+
+    const heroPuzzle = require('./heroPuzzle');
+
+    on('heroPuzzleRequest', async () => {
+      // Lazy: client emits once on hero mount. Rate-limited (5/30s) so a
+      // misbehaving client cannot loop on this pure cache-shaped request —
+      // closes the audit-finding-#5 gap for the new handler.
+      if (await rateLimit(socket.id, 'heroPuzzleRequest', RATE_LIMITS.heroPuzzleRequest.limit, RATE_LIMITS.heroPuzzleRequest.windowMs)) return;
+      // Pick random + strip the multi-actor answer set before emitting back
+      // (revealActor stays for the client's local Show Me path).
+      const puzzle = heroPuzzle.pickRandomPuzzle();
+      socket.emit('heroPuzzleDelivered', heroPuzzle.toClientPuzzle(puzzle));
+    });
+
+    on('heroActorSearch', async ({ query }) => {
+      // Dedicated channel — does NOT share the autocomplete rate-limit bucket
+      // with live-game autocompleteSearch (different surface, different bucket
+      // name so a malicious hero spam doesn't deny live-game players).
+      if (typeof query !== 'string' || query.length === 0 || query.length > 100) return;
+      if (await rateLimit(socket.id, 'heroActorSearch', RATE_LIMITS.autocomplete.limit, RATE_LIMITS.autocomplete.windowMs)) return;
+      const results = await heroPuzzle.searchPersonForHero(query, TMDB_HEADERS);
+      socket.emit('heroActorResults', { query, results });
+    });
+
+    on('heroGuessSubmit', async ({ pairId, actorTmdbId, actorName }) => {
+      // Server-authoritative validation against the puzzle bank. Bad inputs
+      // (missing pairId, non-numeric tmdbId, oversize actorName) drop silently —
+      // the client falls back to its cached bundled outcome on timeout.
+      if (typeof pairId !== 'string' || pairId.length === 0 || pairId.length > 100) return;
+      if (typeof actorTmdbId !== 'number' || !Number.isInteger(actorTmdbId)) return;
+      if (typeof actorName !== 'string' || actorName.length > 200) actorName = '';
+      if (await rateLimit(socket.id, 'heroGuessSubmit', RATE_LIMITS.submitMovie.limit, RATE_LIMITS.submitMovie.windowMs)) return;
+      const result = heroPuzzle.validateGuess(pairId, actorTmdbId);
+      if (!result.ok) {
+        // Unknown pairId — wire returns a defensive null reveal so the client
+        // can show a generic outcome rather than hanging.
+        socket.emit('heroGuessResult', { pairId, correct: false, revealActor: null });
+        return;
+      }
+      socket.emit('heroGuessResult', {
+        pairId,
+        correct: result.correct,
+        revealActor: result.revealActor,
+      });
     });
 
     // -----------------------------------------------------------------------

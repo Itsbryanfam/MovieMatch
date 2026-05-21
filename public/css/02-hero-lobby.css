@@ -1899,3 +1899,149 @@ input:disabled {
 @media (max-width: 639px) {
   .lobby-qr { display: none; }
 }
+
+/* ============================================================
+   Phase 7.9 — Playable Hero
+   ============================================================
+   The hero replaces the pre-7.7 static .hero-demo block with a
+   playable 2-node mini-filmstrip. Visual rules below scope only
+   the hero-specific shell (#hero-puzzle and its direct children):
+   the .filmstrip/.reel-node/.reel-bridge rules in 03-game.css
+   handle the live-game aesthetic for free.
+
+   Discipline: this section is APPEND-ONLY. Zero edits to any rule
+   above this line. Existing .reel-node / .reel-bridge / .filmstrip
+   rules MUST stay byte-identical (spec guardrails 3 and 4). */
+
+.hero-puzzle-mount {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 16px;
+  max-width: 480px;
+}
+
+.hero-puzzle-prompt {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-main);
+  text-align: center;
+}
+
+/* Subtle pulse on the unsolved bridge — telegraphs "this is the
+   puzzle". Compositor-only (opacity); the global reduced-motion
+   neutralizer in 06-states-anim.css covers this for accessibility. */
+.reel-bridge--unsolved {
+  animation: heroBridgePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes heroBridgePulse {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1.0; }
+}
+
+.hero-puzzle-input {
+  width: 100%;
+  position: relative;
+}
+
+#hero-puzzle-search {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.25);
+  color: var(--text-main);
+  font-size: 0.95rem;
+}
+
+#hero-puzzle-search:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+/* The autocomplete-results container reuses the existing .autocomplete-item
+   class from ui-autocomplete styles. Scope here just bounds its position
+   so it pops below the hero input rather than floating elsewhere. */
+.hero-puzzle-input #hero-puzzle-autocomplete {
+  margin-top: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+}
+
+.hero-puzzle-skip {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.55);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px 10px;
+  text-decoration: underline;
+}
+
+.hero-puzzle-skip:hover {
+  color: var(--text-main);
+}
+
+.hero-puzzle-outcome {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-main);
+  font-size: 0.95rem;
+  text-align: center;
+  opacity: 0;
+  animation: heroOutcomeFadeIn 0.5s ease-out forwards;
+}
+
+@keyframes heroOutcomeFadeIn {
+  to { opacity: 1; }
+}
+
+/* State-driven visibility: while checking, dim the input. After reveal,
+   hide the input + skip and let the outcome card do the talking. */
+#hero-puzzle[data-state="checking"] #hero-puzzle-search {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+#hero-puzzle[data-state^="revealed-"] .hero-puzzle-input,
+#hero-puzzle[data-state^="revealed-"] .hero-puzzle-skip {
+  display: none;
+}
+
+/* Tablet: shrink shell padding so the 2-node filmstrip stays centered
+   without crowding. .reel-node uses its base desktop sizing in this
+   range — its only @media in 03-game.css is at max-width:767px — and
+   composes cleanly inside the smaller shell. */
+@media (max-width: 999px) {
+  .hero-puzzle-mount {
+    padding: 16px 12px;
+    gap: 12px;
+  }
+  .hero-puzzle-prompt {
+    font-size: 1.0rem;
+  }
+}
+
+/* Mobile: compact further; keep the filmstrip horizontal so the
+   "two movies connected" semantics survive the smaller viewport.
+   The mount also carries the .hero-demo class (see index.html), so
+   .hero-demo's pre-existing @media (max-width:480px) overrides for
+   background/border/backdrop-filter still compose here — these rules
+   override only the layout properties (padding/gap/max-width) so the
+   cascade resolves correctly via source order. */
+@media (max-width: 639px) {
+  .hero-puzzle-mount {
+    padding: 12px 8px;
+    gap: 10px;
+    max-width: 100%;
+  }
+  .hero-puzzle-prompt {
+    font-size: 0.95rem;
+  }
+}

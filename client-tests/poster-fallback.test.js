@@ -10,7 +10,7 @@
 // covers the load-FAILURE case for the chain board, the autocomplete
 // list, and the static hero demo posters.
 
-import { initUIElements, renderGame, renderAutocompleteResults, playChainReplay } from '../public/js/ui.js';
+import { initUIElements, renderGame, renderAutocompleteResults, playChainReplay, mountHeroPuzzle } from '../public/js/ui.js';
 const { loadIndexHtml, makePlayingState, makeChainItem } = require('./fixtures');
 
 describe('poster load-failure fallback (audit #3)', () => {
@@ -88,13 +88,30 @@ describe('poster load-failure fallback (audit #3)', () => {
     }
   });
 
-  test('the static hero demo posters declare an onerror fallback', () => {
-    // The 3 hero demo <img>s are static markup (not rendered by ui.js), so
-    // they need an inline onerror to swap to the placeholder styling.
-    const heroImgs = document.querySelectorAll('.hero-demo .demo-poster img');
-    expect(heroImgs.length).toBe(3);
-    heroImgs.forEach((img) => {
-      expect((img.getAttribute('onerror') || '').length).toBeGreaterThan(0);
+  test('hero puzzle reel posters attach attachPosterFallback on mount (Phase 7.9)', () => {
+    // Phase 7.9 replaced the 3 static .demo-poster <img> elements with a
+    // playable hero puzzle whose poster <img>s are painted dynamically by
+    // mountHeroPuzzle. The same attachPosterFallback contract (audit #3)
+    // must hold: a broken-image event replaces the img with the placeholder.
+    const mockSocket = {
+      emit: () => {},
+      on: () => {},
+    };
+    mountHeroPuzzle(mockSocket);
+
+    const reel = document.querySelector('#hero-puzzle .filmstrip .reel');
+    const imgs = reel.querySelectorAll('img.reel-poster');
+    expect(imgs.length).toBe(2);
+
+    imgs.forEach((img) => {
+      // Capture parentElement before firing the error — attachPosterFallback
+      // removes the img from the DOM, so img.parentElement is null after.
+      const parent = img.parentElement;
+      // Simulate the browser failing to load the image.
+      img.dispatchEvent(new Event('error'));
+      // The broken <img> must be replaced by the designed placeholder.
+      expect(parent.querySelector('img.reel-poster')).toBeNull();
+      expect(parent.querySelector('.reel-poster.placeholder')).not.toBeNull();
     });
   });
 });

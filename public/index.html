@@ -150,39 +150,26 @@
           </p>
         </div>
 
-        <!-- Right: Animated demo -->
-        <div class="hero-demo" aria-hidden="true">
-          <div class="demo-label">Live example</div>
-          <div class="chain-item demo-item demo-item-1">
-            <div class="chain-poster demo-poster">
-              <img src="https://image.tmdb.org/t/p/w200/78lPtwv72eTNqFW9COBYI0dWDJa.jpg" alt="Iron Man" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;" onerror="this.remove()">
-            </div>
-            <div class="chain-content">
-              <div class="player-name">Alex</div>
-              <div class="movie-title">Iron Man <span class="year">(2008)</span></div>
-              <div class="movie-cast">Robert Downey Jr., Gwyneth Paltrow, Jeff Bridges</div>
-            </div>
-          </div>
-          <div class="chain-item demo-item demo-item-2 shared-highlight">
-            <div class="chain-poster demo-poster">
-              <img src="https://image.tmdb.org/t/p/w200/6WBeq4fCfn7AN0o21W9qNcRF2l9.jpg" alt="Iron Man 2" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;" onerror="this.remove()">
-            </div>
-            <div class="chain-content">
-              <div class="player-name">Bryan</div>
-              <div class="movie-title">Iron Man 2 <span class="year">(2010)</span></div>
-              <div class="movie-cast"><strong>Robert Downey Jr.</strong>, Scarlett Johansson, Don Cheadle</div>
+        <!-- Right: Playable Hero — Phase 7.9. Replaces the pre-7.7 static
+             demo. Driver paints the 2-node mini-filmstrip + unsolved bridge
+             into .reel; the existing .filmstrip/.reel-node/.reel-bridge
+             rules from 03-game.css supply the live-game aesthetic. -->
+        <div class="hero-demo hero-puzzle-mount"
+             id="hero-puzzle"
+             data-state="awaiting-guess"
+             aria-label="Try a turn — name the actor connecting these two">
+          <div class="hero-puzzle-prompt">Who connects these two?</div>
+          <div class="filmstrip">
+            <div class="reel">
+              <!-- Driver paints: .reel-node × 2 + .reel-bridge.reel-bridge--unsolved -->
             </div>
           </div>
-          <div class="chain-item demo-item demo-item-3 shared-highlight">
-            <div class="chain-poster demo-poster">
-              <img src="https://image.tmdb.org/t/p/w200/2Epx7F9X7DrFptn4seqn4mzBVks.jpg" alt="The Jungle Book" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;" onerror="this.remove()">
-            </div>
-            <div class="chain-content">
-              <div class="player-name">Alex</div>
-              <div class="movie-title">The Jungle Book <span class="year">(2016)</span></div>
-              <div class="movie-cast"><strong>Scarlett Johansson</strong>, Bill Murray, Ben Kingsley</div>
-            </div>
+          <div class="hero-puzzle-input">
+            <input id="hero-puzzle-search" type="text"
+                   placeholder="Name an actor in both…" autocomplete="off">
+            <div class="autocomplete-results" id="hero-puzzle-autocomplete"></div>
           </div>
+          <button class="hero-puzzle-skip" type="button">Show me</button>
         </div>
 
       </div>
