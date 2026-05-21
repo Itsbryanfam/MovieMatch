@@ -36,7 +36,7 @@ describe('toClientPuzzle', () => {
     expect(wire.movieA).toEqual(sample.movieA);
     expect(wire.movieB).toEqual(sample.movieB);
     expect(wire.revealActor).toEqual(sample.revealActor);
-    // validActorTmdbIds is the strict secret per spec §3.3 — never on the wire.
+    // validActorTmdbIds is the strict secret (multi-actor answer set) — never on the wire.
     expect(wire.validActorTmdbIds).toBeUndefined();
   });
 });
