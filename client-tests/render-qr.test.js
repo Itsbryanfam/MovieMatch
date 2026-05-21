@@ -5,7 +5,18 @@
 // mount elements via document.createElement. Real-lobby-DOM integration
 // tests land in T1 after the lobby-qr <div>s exist in index.html.
 
-const { loadVendoredQrLib } = require('./fixtures');
+// jest.mock is hoisted to the top of the module by babel-jest regardless of
+// source position. Declaring it here (file-top) makes the scope explicit:
+// the mock applies to the ENTIRE file (both describe blocks below), not just
+// the integration block where it was previously written.
+const { loadVendoredQrLib, loadIndexHtml, makeWaitingState, makePlayer } = require('./fixtures');
+const mockEmit = jest.fn();
+jest.mock('../public/js/state.js', () => ({
+  getSocket: () => ({ emit: mockEmit }),
+  getCurrentLobbyId: () => 'TEST01',
+}));
+// Re-import via the ui.js barrel — same shape as render-lobby.test.js.
+import { initUIElements, renderLobby } from '../public/js/ui.js';
 import { renderQR, clearQR } from '../public/js/ui/ui-qr.js';
 
 beforeAll(() => {
@@ -93,15 +104,10 @@ describe('renderQR / clearQR — pure unit', () => {
 // ─── Integration test for #waiting-room-qr (Phase 7.8c T1) ───
 // Lives in render-qr.test.js (not render-lobby.test.js, which is sacrosanct).
 describe('renderLobby — classic lobby QR integration', () => {
-  const { loadIndexHtml, makeWaitingState, makePlayer } = require('./fixtures');
-  const mockEmit = jest.fn();
-  jest.mock('../public/js/state.js', () => ({
-    getSocket: () => ({ emit: mockEmit }),
-    getCurrentLobbyId: () => 'TEST01',
-  }));
-  // Re-import via the ui.js barrel — same shape as render-lobby.test.js.
-  const { initUIElements, renderLobby } = require('../public/js/ui.js');
-
+  // mockEmit, loadIndexHtml, makeWaitingState, makePlayer, renderLobby, and
+  // jest.mock('../public/js/state.js') are all declared at file-top above.
+  // Keeping them there (not nested here) matches the babel-jest hoisting
+  // reality and the pattern in render-team-screen.test.js.
   beforeEach(() => { loadIndexHtml(); initUIElements(); mockEmit.mockClear(); });
 
   test('renderLobby paints SVG into #waiting-room-qr .lobby-qr-svg', () => {
