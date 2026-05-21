@@ -1836,3 +1836,66 @@ input:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ╔══════════════════════════════════════════════════════════════╗
+   ║  === Phase 7.8c — QR Scan-to-Join ===                        ║
+   ║  Appended (append-only per spec §8.4). Zero deletions.       ║
+   ║  Implements:                                                  ║
+   ║    (a) Compact 140×140 white QR tile in .lobby-head, right    ║
+   ║        of the room code. Same selectors serve classic and    ║
+   ║        team lobbies — zero divergence, one rule set.         ║
+   ║    (b) Tablet shrink to 110px; mobile hide (<640px).         ║
+   ║  No new color tokens; --radius-md and --bg-base are existing.║
+   ╚══════════════════════════════════════════════════════════════╝ */
+
+/* ── (a) Compact QR tile ── */
+/* WHY white background: QR readers require light-on-dark contrast for
+   reliable scanning. Hard-coded #ffffff because there is no existing
+   "panel white" token — and we don't want to invent one for a single
+   localized use. The white tile reads as a print-style sticker against
+   the dark lobby panel, which is visually consistent with how QR codes
+   are normally seen (posters, stickers, business cards). */
+.lobby-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: #ffffff;
+  border-radius: var(--radius-md);
+  width: 140px;
+  flex-shrink: 0;                    /* Don't squeeze when flex sibling is wide */
+}
+
+/* ui-qr.js paints an inline <svg> into .lobby-qr-svg. The viewBox handles
+   scaling — we just set a CSS width/height and the SVG fills it crisply. */
+.lobby-qr-svg { width: 120px; height: 120px; }
+.lobby-qr-svg svg { display: block; width: 100%; height: 100%; }
+
+/* WHY dark caption text: the parent .lobby-qr tile is white, so the
+   dark page-bg color (--bg-base) reads as a high-contrast label.
+   The all-caps + letter-spacing matches the .ref-eyebrow / screen-eyebrow
+   typographic system used elsewhere in the lobby. */
+.lobby-qr-caption {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--bg-base);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── (b) Responsive ── */
+/* Tablet: shrink to 110px so the lobby-head doesn't dominate at narrower
+   viewports. The QR still encodes the same data — viewBox scaling handles
+   the resize at zero visual cost. */
+@media (max-width: 999px) {
+  .lobby-qr { width: 110px; }
+  .lobby-qr-svg { width: 92px; height: 92px; }
+}
+
+/* Mobile: hide entirely. Phones ARE the scanner — they don't need to see
+   what they're scanning, and hiding frees up cramped header space. The
+   room code text remains visible and tappable (click-to-copy preserved). */
+@media (max-width: 639px) {
+  .lobby-qr { display: none; }
+}

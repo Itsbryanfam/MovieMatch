@@ -257,6 +257,12 @@
             <h2>Room: <span id="lobby-code-display" class="accent-text code"></span></h2>
             <p>The cast is arriving — take your seats.</p>
           </div>
+          <!-- Phase 7.8c — QR scan-to-join. ui-render.js paints the SVG into
+               .lobby-qr-svg whenever renderLobby() fires with a state.id. -->
+          <div class="lobby-qr" id="waiting-room-qr">
+            <div class="lobby-qr-svg" data-mount="qr"></div>
+            <div class="lobby-qr-caption">Scan to join</div>
+          </div>
           <label class="setting-toggle public-toggle" title="List this room on the Public Matchmaking viewer">
             <input type="checkbox" id="public-room-toggle" disabled>
             <span>Public Room</span>
@@ -385,6 +391,12 @@
           <div class="head-title">
             <h2>Room: <span id="team-lobby-code" class="accent-text code"></span></h2>
             <p>Pick your side — the rivals are taking the stage.</p>
+          </div>
+          <!-- Phase 7.8c — QR scan-to-join. ui-render.js paints the SVG into
+               .lobby-qr-svg whenever renderTeamScreen() fires with a state.id. -->
+          <div class="lobby-qr" id="team-screen-qr">
+            <div class="lobby-qr-svg" data-mount="qr"></div>
+            <div class="lobby-qr-caption">Scan to join</div>
           </div>
         </div>
 
@@ -803,6 +815,10 @@
     <div id="notification-text"></div>
   </div>
 
+  <!-- Phase 7.8c — vendored qrcode-generator (MIT). Loaded as a classic
+       (non-module) script BEFORE the module script so window.qrcode is
+       defined before ui-qr.js calls it. Tiny (~10kb), no defer needed. -->
+  <script src="/js/lib/qrcode.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

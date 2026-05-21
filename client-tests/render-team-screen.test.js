@@ -8,7 +8,9 @@
 // - join/start gating logic byte-identical to today
 // - ledger sync to team-suffixed controls
 
-const { loadIndexHtml, makeWaitingState, makePlayer } = require('./fixtures');
+// loadVendoredQrLib is included here so it's available for the beforeAll
+// that pre-loads window.qrcode before the QR integration test (Phase 7.8c).
+const { loadIndexHtml, makeWaitingState, makePlayer, loadVendoredQrLib } = require('./fixtures');
 const mockEmit = jest.fn();
 jest.mock('../public/js/state.js', () => ({
   getSocket: () => ({ emit: mockEmit }),
@@ -31,6 +33,10 @@ const teamState = (overrides = {}) => makeWaitingState({
 
 describe('renderTeamScreen — team theater parity', () => {
   beforeEach(() => { loadIndexHtml(); initUIElements(); mockEmit.mockClear(); });
+  // Phase 7.8c — load the vendored qrcode-generator once before any test in
+  // this suite runs, so window.qrcode is defined for the QR integration test.
+  // Positioned adjacent to beforeEach (conventional lifecycle-hook location).
+  beforeAll(() => { loadVendoredQrLib(); });
 
   test('2-red-vs-3-blue renders 2 .seat.team-red + 3 .seat.team-blue', () => {
     renderLobby(teamState(), 'host_id');
@@ -160,5 +166,19 @@ describe('renderTeamScreen — team theater parity', () => {
     // The seat DOM is rebuilt each render, so arrival-diff returns no new ids.
     renderLobby(st, 'host_id');
     expect(document.querySelectorAll('#team-screen li.seat.entering').length).toBe(0);
+  });
+
+  // Phase 7.8c — team-mode QR integration. Mirrors the classic test in
+  // render-qr.test.js; pinned in this file too so the team contract
+  // explicitly covers the QR mount.
+
+  test('renderLobby paints SVG into #team-screen-qr .lobby-qr-svg in team mode', () => {
+    const state = teamState({ id: 'XYZ987' });
+    renderLobby(state, 'host_id');
+    const mount = document.querySelector('#team-screen-qr .lobby-qr-svg');
+    expect(mount).not.toBeNull();
+    const svg = mount.querySelector('svg');
+    expect(svg).not.toBeNull();
+    expect(mount.dataset.qrUrl).toMatch(/\?room=XYZ987$/);
   });
 });

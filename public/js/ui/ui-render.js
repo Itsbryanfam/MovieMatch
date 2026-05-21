@@ -38,6 +38,12 @@ import { clearGhostAttempt, renderPendingGhost } from './ui-notifications.js';
 // client-side (compute every OTHER player's effective hue) so taken
 // swatches render disabled — the server is still the arbiter.
 import { diffArrivals, playerCardModel, seatModel, rollCameraLabel, SEAT_HUES } from './red-carpet.js';
+// Phase 7.8c — QR scan-to-join. renderQR is the thin wrapper around the
+// vendored qrcode-generator; makeJoinUrl is the single source of truth for
+// invite-URL format (extracted from app.js inline duplications into a leaf
+// module to avoid a cycle through the ui.js barrel — see url-helpers.js).
+import { renderQR } from './ui-qr.js';
+import { makeJoinUrl } from '../url-helpers.js';
 // Phase 7.8b: shared DOM builder — single source of truth for the seat <li>
 // shape, used by both renderLobby (classic) and renderTeamScreen (team).
 // WHY NOT via ui.js barrel: ui-render.js is itself re-exported by that barrel,
@@ -350,6 +356,14 @@ export function renderLobby(gameState, myPlayerId) {
     const botRow = buildAddBotRow(amIHost, gameState.id);
     if (botRow) startBtn.insertAdjacentElement('afterend', botRow);
   }
+
+  // Phase 7.8c — paint the lobby QR if its mount node exists and we have a
+  // lobby code. The memo inside renderQR skips re-encoding on every render
+  // call, so this is cheap to invoke unconditionally.
+  const classicQrMount = document.querySelector('#waiting-room-qr .lobby-qr-svg');
+  if (classicQrMount && gameState.id) {
+    renderQR(classicQrMount, makeJoinUrl(gameState.id));
+  }
 }
 
 // Phase 7.8b: shared host-only "Add Bot" row builder. Extracted from the
@@ -508,6 +522,12 @@ export function renderTeamScreen(gameState, myPlayerId, amIHost) {
       const row = buildAddBotRow(amIHost, gameState.id);
       if (row) botContainer.appendChild(row);
     }
+  }
+
+  // Phase 7.8c — paint the team-screen QR. Same mount-pattern as classic.
+  const teamQrMount = document.querySelector('#team-screen-qr .lobby-qr-svg');
+  if (teamQrMount && gameState.id) {
+    renderQR(teamQrMount, makeJoinUrl(gameState.id));
   }
 }
 

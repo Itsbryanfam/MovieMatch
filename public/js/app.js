@@ -35,6 +35,12 @@ import { initSocket, leaveLobby } from './socketClient.js';
 import { getSocket, getCurrentLobbyId, getGameState } from './state.js';
 import { prepareAudio, getStableId, unlockAudioGlobally, isMuted, toggleMute, prefersReducedMotion } from './utils.js';
 import { runTutorial, runTutorialThenContinue } from './tutorial.js';
+// Phase 7.8c — single source of truth for invite-link URL format. Extracted
+// to a leaf module (not defined here) so ui-render.js can import it without
+// creating a cycle through the ui.js barrel. Imported here for local use
+// AND re-exported so any caller that already imports from app.js still works.
+import { makeJoinUrl } from './url-helpers.js';
+export { makeJoinUrl };
 
 // ============================================================================
 // LOBBY SETTINGS CHANGE HANDLERS — exported for unit testing
@@ -119,7 +125,8 @@ document.addEventListener('DOMContentLoaded', () => {
   gameInviteBtn?.addEventListener('click', () => {
     const code = getCurrentLobbyId();
     if (!code) return;
-    const url = window.location.origin + '?room=' + code;
+    // Phase 7.8c: replaced inline URL construction with shared makeJoinUrl.
+    const url = makeJoinUrl(code);
     navigator.clipboard.writeText(url)
       .then(() => showToast('Invite link copied! 🔗'))
       .catch(() => showToast('Room code: ' + code));
@@ -392,7 +399,8 @@ document.addEventListener('DOMContentLoaded', () => {
     element.addEventListener('click', () => {
       const code = element.innerText.trim();
       if (!code) return;
-      const url = window.location.origin + '?room=' + code;
+      // Phase 7.8c: replaced inline URL construction with shared makeJoinUrl.
+      const url = makeJoinUrl(code);
       navigator.clipboard.writeText(url).then(() => {
         showToast('Invite link copied! \uD83D\uDD17');
       }).catch(() => {
