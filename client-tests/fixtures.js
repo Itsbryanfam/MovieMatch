@@ -30,10 +30,12 @@ function loadIndexHtml() {
 }
 
 // Phase 7.8c — load the vendored qrcode-generator into the jsdom global so
-// tests can exercise the real encoder path. The vendored UMD assigns
-// `var qrcode = ...` at top level; in a browser that becomes window.qrcode.
-// In jsdom we use indirect eval (0, eval) to evaluate in global scope so
-// the var lands on the jsdom window instead of inside a local function frame.
+// tests can exercise the real encoder path. The vendored library has a
+// top-level `var qrcode = function(){...}()` IIFE (around line 18 of qrcode.js);
+// under non-strict indirect-eval, that top-level `var` lands on the global
+// object, which in jsdom is the window. The UMD wrapper at the file tail is
+// dead code here (no AMD `define` global, no CommonJS `exports` global
+// reachable via indirect-eval) — the IIFE alone is what exposes window.qrcode.
 function loadVendoredQrLib() {
   // Idempotent: skip if already loaded by a prior test in the same worker.
   if (typeof window.qrcode === 'function') return;
