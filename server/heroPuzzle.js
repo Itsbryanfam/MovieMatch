@@ -97,8 +97,8 @@ function pickRandomPuzzle() {
 }
 
 // Strip the multi-actor answer SET (validActorTmdbIds) — the strict
-// secret per spec §3.3. Keep revealActor (the single canonical name)
-// in the wire payload so the client's "Show me" path (spec §4.6) can
+// secret (multi-actor answer set). Keep revealActor (the single canonical name)
+// in the wire payload so the client's "Show me" path (the local Show Me path) can
 // run locally with no socket round-trip, regardless of whether the
 // current puzzle came from the bundled bank or the server. Without
 // revealActor here the spec contradicts itself (server puzzles would

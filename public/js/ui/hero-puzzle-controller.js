@@ -1,14 +1,14 @@
 // public/js/ui/hero-puzzle-controller.js — Phase 7.9 Playable Hero driver.
 // Thin driver layer. Imports the pure seam + wires the DOM + socket events.
 // Module-level state is scoped to the current tab session — no persistence
-// across reloads (cross-session memory is out of scope per spec §9).
+// across reloads (cross-session memory is deferred scope).
 //
 // Public surface:
 //   - mountHeroPuzzle(socket) — idempotent; paints bundled puzzle into
 //     #hero-puzzle, wires the input + autocomplete, kicks off the lazy
 //     server request. No-op if already mounted (dataset flag).
 
-import { pickBundledPuzzle, classifyOutcome } from './hero-puzzle.js';
+import { pickBundledPuzzle } from './hero-puzzle.js';
 import { attachPosterFallback } from './ui-dom.js';
 
 // Module-level state. Scoped to one tab session.
@@ -18,7 +18,6 @@ import { attachPosterFallback } from './ui-dom.js';
 // Module-level variables below are reset by _resetState() on each mount call
 // when the element does not carry the mounted flag.
 let _currentPuzzle = null;
-let _serverPuzzle = null;
 let _seen = [];
 let _debounceTimer = null;
 const SEARCH_DEBOUNCE_MS = 200;
@@ -27,8 +26,8 @@ const SEARCH_DEBOUNCE_MS = 200;
 // starts clean even though the module is cached.
 function _resetState() {
   _currentPuzzle = null;
-  _serverPuzzle = null;
   _seen = [];
+  if (_debounceTimer) clearTimeout(_debounceTimer);
   _debounceTimer = null;
 }
 
@@ -97,12 +96,12 @@ function _buildReelNode(movie) {
   return node;
 }
 
-function _buildBridge(labelText) {
+function _buildBridge() {
   const bridge = document.createElement('div');
   bridge.className = 'reel-bridge reel-bridge--unsolved';
   const label = document.createElement('span');
   label.className = 'reel-bridge-label';
-  label.textContent = labelText || '↔ ?';
+  label.textContent = '↔ ?';
   bridge.appendChild(label);
   return bridge;
 }
@@ -135,7 +134,6 @@ function _wireSkip(container) {
 
 function _handlePuzzleDelivered(container, payload) {
   if (!payload || !payload.pairId) return;
-  _serverPuzzle = payload;
   const input = container.querySelector('#hero-puzzle-search');
   if (
     container.dataset.state === 'awaiting-guess' &&
@@ -207,6 +205,8 @@ function _handleGuessResult(container, payload) {
   if (!payload) return;
   if (container.dataset.pairId !== payload.pairId) return;
   if (container.dataset.state !== 'checking') return;
+  // The pairId guard above ensures container.dataset.pairId === payload.pairId,
+  // so _currentPuzzle.revealActor is a safe fallback for the same puzzle.
   const revealActor = payload.revealActor || _currentPuzzle.revealActor || { name: 'Unknown' };
   const kind = payload.correct ? 'correct' : 'incorrect';
   _revealNow(container, revealActor, kind);

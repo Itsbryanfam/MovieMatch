@@ -67,6 +67,10 @@ const RATE_LIMITS = {
   //                       clicking through options is never blocked, but a
   //                       toggle-flood across any mix of them is still capped.
   //   requestPosters   — pure cache read, but still a free socket round-trip.
+  // Phase 7.9: Playable Hero — pre-room request the hero mount fires
+  // exactly once on page load. 5/30s tolerates legit page-refresh bursts
+  // and rejects any kind of automated spin loop.
+  heroPuzzleRequest: { limit: 5, windowMs: 30000 },
   rejoinLobby:   { limit: 10, windowMs: 10000 },
   publicLobbies: { limit: 12, windowMs: 10000 },
   lobbyConfig:   { limit: 30, windowMs: 10000 },
@@ -335,10 +339,12 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     const heroPuzzle = require('./heroPuzzle');
 
     on('heroPuzzleRequest', async () => {
-      // Lazy: client emits once on hero mount. No payload validation needed —
-      // the request itself carries no data. Server picks random + strips the
-      // multi-actor answer set before emitting back (revealActor stays for
-      // the client's local Show Me path).
+      // Lazy: client emits once on hero mount. Rate-limited (5/30s) so a
+      // misbehaving client cannot loop on this pure cache-shaped request —
+      // closes the audit-finding-#5 gap for the new handler.
+      if (await rateLimit(socket.id, 'heroPuzzleRequest', RATE_LIMITS.heroPuzzleRequest.limit, RATE_LIMITS.heroPuzzleRequest.windowMs)) return;
+      // Pick random + strip the multi-actor answer set before emitting back
+      // (revealActor stays for the client's local Show Me path).
       const puzzle = heroPuzzle.pickRandomPuzzle();
       socket.emit('heroPuzzleDelivered', heroPuzzle.toClientPuzzle(puzzle));
     });
