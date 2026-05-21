@@ -804,3 +804,61 @@
 }
 .recap-actions .btn-primary, .recap-actions .btn-secondary { flex: 1; }
 
+/* ============================================================================
+   Phase 7.10 — DS-01 pass 2: 6 new rules migrating modal-related inline
+   style attrs from index.html. Each rule preserves the previous inline
+   pixel values byte-for-byte. ID-based selectors are used where the
+   element has a unique id and a unique style. Combined selectors are
+   used where two elements share byte-identical styles.
+   ============================================================================ */
+
+/* Was inline at index.html:692 — wrapper centering for the replay-tutorial
+   button at the foot of the How-to-Play modal. */
+.replay-tutorial-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+/* Was inline at index.html:694 — padding override for the replay-tutorial
+   button (the existing .btn-secondary defaults are larger). */
+#replay-tutorial-btn {
+  padding: 0.5rem 1.2rem;
+}
+
+/* Was inline at index.html:752 — scroll constraint for the Leaderboard
+   modal body. The 400px ceiling is a deliberate fixed height for the
+   leaderboard scroll (distinct from the 60vh used by my-stats and
+   daily-result, which need to grow on tall screens). */
+#leaderboard-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 1rem;
+}
+
+/* Was inline at index.html:766 and :784 — byte-identical scroll
+   constraint for the My Stats and Daily Result modal bodies. */
+#my-stats-body,
+#daily-result-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-top: 1rem;
+}
+
+/* Was inline at index.html:785 — the .daily-result-actions class was
+   already on the element; this gives it its first CSS rule. Centered
+   horizontal action row at the foot of the Daily Result modal. */
+.daily-result-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+/* Was inline at index.html:787 and :788 — byte-identical padding for
+   the Daily Result modal's two action buttons. */
+#daily-result-share-btn,
+#daily-result-close-btn {
+  padding: 0.55rem 1.2rem;
+}
+
