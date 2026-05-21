@@ -98,8 +98,9 @@ document.addEventListener('DOMContentLoaded', () => {
   unlockAudioGlobally();
 
   // Phase 7.9: Playable Hero — paint the bundled puzzle into #hero-puzzle
-  // and wire DOM + socket events. Idempotent (guarded by a module-level
-  // _mounted flag) so duplicate DOMContentLoaded ticks don't double-paint.
+  // and wire DOM + socket events. Idempotent (guarded by container.dataset.mounted
+  // so the test harness's loadIndexHtml DOM teardown resets the flag naturally
+  // between tests, while production sees one mount per page lifetime).
   mountHeroPuzzle(socket);
 
   // =========================================================================

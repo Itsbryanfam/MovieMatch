@@ -140,6 +140,36 @@ describe('mountHeroPuzzle', () => {
     expect(outcome.textContent.toLowerCase()).toContain('nailed');
   });
 
+  test('heroGuessResult correct=false flips state to revealed-incorrect with "Almost" copy', () => {
+    mountHeroPuzzle(socket);
+    const mount = document.getElementById('hero-puzzle');
+
+    // Same setup as the correct=true test: get into 'checking' state via
+    // dropdown click flow.
+    socket.__fire('heroActorResults', {
+      query: 'sca',
+      results: [{ tmdbId: 999, name: 'Wrong Actor', profilePath: null, knownFor: [] }],
+    });
+    document.querySelector('#hero-puzzle-autocomplete .autocomplete-item').click();
+    expect(mount.dataset.state).toBe('checking');
+
+    socket.__fire('heroGuessResult', {
+      pairId: mount.dataset.pairId,
+      correct: false,
+      revealActor: { tmdbId: 1245, name: 'Scarlett Johansson' },
+    });
+
+    expect(mount.dataset.state).toBe('revealed-incorrect');
+
+    const bridge = document.querySelector('#hero-puzzle .reel-bridge');
+    expect(bridge.classList.contains('reel-bridge--unsolved')).toBe(false);
+    expect(bridge.textContent).toContain('Scarlett Johansson');
+
+    const outcome = document.querySelector('#hero-puzzle .hero-puzzle-outcome');
+    expect(outcome).toBeTruthy();
+    expect(outcome.textContent.toLowerCase()).toContain('almost');
+  });
+
   test('Show me skips to reveal using current puzzle revealActor, no socket emit', () => {
     mountHeroPuzzle(socket);
     const before = socket.__emits.length;
