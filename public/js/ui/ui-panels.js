@@ -394,6 +394,10 @@ export function renderDailyResult(data) {
   if (leaderboard.length === 0) {
     // Phase 7.10 — DS-01 pass 2: padding override moved to .empty-hint--sm
     // modifier in 03-game.css; the 1rem here is smaller than the lg variant.
+    // Side-note: the original inline style omitted font-style, but the base
+    // .empty-hint rule (03-game.css:357-363) sets font-style: italic — so
+    // post-migration this empty hint becomes italic. Visually harmless and
+    // aligns with the stats-empty case that always had italic.
     const empty = document.createElement('div');
     empty.className = 'empty-hint empty-hint--sm';
     empty.textContent = 'No results yet. Yours could be the first!';

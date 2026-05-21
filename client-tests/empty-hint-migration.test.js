@@ -36,9 +36,6 @@ describe('Phase 7.10 T1 — empty-hint cleanup', () => {
       // The "No open lobbies" template lives at socketClient.js:115. Post-migration
       // it should be `<div class="empty-hint empty-hint--lg">No open lobbies...`
       // with no `style="..."` substring on that line.
-      const m = src.match(/No open lobbies found[^<]*<\/div>['"]/);
-      // The capture is the surrounding template; pull the preceding `<div ...>`
-      // tag to validate the class + no inline style.
       const tagMatch = src.match(/<div\s+class="empty-hint empty-hint--lg">No open lobbies/);
       expect(tagMatch).not.toBeNull();
       // Negative: no `style="..."` should appear on the "No open lobbies" line.
