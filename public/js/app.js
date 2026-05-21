@@ -17,6 +17,7 @@ import {
   initUIElements, closeMobileAc, openShareModal, showNotification, showToast,
   buildTextRecap, showDailyNamePrompt, // WHY: HL-01 — name-less Daily seam
   showScreen, // WHY: canonical group-normaliser added in Phase 3 Task D
+  mountHeroPuzzle, // Phase 7.9: Playable Hero driver mount
   submissionPill, // Phase 7.2 (CG-03): keeps submitted title visible during TMDB round-trip
   createPromptModal, buildNamePromptConfig, buildJoinPromptConfig, // Phase 7.3 (MI-02): shared prompt-modal factory + builders
   playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
@@ -95,6 +96,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 3. Unlock audio for browsers that require user interaction
   unlockAudioGlobally();
+
+  // Phase 7.9: Playable Hero — paint the bundled puzzle into #hero-puzzle
+  // and wire DOM + socket events. Idempotent (guarded by a module-level
+  // _mounted flag) so duplicate DOMContentLoaded ticks don't double-paint.
+  mountHeroPuzzle(socket);
 
   // =========================================================================
   // MUTE BUTTON

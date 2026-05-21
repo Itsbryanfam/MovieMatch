@@ -18,3 +18,4 @@ export * from './ui/ui-panels.js';
 export * from './ui/recap-player.js';   // Phase 7.6: Chain Premiere Recap driver (playRecap/cancelRecap)
 export * from './ui/turn-motion.js';   // Phase 7.7: pure per-turn motion timeline + clutch-save predicate
 export * from './ui/hero-puzzle.js';   // Phase 7.9: pure Playable Hero seam (bank + picker + classifier)
+export * from './ui/hero-puzzle-controller.js';   // Phase 7.9: Playable Hero driver
