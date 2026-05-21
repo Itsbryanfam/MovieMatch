@@ -609,9 +609,10 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadLeaderboard() {
     leaderboardModal.classList.remove('hidden');
     leaderboardList.innerHTML = '';
+    // Phase 7.10 \u2014 DS-01 pass 2: classes migrated to 03-game.css.
+    // .empty-hint--lg preserves the previous 2rem inline padding override.
     const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'empty-hint';
-    loadingDiv.style.cssText = 'text-align:center;padding:2rem;color:var(--text-muted);';
+    loadingDiv.className = 'empty-hint empty-hint--lg';
     loadingDiv.textContent = 'Loading...';
     leaderboardList.appendChild(loadingDiv);
     try {
@@ -620,23 +621,24 @@ document.addEventListener('DOMContentLoaded', () => {
       leaderboardList.innerHTML = '';
       if (!data.length) {
         const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'empty-hint';
-        emptyDiv.style.cssText = 'text-align:center;padding:2rem;color:var(--text-muted);font-style:italic;';
+        emptyDiv.className = 'empty-hint empty-hint--lg';
         emptyDiv.textContent = 'No wins recorded yet. Play a game!';
         leaderboardList.appendChild(emptyDiv);
         return;
       }
       data.forEach((entry, i) => {
+        // Phase 7.10 \u2014 DS-01 pass 2: row/rank/name/wins styling moved to
+        // .leaderboard-* component classes in 03-game.css.
         const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;padding:0.75rem 1rem;border-bottom:1px solid rgba(255,255,255,0.06);';
+        row.className = 'leaderboard-row';
         const rank = document.createElement('span');
-        rank.style.cssText = 'width:2.5rem;font-size:1.1rem;text-align:center;flex-shrink:0;';
+        rank.className = 'leaderboard-rank';
         rank.textContent = i === 0 ? '\uD83E\uDD47' : i === 1 ? '\uD83E\uDD48' : i === 2 ? '\uD83E\uDD49' : '#' + (i + 1);
         const name = document.createElement('span');
-        name.style.cssText = 'flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        name.className = 'leaderboard-name';
         name.textContent = entry.name;
         const wins = document.createElement('span');
-        wins.style.cssText = 'color:var(--text-muted,#94a3b8);font-size:0.9rem;flex-shrink:0;margin-left:0.5rem;';
+        wins.className = 'leaderboard-wins';
         wins.textContent = entry.wins + ' \uD83C\uDFC6';
         row.appendChild(rank);
         row.appendChild(name);
@@ -646,8 +648,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       leaderboardList.innerHTML = '';
       const errorDiv = document.createElement('div');
-      errorDiv.className = 'empty-hint';
-      errorDiv.style.cssText = 'text-align:center;padding:2rem;color:var(--text-muted);';
+      errorDiv.className = 'empty-hint empty-hint--lg';
       errorDiv.textContent = 'Failed to load leaderboard.';
       leaderboardList.appendChild(errorDiv);
     }

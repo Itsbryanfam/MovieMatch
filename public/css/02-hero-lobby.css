@@ -128,19 +128,11 @@
   opacity: 0.85;
 }
 
-.hero-demo .demo-item {
-  opacity: 0;
-  transform: translateY(-40px);
-  will-change: transform, opacity;
-}
-
-.hero-demo.animate-demo .demo-item {
-  animation: dropIn 1s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.hero-demo.animate-demo .demo-item-1 { animation-delay: 0.2s; }
-.hero-demo.animate-demo .demo-item-2 { animation-delay: 0.8s; }
-.hero-demo.animate-demo .demo-item-3 { animation-delay: 1.4s; }
+/* Phase 7.10 — DS-01 pass 2: 5 dead demo-item / animate-demo rules
+   deleted. Verified zero JS and zero markup consumers at commit 7ad0857
+   (Phase 7.9 replaced the hero-demo block with #hero-puzzle, leaving
+   these rules orphaned). The matching inline <style> block in index.html
+   at L79-82 was deleted alongside in the same task. */
 
 .demo-poster {
   width: 56px;
@@ -2044,4 +2036,37 @@ input:disabled {
   .hero-puzzle-prompt {
     font-size: 0.95rem;
   }
+}
+
+/* ============================================================================
+   Phase 7.10 — DS-01 pass 2: .join-public-btn padding/width override.
+   Was inline at socketClient.js:193 via .style.cssText. The .join-public-btn
+   class is already on the element; this gives it its first CSS rule.
+   ============================================================================ */
+.join-public-btn {
+  padding: 0.5rem 1rem;
+  width: auto;
+}
+
+/* ============================================================================
+   Phase 7.10 — DS-01 pass 2: 2 rules migrating index.html inline-style attrs.
+
+   #join-panel .input-group-vertical was style="margin-bottom: 1.5rem;"
+   at index.html:186 (the player-name input wrapper, Stage 1). The contextual
+   selector limits the override to the join-panel context — other
+   .input-group-vertical callers (e.g., the private-panel one at
+   index.html:204) keep their default zero margin.
+
+   #join-btn was style="margin-bottom:0.75rem;" at index.html:209. NOTE: this
+   button lives in #private-panel (Stage 2A), not in #join-panel — but the
+   #join-btn ID selector is unique so no contextual scoping is needed. The
+   two rules are grouped here purely because they're both lobby-screen UI;
+   no shared container is implied.
+   ============================================================================ */
+#join-panel .input-group-vertical {
+  margin-bottom: 1.5rem;
+}
+
+#join-btn {
+  margin-bottom: 0.75rem;
 }

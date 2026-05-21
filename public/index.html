@@ -76,10 +76,6 @@
   <link rel="stylesheet" href="css/06-states-anim.css?v=1.4">
   <script src="/socket.io/socket.io.js"></script>
 
-  <style>
-    /* Prevent flicker for hero demo */
-    .hero-demo .demo-item { opacity: 0; transform: translateY(-40px); }
-  </style>
 </head>
 <body>
   <div id="offline-banner" class="offline-banner hidden">
@@ -183,7 +179,7 @@
           <h2>Player Setup</h2>
           <p>Who's playing tonight?</p>
         </div>
-        <div class="input-group-vertical" style="margin-bottom: 1.5rem;">
+        <div class="input-group-vertical">
           <label for="player-name">Player Name</label>
           <input type="text" id="player-name" placeholder="John Doe" autocomplete="off" />
         </div>
@@ -206,7 +202,7 @@
           <input type="text" id="lobby-id-input" placeholder="Leave blank to create new" autocomplete="off" />
         </div>
         <!-- Phase 4: .btn additive base (cursor:pointer already on btn-primary/btn-secondary); zero visual change. -->
-        <button id="join-btn" class="btn btn-primary" style="margin-bottom:0.75rem;">Connect to Room</button>
+        <button id="join-btn" class="btn btn-primary">Connect to Room</button>
         <button id="back-to-join-btn" class="btn btn-secondary">Back</button>
       </div>
 
@@ -222,7 +218,7 @@
         </div>
 
         <div class="public-lobbies-list" id="public-lobbies-list">
-           <div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">Loading lobbies...</div>
+           <div class="empty-hint empty-hint--lg">Loading lobbies...</div>
         </div>
 
         <!-- Phase 4: .btn additive base (cursor:pointer already on btn-secondary); zero visual change. -->
@@ -462,7 +458,7 @@
             </div>
 
             <div>
-              <button id="team-start-btn" class="btn btn-primary ref-cta" style="display:none;">🎬 Start Match</button>
+              <button id="team-start-btn" class="btn btn-primary ref-cta hidden">🎬 Start Match</button>
               <div class="add-bot-row" id="add-bot-row-team"></div>
               <button id="team-back-btn" class="btn btn-secondary team-back">← Back to mode</button>
               <p class="team-hint" id="team-hint">Teams need at least 1 player each.</p>
@@ -479,7 +475,7 @@
       <nav class="mobile-tabs" id="mobile-tabs">
         <button class="mobile-tab active" data-tab="board">🎬 Board</button>
         <button class="mobile-tab" data-tab="players">👥 Players</button>
-        <button class="mobile-tab" data-tab="chat">💬 Chat <span id="chat-badge" style="display:none;"></span></button>
+        <button class="mobile-tab" data-tab="chat">💬 Chat <span id="chat-badge" class="hidden"></span></button>
       </nav>
       <div class="layout-grid">
         <!-- Sidebar -->
@@ -689,9 +685,9 @@
       <!-- M6: "Replay tutorial" affordance for returning players who want
            the guided walkthrough again, since the gate flag suppresses
            it on subsequent visits otherwise. -->
-      <div style="display:flex; justify-content:center; margin-top:1rem;">
+      <div class="replay-tutorial-row">
         <!-- Phase 4: .btn additive base (cursor:pointer already on btn-secondary); zero visual change. -->
-        <button id="replay-tutorial-btn" class="btn btn-secondary" style="padding:0.5rem 1.2rem;">▶ Replay tutorial</button>
+        <button id="replay-tutorial-btn" class="btn btn-secondary">▶ Replay tutorial</button>
       </div>
 
       <h3 class="modal-section-title">🎮 Game Modes</h3>
@@ -749,7 +745,7 @@
       <button class="btn modal-close" id="close-leaderboard" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title">🏆 Leaderboard</h2>
       <p class="modal-subtitle">Top players by wins</p>
-      <div id="leaderboard-list" style="max-height:400px;overflow-y:auto;margin-top:1rem;"></div>
+      <div id="leaderboard-list"></div>
     </div>
   </div>
 
@@ -763,7 +759,7 @@
       <button class="btn modal-close" id="close-my-stats" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title">📊 Your Stats</h2>
       <p class="modal-subtitle" id="my-stats-subtitle">Loading…</p>
-      <div id="my-stats-body" style="max-height:60vh;overflow-y:auto;margin-top:1rem;"></div>
+      <div id="my-stats-body"></div>
     </div>
   </div>
 
@@ -781,11 +777,11 @@
       <button class="btn modal-close" id="close-daily-result" aria-label="Close dialog" title="Close">✕</button>
       <h2 class="modal-title" id="daily-result-title">Daily Challenge</h2>
       <p class="modal-subtitle" id="daily-result-subtitle"></p>
-      <div id="daily-result-body" style="max-height:60vh;overflow-y:auto;margin-top:1rem;"></div>
-      <div class="daily-result-actions" style="display:flex; gap:0.6rem; justify-content:center; margin-top:1rem;">
+      <div id="daily-result-body"></div>
+      <div class="daily-result-actions">
         <!-- Phase 4: .btn additive base (cursor:pointer already on btn-primary/btn-secondary); zero visual change. -->
-        <button id="daily-result-share-btn" class="btn btn-primary" style="padding:0.55rem 1.2rem;">📋 Copy Result</button>
-        <button id="daily-result-close-btn" class="btn btn-secondary" style="padding:0.55rem 1.2rem;">Done</button>
+        <button id="daily-result-share-btn" class="btn btn-primary">📋 Copy Result</button>
+        <button id="daily-result-close-btn" class="btn btn-secondary">Done</button>
       </div>
     </div>
   </div>

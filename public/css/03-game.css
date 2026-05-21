@@ -759,3 +759,47 @@
   .now-cast-title { font-size: 1rem; }
 }
 
+/* ============================================================================
+   Phase 7.10 — DS-01 pass 2: leaderboard row component classes + .empty-hint
+   size modifiers. Extracted verbatim from the .style.cssText writes that
+   loadLeaderboard at app.js:609-654 used to perform inline. Pixel values
+   are byte-identical to pre-migration. The dead #94a3b8 fallback (var(--text-
+   muted) is always defined in 01-base.css:21) is dropped — never resolved
+   at runtime, so removing it is a no-op visually.
+   ============================================================================ */
+
+/* Size modifiers for .empty-hint — preserve byte-identical padding overrides
+   that callers (leaderboard loading/empty/error, stats empty, daily-lb empty)
+   previously set via inline .style.cssText. The default .empty-hint padding
+   (1.25rem) stays for callers without a modifier. */
+.empty-hint--lg { padding: 2rem; }
+.empty-hint--sm { padding: 1rem; }
+
+/* Leaderboard row layout — was inline at app.js:631 via .style.cssText.
+   The rgba border-bottom is the existing card-divider hue. */
+.leaderboard-row {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.leaderboard-rank {
+  width: 2.5rem;
+  font-size: 1.1rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+.leaderboard-name {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leaderboard-wins {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+

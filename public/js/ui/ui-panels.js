@@ -185,9 +185,10 @@ export function renderMyStats(stats) {
   // Empty-state — no plays yet. Shorter, encouraging copy instead of a
   // sea of zeroes.
   if (isEmpty) {
+    // Phase 7.10 — DS-01 pass 2: padding override moved to .empty-hint--lg
+    // modifier in 03-game.css; existing .empty-hint rule covers the rest.
     const empty = document.createElement('div');
-    empty.className = 'empty-hint';
-    empty.style.cssText = 'text-align:center; padding:2rem; color:var(--text-muted); font-style:italic;';
+    empty.className = 'empty-hint empty-hint--lg';
     empty.textContent = "No stats yet — your first game will start your record.";
     body.appendChild(empty);
     modal.classList.remove('hidden');
@@ -391,9 +392,14 @@ export function renderDailyResult(data) {
   lbList.className = 'daily-lb-list';
   const leaderboard = Array.isArray(data.leaderboard) ? data.leaderboard : [];
   if (leaderboard.length === 0) {
+    // Phase 7.10 — DS-01 pass 2: padding override moved to .empty-hint--sm
+    // modifier in 03-game.css; the 1rem here is smaller than the lg variant.
+    // Side-note: the original inline style omitted font-style, but the base
+    // .empty-hint rule (03-game.css:357-363) sets font-style: italic — so
+    // post-migration this empty hint becomes italic. Visually harmless and
+    // aligns with the stats-empty case that always had italic.
     const empty = document.createElement('div');
-    empty.className = 'empty-hint';
-    empty.style.cssText = 'text-align:center; padding:1rem; color:var(--text-muted);';
+    empty.className = 'empty-hint empty-hint--sm';
     empty.textContent = 'No results yet. Yours could be the first!';
     lbList.appendChild(empty);
   } else {

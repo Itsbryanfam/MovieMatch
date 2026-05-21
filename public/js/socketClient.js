@@ -112,7 +112,11 @@ export function initSocket() {
     publicLobbiesList.innerHTML = '';
 
     if (!lobbies || lobbies.length === 0) {
-      publicLobbiesList.innerHTML = '<div class="empty-hint" style="text-align:center; padding: 2rem; color: var(--text-muted); font-style:italic;">No open lobbies found. Create a private one!</div>';
+      // Phase 7.10 — DS-01 pass 2: empty-hint inline style migrated to
+      // .empty-hint--lg modifier (existing .empty-hint rule in 03-game.css
+      // covers text-align/color/font-style/font-size; --lg preserves the
+      // 2rem padding override).
+      publicLobbiesList.innerHTML = '<div class="empty-hint empty-hint--lg">No open lobbies found. Create a private one!</div>';
       return;
     }
 
@@ -189,8 +193,10 @@ export function initSocket() {
       info.appendChild(stats);
 
       const joinButton = document.createElement('button');
+      // Phase 7.10 — DS-01 pass 2: padding/width moved to .join-public-btn
+      // rule in 02-hero-lobby.css; class already present, just drops the
+      // redundant inline cssText.
       joinButton.className = 'btn-primary join-public-btn';
-      joinButton.style.cssText = 'padding: 0.5rem 1rem; width: auto;';
       joinButton.textContent = 'Join';
       joinButton.addEventListener('click', () => {
         const name = playerNameInput ? playerNameInput.value.trim() : '';
