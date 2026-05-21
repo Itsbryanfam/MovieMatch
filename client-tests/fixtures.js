@@ -29,6 +29,24 @@ function loadIndexHtml() {
   document.documentElement.innerHTML = html.replace(/<\/?html[^>]*>/gi, '');
 }
 
+// Phase 7.8c — load the vendored qrcode-generator into the jsdom global so
+// tests can exercise the real encoder path. The vendored UMD assigns
+// `var qrcode = ...` at top level; in a browser that becomes window.qrcode.
+// In jsdom we use indirect eval (0, eval) to evaluate in global scope so
+// the var lands on the jsdom window instead of inside a local function frame.
+function loadVendoredQrLib() {
+  // Idempotent: skip if already loaded by a prior test in the same worker.
+  if (typeof window.qrcode === 'function') return;
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'public', 'js', 'lib', 'qrcode.js'),
+    'utf8'
+  );
+  // Indirect-eval form: (0, eval) breaks the local-scope binding so the
+  // script evaluates in the global scope (= jsdom window). Top-level
+  // `var qrcode` in the vendored file becomes window.qrcode.
+  (0, eval)(src);
+}
+
 // Build a player object with sensible defaults
 function makePlayer(overrides = {}) {
   return {
@@ -101,4 +119,5 @@ module.exports = {
   makeWaitingState,
   makePlayingState,
   makeChainItem,
+  loadVendoredQrLib,   // Phase 7.8c — vendored QR encoder loader
 };
