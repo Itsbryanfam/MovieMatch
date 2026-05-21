@@ -2014,9 +2014,10 @@ input:disabled {
   display: none;
 }
 
-/* Tablet: shrink horizontal padding so the 2-node filmstrip stays
-   centered without crowding. The .reel-node rules in 03-game.css
-   already scale at this breakpoint, so we only adjust the shell. */
+/* Tablet: shrink shell padding so the 2-node filmstrip stays centered
+   without crowding. .reel-node uses its base desktop sizing in this
+   range — its only @media in 03-game.css is at max-width:767px — and
+   composes cleanly inside the smaller shell. */
 @media (max-width: 999px) {
   .hero-puzzle-mount {
     padding: 16px 12px;
@@ -2028,7 +2029,12 @@ input:disabled {
 }
 
 /* Mobile: compact further; keep the filmstrip horizontal so the
-   "two movies connected" semantics survive the smaller viewport. */
+   "two movies connected" semantics survive the smaller viewport.
+   The mount also carries the .hero-demo class (see index.html), so
+   .hero-demo's pre-existing @media (max-width:480px) overrides for
+   background/border/backdrop-filter still compose here — these rules
+   override only the layout properties (padding/gap/max-width) so the
+   cascade resolves correctly via source order. */
 @media (max-width: 639px) {
   .hero-puzzle-mount {
     padding: 12px 8px;
