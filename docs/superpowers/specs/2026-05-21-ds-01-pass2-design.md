@@ -111,7 +111,7 @@ The inline `<style>` block at `index.html:79-82` is the original §7-listed "inl
 **Pattern:** zero-behaviour-change CSS hygiene refactor — mirrors 7.3 / 7.5–7.9 discipline. Three linear TDD tasks, each producing a coherent committable diff with a sacrosanct-suite-byte-identical guarantee.
 
 **File boundaries:**
-- New CSS rules land in the partial that owns the surface: `02-hero-lobby.css` (lobby surfaces — `.join-public-btn`, `#join-btn`, contextual `.input-group-vertical`), `03-game.css` (game / empty-hint family — `.leaderboard-*`, `.empty-hint--lg/--sm`), `04-modals.css` (modal contents — modal-body scroll, daily-result buttons, replay-tutorial row).
+- New CSS rules land in the partial that owns the surface: `02-hero-lobby.css` (lobby surfaces — 3 rules: `.join-public-btn`, `#join-btn`, contextual `.input-group-vertical`), `03-game.css` (game / empty-hint family — 6 rules: 4 `.leaderboard-*` + 2 `.empty-hint--lg/--sm`), `04-modals.css` (modal contents — 6 rules: `.replay-tutorial-row`, `#replay-tutorial-btn`, `#leaderboard-list`, `#my-stats-body, #daily-result-body` combined, `.daily-result-actions`, `#daily-result-share-btn, #daily-result-close-btn` combined). Total 15 new rules across the three partials.
 - Cascade order load-bearing: the six `<link>` partial order in `index.html:71-76` is **not** reordered.
 - Append-only to each touched partial. Single exception: the explicit dead-code excision in item D (5 dead rules in `02-hero-lobby.css:131-143`) — flagged in the spec, plan, and PR body as the one intentional deletion.
 
@@ -151,7 +151,7 @@ ID-based selectors are used where the element has a unique `id` and a unique sty
 | 11 | :785 | full inline on `.daily-result-actions` | New rule in `04-modals.css`: `.daily-result-actions { display: flex; gap: 0.6rem; justify-content: center; margin-top: 1rem; }` (existing class already on the element — just gains its first CSS rule). |
 | 12-13 | :787, :788 | identical `padding:0.55rem 1.2rem;` on `#daily-result-share-btn` / `#daily-result-close-btn` | New combined-selector rule in `04-modals.css`: `#daily-result-share-btn, #daily-result-close-btn { padding: 0.55rem 1.2rem; }` |
 
-**Subtotal:** 13 inline `style="..."` attrs removed. New CSS rules added: 3 to `02-hero-lobby.css` (incl. contextual #1), 7 to `04-modals.css`. Two `class="...hidden"` additions in `index.html`. One `class="replay-tutorial-row"` addition.
+**Item A subtotal:** 13 inline `style="..."` attrs removed. New CSS rules added by Item A alone: 2 to `02-hero-lobby.css` (`#join-btn`, contextual `.input-group-vertical`) + 6 to `04-modals.css` (`.replay-tutorial-row`, `#replay-tutorial-btn`, `#leaderboard-list`, combined `#my-stats-body, #daily-result-body`, `.daily-result-actions`, combined `#daily-result-share-btn, #daily-result-close-btn`). Two `class="...hidden"` additions in `index.html`. One `class="replay-tutorial-row"` addition. (Item C separately adds `.join-public-btn` to `02-hero-lobby.css`, bringing that partial's net additions to 3.)
 
 ### 4.2 Item B — Leaderboard renderer (`app.js:614-650`)
 
@@ -246,7 +246,7 @@ The deletion is provably visually inert (no DOM element ever had/has the `.demo-
 - The four backlog items from original DS-01 spec §7 (A: 13 `index.html` `style="..."` attrs; B: 7 leaderboard `.style.cssText`; C: 3 empty-hint `.style.cssText`; D: inline `<style>` block at `index.html:79-82`).
 - Bonus: the 5 dead `.demo-item` rules at `02-hero-lobby.css:131-143` (matching co-orphans of D).
 - 3 new test files (~18 net new tests, suite 592 → 610).
-- ~15 new CSS rules (3-4 in `02-hero-lobby.css`, 6 in `03-game.css`, 7 in `04-modals.css`) — all *append-only* to those partials except the explicit dead-code deletions in D.
+- 15 new CSS rules (3 in `02-hero-lobby.css`, 6 in `03-game.css`, 6 in `04-modals.css`) — all *append-only* to those partials except the explicit dead-code deletions in D.
 
 ### 5.2 Permanently excluded (not debt — behaviour, not static presentation)
 
