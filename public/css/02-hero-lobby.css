@@ -2045,3 +2045,13 @@ input:disabled {
     font-size: 0.95rem;
   }
 }
+
+/* ============================================================================
+   Phase 7.10 — DS-01 pass 2: .join-public-btn padding/width override.
+   Was inline at socketClient.js:193 via .style.cssText. The .join-public-btn
+   class is already on the element; this gives it its first CSS rule.
+   ============================================================================ */
+.join-public-btn {
+  padding: 0.5rem 1rem;
+  width: auto;
+}
