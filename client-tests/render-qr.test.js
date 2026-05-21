@@ -89,3 +89,37 @@ describe('renderQR / clearQR — pure unit', () => {
   });
 
 });
+
+// ─── Integration test for #waiting-room-qr (Phase 7.8c T1) ───
+// Lives in render-qr.test.js (not render-lobby.test.js, which is sacrosanct).
+describe('renderLobby — classic lobby QR integration', () => {
+  const { loadIndexHtml, makeWaitingState, makePlayer } = require('./fixtures');
+  const mockEmit = jest.fn();
+  jest.mock('../public/js/state.js', () => ({
+    getSocket: () => ({ emit: mockEmit }),
+    getCurrentLobbyId: () => 'TEST01',
+  }));
+  // Re-import via the ui.js barrel — same shape as render-lobby.test.js.
+  const { initUIElements, renderLobby } = require('../public/js/ui.js');
+
+  beforeEach(() => { loadIndexHtml(); initUIElements(); mockEmit.mockClear(); });
+
+  test('renderLobby paints SVG into #waiting-room-qr .lobby-qr-svg', () => {
+    const state = makeWaitingState({
+      id: 'ABCDEF',
+      gameMode: 'classic',
+      players: [
+        makePlayer({ id: 'host_id', name: 'Host', isHost: true }),
+      ],
+    });
+    renderLobby(state, 'host_id');
+    const mount = document.querySelector('#waiting-room-qr .lobby-qr-svg');
+    expect(mount).not.toBeNull();
+    const svg = mount.querySelector('svg');
+    expect(svg).not.toBeNull();
+    // dataset.qrUrl must encode the lobby code via makeJoinUrl. The
+    // jsdom default origin is http://localhost so we expect the URL to
+    // end with '?room=ABCDEF'.
+    expect(mount.dataset.qrUrl).toMatch(/\?room=ABCDEF$/);
+  });
+});

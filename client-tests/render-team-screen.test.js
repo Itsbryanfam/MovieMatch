@@ -161,4 +161,24 @@ describe('renderTeamScreen — team theater parity', () => {
     renderLobby(st, 'host_id');
     expect(document.querySelectorAll('#team-screen li.seat.entering').length).toBe(0);
   });
+
+  // Phase 7.8c — team-mode QR integration. Mirrors the classic test in
+  // render-qr.test.js; pinned in this file too so the team contract
+  // explicitly covers the QR mount.
+  // beforeAll loads the vendored qrcode-generator so window.qrcode is
+  // defined — renderQR is a silent no-op without it (ui-qr.js guards).
+  beforeAll(() => {
+    const { loadVendoredQrLib } = require('./fixtures');
+    loadVendoredQrLib();
+  });
+
+  test('renderLobby paints SVG into #team-screen-qr .lobby-qr-svg in team mode', () => {
+    const state = teamState({ id: 'XYZ987' });
+    renderLobby(state, 'host_id');
+    const mount = document.querySelector('#team-screen-qr .lobby-qr-svg');
+    expect(mount).not.toBeNull();
+    const svg = mount.querySelector('svg');
+    expect(svg).not.toBeNull();
+    expect(mount.dataset.qrUrl).toMatch(/\?room=XYZ987$/);
+  });
 });
