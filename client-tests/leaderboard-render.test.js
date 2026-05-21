@@ -17,12 +17,15 @@ const appJsPath = path.join(__dirname, '..', 'public', 'js', 'app.js');
 const css = fs.readFileSync(cssPath, 'utf8');
 const appJs = fs.readFileSync(appJsPath, 'utf8');
 
-// Isolate the loadLeaderboard function body — start to its closing brace.
-// The function spans approx lines 609-654; we capture the chunk for the
-// substring assertions so we don't false-match elsewhere in app.js.
+// Isolate the loadLeaderboard function body — start to its closing brace
+// followed by a blank line (the function ends at `  }\n\n  leaderboardBtn...`).
+// The trailing blank-line anchor prevents the non-greedy `*?` from stopping
+// at a nested block's closing brace. The function spans approx lines 609-654;
+// we capture the chunk so substring assertions don't false-match elsewhere
+// in app.js.
 // WHY \r?\n: the repo uses CRLF line endings on Windows; the regex must
 // handle both LF and CRLF so the tests are cross-platform stable.
-const leaderboardFnMatch = appJs.match(/async function loadLeaderboard\([\s\S]*?\r?\n  \}\r?\n/);
+const leaderboardFnMatch = appJs.match(/async function loadLeaderboard\([\s\S]*?\r?\n  \}\r?\n\r?\n/);
 const leaderboardFnBody = leaderboardFnMatch ? leaderboardFnMatch[0] : '';
 
 describe('Phase 7.10 T0 — leaderboard renderer migration', () => {
