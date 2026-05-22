@@ -151,6 +151,16 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // single "Any" entry it hardcodes.
     }
 
+    // Phase 6c — emit the rule-kit display list once per connection so the
+    // lobby chip strip can render without a round-trip. Same pattern as
+    // themesList; the server stays authoritative on what each kit applies.
+    try {
+      const ruleKits = require('./ruleKits');
+      socket.emit('ruleKitsList', ruleKits.listKits());
+    } catch {
+      // No kits is degenerate — the chip strip simply stays empty.
+    }
+
     // Every handler below registers via safeOn instead of socket.on directly.
     // safeOn wraps the handler in a try/catch so an unhandled rejection can't
     // crash the process. This replaces an earlier monkey-patch on socket.on,
@@ -203,11 +213,30 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       await lobbySystem.setGameMode(ctx, socket, data);
     });
 
+    on('selectRuleKit', async (data) => {
+      // Phase 6c — host setting action; reuse the shared lobbyConfig limiter
+      // (same class as setGameMode/setTheme).
+      if (await lobbyConfigLimited()) return;
+      await lobbySystem.selectRuleKit(ctx, socket, data || {});
+    });
+
     on('setTheme', async (data) => {
       // L1: Host-only setter; lobbySystem validates the theme id against
       // the whitelist so a buggy/malicious client can't write garbage.
       if (await lobbyConfigLimited()) return;
       await lobbySystem.setTheme(ctx, socket, data);
+    });
+
+    on('setEquippedTitle', async (data) => {
+      // Phase 6b — personal cosmetic write. Reuse the dailyLeaderboard bucket
+      // (same player-intent cadence as requestMyStats). stableId IS the auth,
+      // exactly like requestMyStats (pre-lobby equip from the My Stats modal).
+      if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
+      const stableId = (data && typeof data.stableId === 'string') ? data.stableId : '';
+      const titleId  = (data && typeof data.titleId === 'string') ? data.titleId : '';
+      if (!stableId || stableId.length > 64) return;
+      if (!titleId || titleId.length > 64) return;
+      await lobbySystem.setEquippedTitle(ctx, socket, { stableId, titleId });
     });
 
     on('assignTeam', async (data) => {
@@ -298,8 +327,20 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
       if (typeof stableId !== 'string' || stableId.length === 0 || stableId.length > 64) return;
       const statsSystem = require('./systems/statsSystem');
+      const achievements = require('./achievements');
+      const titlesSystem = require('./systems/titlesSystem');
       const stats = await statsSystem.getStats(pubClient, stableId);
-      socket.emit('myStats', stats);
+      // Phase 6b — additively enrich myStats with the equipped title + the
+      // achievements wall payload (catalog + this player's earned ids). No test
+      // asserts the myStats shape today, so this is regression-free. getStats
+      // output is spread unchanged.
+      const earned = achievements.deriveEarned(stats);
+      const equippedTitle = await titlesSystem.getEquippedTitle(pubClient, stableId);
+      socket.emit('myStats', {
+        ...stats,
+        equippedTitle: equippedTitle || null,
+        achievements: { catalog: achievements.clientCatalog(), earned },
+      });
     });
 
     on('requestPublicLobbies', async () => {

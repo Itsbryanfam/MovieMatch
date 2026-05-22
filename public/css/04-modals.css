@@ -857,3 +857,81 @@
   padding: 0.55rem 1.2rem;
 }
 
+/* ============================================================================
+   Phase 6b — Titles wall (rendered inside the My Stats modal body) + the
+   end-of-game equipped-title badge. Append-only; no existing rule touched.
+   NOTE: a row can in rare TTL-mismatch cases carry BOTH .is-locked and
+   .is-equipped — that degrades to a dimmed gold highlight, which is acceptable.
+   ============================================================================ */
+.achievements-wall {
+  margin-top: 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 1rem;
+}
+.achievements-heading {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted, #9ca3af);
+  margin-bottom: 0.6rem;
+}
+.achievement-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.achievement-row.is-locked {
+  opacity: 0.45;
+}
+.achievement-row.is-equipped {
+  background: rgba(212, 175, 55, 0.08);
+  border-radius: 8px;
+}
+.achievement-text {
+  min-width: 0;
+}
+.achievement-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.achievement-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted, #9ca3af);
+}
+.achievement-new {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--gold, #d4af37);
+}
+.achievement-equip {
+  flex-shrink: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  /* On-brand gold-tinted action pill (consistent with the Titles theme +
+     the .is-equipped highlight) instead of the UA-default grey button. */
+  background: rgba(212, 175, 55, 0.15);
+  color: var(--gold, #d4af37);
+  border: 1px solid rgba(212, 175, 55, 0.4);
+}
+.achievement-equip:hover {
+  background: rgba(212, 175, 55, 0.28);
+}
+.achievement-equipped-badge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--gold, #d4af37);
+}
+.game-over-title-badge {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--gold, #d4af37);
+  font-weight: 600;
+}
+

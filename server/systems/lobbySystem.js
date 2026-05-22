@@ -108,9 +108,16 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
     const isHost = r.players.length === 0;
     const teamId = r.players.length % 2;
     const wins = await redisUtils.getPlayerWins(pubClient, stableId);
+    // Phase 6b — resolve the joiner's equipped title to a label so every seat
+    // can render it. Best-effort read inside the existing lock section (mirrors
+    // the getPlayerWins await above); null when unset/unknown → no title shown.
+    const titlesSystem = require('./titlesSystem');
+    const achievements = require('../achievements');
+    const _equippedId = await titlesSystem.getEquippedTitle(pubClient, stableId);
+    const titleLabel = _equippedId ? achievements.titleLabel(_equippedId) : null;
     r.players.push({
       id: socket.id, name, isHost, isAlive: true, connected: true,
-      score: 0, wins, teamId, stableId,
+      score: 0, wins, teamId, stableId, titleLabel,
     });
     outcome = 'player';
   }, { seedRoom: isNewLobby ? initialRoom : undefined });
@@ -247,6 +254,32 @@ async function setGameMode(ctx, socket, { lobbyId, mode }) {
   if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
+// Phase 6c — apply a named rule kit. Composes the SAME field-writes as
+// setTheme/setGameMode/toggleSetting under ONE lock with the SAME host-only +
+// waiting-state guards, and validates every field against the existing
+// whitelists (so a kit can never set an illegal theme/mode). One broadcast.
+async function selectRuleKit(ctx, socket, { lobbyId, kitId }) {
+  const { io, pubClient } = ctx;
+  const ruleKits = require('../ruleKits');
+  const themesSystem = require('./themesSystem');
+  const kit = ruleKits.getKit(kitId);
+  if (!kit) return; // unknown kit → no-op (no lock taken)
+  const validModes = ['classic', 'team', 'solo', 'speed'];
+  if (!themesSystem.isValidTheme(kit.theme)) return; // defensive (catalog test guards this)
+  if (!validModes.includes(kit.mode)) return;
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    r.theme = kit.theme;
+    r.gameMode = kit.mode;
+    r.hardcoreMode = !!kit.hardcore;
+    r.allowTvShows = !!kit.tvShows;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
+}
+
 // L1: Host-only setter for the lobby theme. Validated against the
 // themesSystem whitelist so a malicious client can't set an arbitrary
 // string (which would degrade safely via matchesTheme's fallback, but
@@ -261,6 +294,41 @@ async function setTheme(ctx, socket, { lobbyId, theme }) {
     if (r.status !== 'waiting') return false;
     if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
     r.theme = theme;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
+}
+
+// Phase 6b — equip a title. Re-derives the earned set server-side (defense at
+// the persistence boundary), persists via titlesSystem, and — if the player is
+// currently seated in a room — updates their in-room titleLabel and re-broadcasts
+// so every seat reflects the change live. Fail-closed: any miss/error leaves
+// state unchanged and never throws.
+async function setEquippedTitle(ctx, socket, { stableId, titleId }) {
+  const { io, pubClient } = ctx;
+  const statsSystem = require('./statsSystem');
+  const achievements = require('../achievements');
+  const titlesSystem = require('./titlesSystem');
+
+  // Unknown title id → no-op (defense; the client only offers catalog ids).
+  if (!achievements.titleLabel(titleId)) return;
+
+  // Re-derive THIS player's earned set from their own anonymous stats.
+  const stats = await statsSystem.getStats(pubClient, stableId);
+  const earned = achievements.deriveEarned(stats);
+  if (!earned.includes(titleId)) return; // not earned → refuse
+
+  await titlesSystem.setEquippedTitle(pubClient, stableId, titleId, earned);
+
+  // Live-reflect on the player's seat if they're in a room right now.
+  const lobbyId = await redisUtils.getSocketLobby(pubClient, socket.id);
+  if (!lobbyId) return;
+  const label = achievements.titleLabel(titleId);
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    const p = r.players.find(pl => pl.id === socket.id);
+    if (!p) return false;
+    p.titleLabel = label;
     changed = true;
   });
   if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
@@ -890,7 +958,9 @@ module.exports = {
   addBot,
   removeBot,
   setGameMode,
+  selectRuleKit,
   setTheme,
+  setEquippedTitle,
   assignTeam,
   selectColor,
   toggleSetting,
