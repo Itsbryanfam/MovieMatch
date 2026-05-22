@@ -30,6 +30,7 @@ describe('ACHIEVEMENTS catalog', () => {
       expect(typeof a.description).toBe('string');
       expect(typeof a.statPath).toBe('string');
       expect(typeof a.threshold).toBe('number');
+      expect(a.threshold).toBeGreaterThan(0); // guard: a 0 threshold would make an achievement always-earned
     }
     const ids = ACHIEVEMENTS.map(a => a.id);
     expect(new Set(ids).size).toBe(ids.length);
