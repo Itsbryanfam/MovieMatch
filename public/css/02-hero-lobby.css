@@ -2088,6 +2088,7 @@ input:disabled {
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem 0.75rem;
+  min-height: 44px; /* match the .mode-chip touch-target a11y standard */
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);

@@ -913,6 +913,14 @@
   padding: 0.3rem 0.7rem;
   font-size: 0.78rem;
   border-radius: 6px;
+  /* On-brand gold-tinted action pill (consistent with the Titles theme +
+     the .is-equipped highlight) instead of the UA-default grey button. */
+  background: rgba(212, 175, 55, 0.15);
+  color: var(--gold, #d4af37);
+  border: 1px solid rgba(212, 175, 55, 0.4);
+}
+.achievement-equip:hover {
+  background: rgba(212, 175, 55, 0.28);
 }
 .achievement-equipped-badge {
   flex-shrink: 0;
