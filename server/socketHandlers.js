@@ -210,6 +210,18 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       await lobbySystem.setTheme(ctx, socket, data);
     });
 
+    on('setEquippedTitle', async (data) => {
+      // Phase 6b — personal cosmetic write. Reuse the dailyLeaderboard bucket
+      // (same player-intent cadence as requestMyStats). stableId IS the auth,
+      // exactly like requestMyStats (pre-lobby equip from the My Stats modal).
+      if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
+      const stableId = (data && typeof data.stableId === 'string') ? data.stableId : '';
+      const titleId  = (data && typeof data.titleId === 'string') ? data.titleId : '';
+      if (!stableId || stableId.length > 64) return;
+      if (!titleId || titleId.length > 64) return;
+      await lobbySystem.setEquippedTitle(ctx, socket, { stableId, titleId });
+    });
+
     on('assignTeam', async (data) => {
       if (await lobbyConfigLimited()) return;
       await lobbySystem.assignTeam(ctx, socket, data);
@@ -298,8 +310,20 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (await rateLimit(socket.id, 'dailyLeaderboard', RATE_LIMITS.dailyLeaderboard.limit, RATE_LIMITS.dailyLeaderboard.windowMs)) return;
       if (typeof stableId !== 'string' || stableId.length === 0 || stableId.length > 64) return;
       const statsSystem = require('./systems/statsSystem');
+      const achievements = require('./achievements');
+      const titlesSystem = require('./systems/titlesSystem');
       const stats = await statsSystem.getStats(pubClient, stableId);
-      socket.emit('myStats', stats);
+      // Phase 6b — additively enrich myStats with the equipped title + the
+      // achievements wall payload (catalog + this player's earned ids). No test
+      // asserts the myStats shape today, so this is regression-free. getStats
+      // output is spread unchanged.
+      const earned = achievements.deriveEarned(stats);
+      const equippedTitle = await titlesSystem.getEquippedTitle(pubClient, stableId);
+      socket.emit('myStats', {
+        ...stats,
+        equippedTitle: equippedTitle || null,
+        achievements: { catalog: achievements.clientCatalog(), earned },
+      });
     });
 
     on('requestPublicLobbies', async () => {
