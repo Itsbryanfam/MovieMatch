@@ -5,6 +5,8 @@ const ruleKits = require('./ruleKits');
 const { RULE_KITS, getKit, listKits } = ruleKits;
 const themesSystem = require('./systems/themesSystem');
 
+// Mirrors the validModes whitelist in lobbySystem.setGameMode — keep in sync
+// if a new game mode is ever added (this test pins kit modes to that set).
 const VALID_MODES = ['classic', 'team', 'solo', 'speed'];
 
 describe('RULE_KITS catalog integrity', () => {
