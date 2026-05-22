@@ -254,6 +254,32 @@ async function setGameMode(ctx, socket, { lobbyId, mode }) {
   if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
 }
 
+// Phase 6c — apply a named rule kit. Composes the SAME field-writes as
+// setTheme/setGameMode/toggleSetting under ONE lock with the SAME host-only +
+// waiting-state guards, and validates every field against the existing
+// whitelists (so a kit can never set an illegal theme/mode). One broadcast.
+async function selectRuleKit(ctx, socket, { lobbyId, kitId }) {
+  const { io, pubClient } = ctx;
+  const ruleKits = require('../ruleKits');
+  const themesSystem = require('./themesSystem');
+  const kit = ruleKits.getKit(kitId);
+  if (!kit) return; // unknown kit → no-op (no lock taken)
+  const validModes = ['classic', 'team', 'solo', 'speed'];
+  if (!themesSystem.isValidTheme(kit.theme)) return; // defensive (catalog test guards this)
+  if (!validModes.includes(kit.mode)) return;
+  let changed = false;
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    if (r.status !== 'waiting') return false;
+    if (!r.players.find(p => p.id === socket.id)?.isHost) return false;
+    r.theme = kit.theme;
+    r.gameMode = kit.mode;
+    r.hardcoreMode = !!kit.hardcore;
+    r.allowTvShows = !!kit.tvShows;
+    changed = true;
+  });
+  if (changed && room) gameLogic.broadcastState(io, lobbyId, room);
+}
+
 // L1: Host-only setter for the lobby theme. Validated against the
 // themesSystem whitelist so a malicious client can't set an arbitrary
 // string (which would degrade safely via matchesTheme's fallback, but
@@ -932,6 +958,7 @@ module.exports = {
   addBot,
   removeBot,
   setGameMode,
+  selectRuleKit,
   setTheme,
   setEquippedTitle,
   assignTeam,

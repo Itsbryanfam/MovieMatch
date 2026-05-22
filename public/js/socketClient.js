@@ -18,6 +18,7 @@ import {
   timerSeverity, // Phase 7.4: pure timer-severity seam (Panic Timer)
   isClutchSave, markClutchSave, // Phase 7.7: clutch-save predicate + one-shot flag
   showScreen, // WHY: Phase 3 Task D — canonical group-normaliser for screen transitions
+  renderRuleKitChips, // Phase 6c: renders lobby quick-kit chips from server-delivered list
   // DOM elements
   publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
   heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
@@ -228,6 +229,16 @@ export function initSocket() {
       // event the picker code listens for.
       window.dispatchEvent(new CustomEvent('mm:themes-updated'));
     }
+  });
+
+  socket.on('ruleKitsList', (kits) => {
+    // Phase 6c — render the lobby quick-kit chips. Click emits selectRuleKit;
+    // the server enforces host-only/waiting + applies the kit authoritatively.
+    // The lobby id is read at CLICK time (chips render pre-lobby on connect).
+    const container = document.getElementById('rule-kit-chips');
+    renderRuleKitChips(kits, container, (kitId) => {
+      socket.emit('selectRuleKit', { lobbyId: getCurrentLobbyId(), kitId });
+    });
   });
 
   // -----------------------------------------------------------------------

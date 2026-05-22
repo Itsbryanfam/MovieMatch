@@ -151,6 +151,16 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // single "Any" entry it hardcodes.
     }
 
+    // Phase 6c — emit the rule-kit display list once per connection so the
+    // lobby chip strip can render without a round-trip. Same pattern as
+    // themesList; the server stays authoritative on what each kit applies.
+    try {
+      const ruleKits = require('./ruleKits');
+      socket.emit('ruleKitsList', ruleKits.listKits());
+    } catch {
+      // No kits is degenerate — the chip strip simply stays empty.
+    }
+
     // Every handler below registers via safeOn instead of socket.on directly.
     // safeOn wraps the handler in a try/catch so an unhandled rejection can't
     // crash the process. This replaces an earlier monkey-patch on socket.on,
@@ -201,6 +211,13 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     on('setGameMode', async (data) => {
       if (await lobbyConfigLimited()) return;
       await lobbySystem.setGameMode(ctx, socket, data);
+    });
+
+    on('selectRuleKit', async (data) => {
+      // Phase 6c — host setting action; reuse the shared lobbyConfig limiter
+      // (same class as setGameMode/setTheme).
+      if (await lobbyConfigLimited()) return;
+      await lobbySystem.selectRuleKit(ctx, socket, data || {});
     });
 
     on('setTheme', async (data) => {

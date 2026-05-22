@@ -316,6 +316,15 @@
               <p class="mode-description" id="mode-description">Last player standing wins. Timer shrinks each round.</p>
             </div>
 
+        <!-- Phase 6c — Quick Kits: one-click presets that batch-set theme +
+             mode + toggles. Chips render from the server-authoritative
+             ruleKitsList event (socketClient). Host-only application is enforced
+             server-side; the resulting stateUpdate re-renders the controls below. -->
+        <div class="rule-kit-section">
+          <div class="field-label"><span class="nu">★</span> Quick Kits</div>
+          <div class="rule-kit-chips" id="rule-kit-chips"></div>
+        </div>
+
             <!-- Step 2: House Rules (PRESERVE #lobby-settings + control ids) -->
             <div>
               <div class="field-label"><span class="nu">2</span> House Rules</div>
