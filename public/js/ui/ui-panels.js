@@ -170,7 +170,7 @@ const MODE_LABELS = {
   daily: '🗓️ Daily',
 };
 
-export function renderMyStats(stats) {
+export function renderMyStats(stats, opts) {
   const modal = document.getElementById('my-stats-modal');
   const body = document.getElementById('my-stats-body');
   const sub = document.getElementById('my-stats-subtitle');
@@ -288,6 +288,80 @@ export function renderMyStats(stats) {
     fav.appendChild(name);
     fav.appendChild(count);
     body.appendChild(fav);
+  }
+
+  // Phase 6b — Titles wall. Rendered from the server-enriched payload
+  // (stats.achievements = { catalog, earned }) + stats.equippedTitle. Gated:
+  // a legacy myStats payload without `achievements` renders the pre-6b modal
+  // unchanged (existing renderMyStats tests pass no achievements).
+  if (stats && stats.achievements && Array.isArray(stats.achievements.catalog)) {
+    const onEquip = (opts && typeof opts.onEquip === 'function') ? opts.onEquip : null;
+    const earnedSet = new Set(stats.achievements.earned || []);
+    const equippedId = stats.equippedTitle || null;
+
+    // "New" flag: ids earned since the player last opened the wall. Device-local
+    // only (no server involvement); wrapped because localStorage can throw.
+    let seen = [];
+    try { seen = JSON.parse(window.localStorage.getItem('mm_seen_titles') || '[]'); } catch {}
+    const seenSet = new Set(Array.isArray(seen) ? seen : []);
+
+    const section = document.createElement('div');
+    section.className = 'achievements-wall';
+    const heading = document.createElement('div');
+    heading.className = 'achievements-heading';
+    heading.textContent = 'Titles';
+    section.appendChild(heading);
+
+    stats.achievements.catalog.forEach(a => {
+      const earned = earnedSet.has(a.id);
+      const equipped = equippedId === a.id;
+      const row = document.createElement('div');
+      row.className = 'achievement-row'
+        + (earned ? ' is-earned' : ' is-locked')
+        + (equipped ? ' is-equipped' : '');
+
+      const text = document.createElement('div');
+      text.className = 'achievement-text';
+      const name = document.createElement('div');
+      name.className = 'achievement-name';
+      name.textContent = a.title;
+      // "New" marker for a freshly-earned, not-yet-seen title.
+      if (earned && !seenSet.has(a.id)) {
+        const nu = document.createElement('span');
+        nu.className = 'achievement-new';
+        nu.textContent = '✦ New';
+        name.appendChild(nu);
+      }
+      const desc = document.createElement('div');
+      desc.className = 'achievement-desc';
+      desc.textContent = a.description;
+      text.appendChild(name);
+      text.appendChild(desc);
+      row.appendChild(text);
+
+      // Earned rows get an equip affordance; the equipped row shows a static
+      // "Equipped" marker instead of a button.
+      if (earned) {
+        if (equipped) {
+          const badge = document.createElement('span');
+          badge.className = 'achievement-equipped-badge';
+          badge.textContent = 'Equipped';
+          row.appendChild(badge);
+        } else {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'btn achievement-equip';
+          btn.textContent = 'Equip';
+          if (onEquip) btn.addEventListener('click', () => onEquip(a.id));
+          row.appendChild(btn);
+        }
+      }
+      section.appendChild(row);
+    });
+    body.appendChild(section);
+
+    // Mark all currently-earned titles as seen for the next open.
+    try { window.localStorage.setItem('mm_seen_titles', JSON.stringify([...earnedSet])); } catch {}
   }
 
   modal.classList.remove('hidden');

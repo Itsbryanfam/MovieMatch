@@ -204,6 +204,15 @@ export function buildSeatNode(model, callbacks, extra) {
     botPill.textContent = 'BOT';
     plate.appendChild(botPill);
   }
+  // Phase 6b — equipped title badge. Gated on ex.titleLabel: every pre-6b
+  // caller (and the seat-builder suite) omits it → byte-identical render. The
+  // name still carries identity; this is a small secondary cue.
+  if (ex.titleLabel) {
+    const title = document.createElement('span');
+    title.className = 'seat-title';
+    title.textContent = ex.titleLabel;
+    plate.appendChild(title);
+  }
   li.appendChild(plate);
 
   // ---- person / avatar emoji ----

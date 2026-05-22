@@ -258,6 +258,7 @@ export function renderLobby(gameState, myPlayerId) {
         takenByOthers,
         allHues: SEAT_HUES,
         containerForCleanup: lobbyPlayersList,
+        titleLabel: p.titleLabel, // Phase 6b — equipped title from the wire (undefined pre-6b)
       }
     );
     lobbyPlayersList.appendChild(node);
@@ -1180,6 +1181,18 @@ export function showGameOverBanner(state, myPlayerId) {
 
   banner.appendChild(titleDiv);
   banner.appendChild(subtitleDiv);
+
+  // Phase 6b — show the LOCAL player's equipped title under the result line.
+  // Gated on the local player's titleLabel (absent in pre-6b states + the
+  // existing game-over fixtures → byte-identical there).
+  const me = state.players?.find(p => p.id === myPlayerId);
+  if (me && me.titleLabel) {
+    const titleBadge = document.createElement('div');
+    titleBadge.className = 'game-over-title-badge';
+    titleBadge.textContent = `Played as ${me.titleLabel}`;
+    banner.appendChild(titleBadge);
+  }
+
   banner.appendChild(actionsDiv);
 
   chainDisplay.appendChild(banner);

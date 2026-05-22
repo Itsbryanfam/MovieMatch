@@ -642,7 +642,12 @@ export function initSocket() {
   // -----------------------------------------------------------------------
 
   socket.on('myStats', (stats) => {
-    renderMyStats(stats);
+    // Phase 6b — pass an equip callback so the Titles wall can persist the
+    // player's choice. getStableId() is the same anonymous id used by
+    // requestMyStats; the server re-derives the earned set before persisting.
+    renderMyStats(stats, {
+      onEquip: (titleId) => socket.emit('setEquippedTitle', { stableId: getStableId(), titleId }),
+    });
   });
 
   // -----------------------------------------------------------------------
