@@ -2070,3 +2070,49 @@ input:disabled {
 #join-btn {
   margin-bottom: 0.75rem;
 }
+
+/* ============================================================================
+   Phase 6c — Quick Kits chip strip. Extends the .mode-chips visual language
+   (horizontal wrap of pill buttons). Append-only; no existing rule touched.
+   ============================================================================ */
+.rule-kit-section {
+  margin-bottom: 1rem;
+}
+.rule-kit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.rule-kit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.rule-kit-chip:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+.rule-kit-chip-icon {
+  font-size: 1rem;
+}
+.rule-kit-chip-name {
+  font-weight: 600;
+}
+
+/* Phase 6b — equipped title badge on a lobby seat nameplate. */
+.seat-title {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(212, 175, 55, 0.18);
+  color: var(--gold, #d4af37);
+  font-size: 0.7rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
