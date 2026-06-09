@@ -19,6 +19,9 @@ const lobbySystem = require('./systems/lobbySystem');
 const matchSystem = require('./systems/matchSystem');
 const posterCache = require('./posterCache');
 const redisUtils = require('./redisUtils');
+// T3a audit fix: shared rightmost-XFF client-IP derivation — same helper the
+// io.use() connection throttle uses, so HTTP and socket layers agree on IPs.
+const { deriveClientIp } = require('./clientIp');
 const pino = require('pino');
 const logger = pino();
 
@@ -135,6 +138,15 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
   // =========================================================================
 
   io.on('connection', (socket) => {
+
+    // T3a audit fix (P2): derive the client IP ONCE per connection and pin it
+    // on socket.data so every later rate-limit check reads one stable value
+    // (headers can't change mid-connection, so re-parsing per event would be
+    // waste). Rightmost-XFF-wins trust reasoning lives in clientIp.js: Render
+    // appends the real client IP as the LAST x-forwarded-for entry, while
+    // client-supplied entries sit further LEFT and must be ignored — mirroring
+    // Express `trust proxy: 1`, so socket and HTTP limiters key the same IP.
+    socket.data.clientIp = deriveClientIp(socket.handshake);
 
     // Send cached posters on connect so the background renders immediately
     const cached = posterCache.getPosters();
