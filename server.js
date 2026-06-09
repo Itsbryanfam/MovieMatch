@@ -397,3 +397,17 @@ function gracefulShutdown(signal) {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// T1 audit fix T1b: process-level backstop for stray promise rejections.
+// Node's default for an unhandled rejection is to CRASH the process — and
+// because lobby/game state lives in Redis but socket connections don't, a
+// crash here drops every live game on the instance at once. node-redis v4
+// rejects ALL in-flight commands when its socket flaps, so any await that a
+// future code path leaves outside a try (the watchdog had exactly this bug —
+// fixed properly in T1a) turns one transient blip into a full outage.
+// Log loudly and DO NOT exit: per-path try/catch remains the real fix; this
+// exists solely so one missed path degrades one action instead of the fleet.
+// (Listener presence alone disables Node's crash-on-unhandled default.)
+process.on('unhandledRejection', (reason) => {
+  logger.error(reason, 'Unhandled promise rejection reached the process backstop (T1b) — find and wrap the offending await');
+});
