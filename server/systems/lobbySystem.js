@@ -775,7 +775,39 @@ async function quitGame(ctx, socket, lobbyId) {
     onOwnTurn: isCurrentTurn,
   });
   if (isCurrentTurn) {
-    await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, 'Quit');
+    // T1 audit fix T1c: this branch was the lone eliminateCurrentPlayer call
+    // site holding NO submit lock (watchdog, forceNextTurn, and bot-whiff all
+    // take it) and it passed the UNLOCKED snapshot from the top of quitGame.
+    // eliminateCurrentPlayer mutates state, advances the turn, and saves —
+    // doing that on a stale snapshot races an in-flight submit (double
+    // elimination, or a committed chain advance silently clobbered). Mirror
+    // forceNextTurn exactly: lock → fresh in-lock re-read → re-verify →
+    // eliminate the FRESH room → token-guarded release.
+    const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+    // No lock = a submit/forceNextTurn/watchdog already holds it and is
+    // advancing this very turn itself — quitting now is a no-op, not an
+    // error (the player can simply quit again once that resolves).
+    if (!lockToken) return;
+    try {
+      // Every check below must re-run against state the previous lock holder
+      // finished writing — our pre-lock snapshot only chose the branch.
+      const fresh = await redisUtils.getLobby(pubClient, lobbyId);
+      if (!fresh || fresh.status !== 'playing') return;
+      const freshPlayer = fresh.players.find(p => p.id === socket.id);
+      // Already eliminated while we waited (e.g. the watchdog beat us) —
+      // eliminating again would advance the turn twice.
+      if (!freshPlayer || !freshPlayer.isAlive) return;
+      // Turn moved on while the quit was in flight: "current player" is now
+      // someone ELSE — eliminating them off our stale view kills the wrong
+      // player, the exact race this lock exists to prevent.
+      if (fresh.players[fresh.currentTurnIndex]?.id !== socket.id) return;
+      await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, fresh, 'Quit');
+    } finally {
+      // Token-guarded by construction (returned above when acquire failed).
+      // .catch mirrors forceNextTurn: a failed release self-heals via the
+      // lock's 30s TTL and must never mask an eliminate error.
+      await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
+    }
   } else {
     // R1: previously this did an unlocked getLobby (top of quitGame) ->
     // mutate -> saveLobby, so a concurrent submit/quit/grace-expiry on the

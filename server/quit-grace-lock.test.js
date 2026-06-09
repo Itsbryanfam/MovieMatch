@@ -107,3 +107,96 @@ describe('R1 — non-current-turn quit/grace mutate through withLobbyLock', () =
     // gameLogic.js, so no simple clear call exists here.
   });
 });
+
+// T1 audit (2026-06-09), fix T1c: the CURRENT-turn quit branch was the lone
+// eliminateCurrentPlayer call site holding NO submit lock (watchdog,
+// forceNextTurn, and the bot-whiff path all take it), and it passed the
+// UNLOCKED snapshot read at the top of quitGame. eliminateCurrentPlayer
+// mutates state, advances the turn, and saves — doing that on a stale
+// snapshot races an in-flight submit (double-eliminate / clobbered chain
+// advance). These pin the forceNextTurn-mirroring contract: acquire submit
+// lock → fresh in-lock re-read → re-verify → eliminate fresh → release.
+describe('T1c — current-turn quit eliminates under the submit lock', () => {
+  const gameLogic = require('../server/gameLogic');
+  let pub, io, ctx, elim, acquire, release;
+
+  beforeEach(async () => {
+    pub = makeFakeRedis();
+    await redisUtils.saveLobby(pub, 'L1', buildPlayingRoom());
+    io = { to: jest.fn().mockReturnThis(), emit: jest.fn() };
+    ctx = { io, pubClient: pub };
+    // Stub eliminate: these tests pin quitGame's lock ORCHESTRATION, not the
+    // whole elimination pipeline (gameLogic.test.js owns that).
+    elim = jest.spyOn(gameLogic, 'eliminateCurrentPlayer').mockResolvedValue(undefined);
+    acquire = jest.spyOn(redisUtils, 'acquireSubmitLock');
+    release = jest.spyOn(redisUtils, 'releaseSubmitLock').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    // Spies patch the SHARED module objects lobbySystem holds — restore so
+    // the R1 describe above keeps exercising the real implementations.
+    jest.restoreAllMocks();
+    gameLogic.clearTurnTimeout('L1');
+  });
+
+  test('acquires the lock, re-reads, and passes the FRESH room to eliminate', async () => {
+    // Simulate a concurrent commit landing between quitGame's unlocked
+    // pre-read and its lock grant: at acquire time, stamp a marker onto the
+    // PERSISTED room. Only a post-lock re-read can see the marker — the
+    // pre-lock snapshot (the pre-fix bug) cannot.
+    acquire.mockImplementation(async (p, id) => {
+      const live = await redisUtils.getLobby(p, id);
+      live.freshMarker = true;
+      await redisUtils.saveLobby(p, id, live);
+      return 'tok-1';
+    });
+
+    await lobbySystem.quitGame(ctx, { id: 's0' }, 'L1'); // s0 holds the turn
+
+    expect(acquire).toHaveBeenCalledWith(pub, 'L1');
+    expect(elim).toHaveBeenCalledTimes(1);
+    // 4th arg is the room — it must be the in-lock read, not the stale snapshot.
+    expect(elim.mock.calls[0][3].freshMarker).toBe(true);
+    expect(elim.mock.calls[0][4]).toBe('Quit'); // reason string preserved
+    expect(release).toHaveBeenCalledWith(pub, 'L1', 'tok-1');
+  });
+
+  test('lock is released even when eliminate throws', async () => {
+    acquire.mockResolvedValue('tok-2');
+    elim.mockRejectedValue(new Error('eliminate boom'));
+
+    // quitGame propagates (forceNextTurn does the same; safeOn catches in
+    // prod) — what matters is the finally still released the lock, or the
+    // lobby would freeze for the 30s lock TTL after any eliminate fault.
+    await expect(lobbySystem.quitGame(ctx, { id: 's0' }, 'L1'))
+      .rejects.toThrow('eliminate boom');
+    expect(release).toHaveBeenCalledWith(pub, 'L1', 'tok-2');
+  });
+
+  test('no lock acquired → no eliminate (someone else is advancing the turn)', async () => {
+    acquire.mockResolvedValue(null);
+
+    await lobbySystem.quitGame(ctx, { id: 's0' }, 'L1');
+
+    expect(elim).not.toHaveBeenCalled();
+    // Nothing acquired → nothing released (token-guarded by construction).
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  test('fresh re-read shows the turn moved on → no eliminate (stale-quit race)', async () => {
+    // The exact race the lock exists for: while the quit was in flight, the
+    // previous lock holder advanced the turn to s1. Eliminating "the current
+    // player" off the stale snapshot would now kill the WRONG player.
+    acquire.mockImplementation(async (p, id) => {
+      const live = await redisUtils.getLobby(p, id);
+      live.currentTurnIndex = 1;
+      await redisUtils.saveLobby(p, id, live);
+      return 'tok-3';
+    });
+
+    await lobbySystem.quitGame(ctx, { id: 's0' }, 'L1');
+
+    expect(elim).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(pub, 'L1', 'tok-3'); // still released
+  });
+});
