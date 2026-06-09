@@ -188,6 +188,24 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       if (await rateLimit(socket.id, 'joinLobby', RATE_LIMITS.joinLobby.limit, RATE_LIMITS.joinLobby.windowMs)) return;
       name = clampString(name, 24);
       if (!name || !name.trim()) return socket.emit('error', 'Name cannot be empty.');
+      // T1 audit fix T1f: lobbyId flows into Redis keys — lobby:${id}
+      // (NX-created with a 2h TTL), both lock keys, and the activeLobbies
+      // set — so an uncapped client value let one socket inflate Redis with
+      // multi-megabyte keys for free. Validate the SAME normalization
+      // lobbySystem.joinLobby applies (trim + uppercase) so the regex judges
+      // exactly the string that becomes the key. Empty stays "generate a
+      // fresh code" (unchanged); non-strings pass through untouched so the
+      // pre-existing behavior (lobbySystem throws, safeOn swallows, no lobby
+      // created) is preserved rather than silently reinterpreted. The 32-cap
+      // + A-Z/0-9/hyphen charset admits both generated 6-char codes and
+      // DAILY-… ids by construction. Rejection reuses this handler's own
+      // socket.emit('error', ...) pattern (see the name guard above).
+      if (typeof lobbyId === 'string') {
+        const requestedId = lobbyId.trim().toUpperCase();
+        if (requestedId && !/^[A-Z0-9-]{1,32}$/.test(requestedId)) {
+          return socket.emit('error', 'Invalid lobby code.');
+        }
+      }
       // stableId is a client-generated persistent ID that survives socket reconnects.
       // Fall back to socket.id if the client doesn't supply one.
       stableId = (typeof stableId === 'string' && stableId.length > 0 && stableId.length <= 64) ? stableId : socket.id;

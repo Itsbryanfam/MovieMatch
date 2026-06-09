@@ -207,6 +207,52 @@ describe('Socket.io Integration', () => {
     expect(data.isSpectator).toBe(true);
   });
 
+  // T1 audit (2026-06-09), fix T1f: client-supplied lobbyId previously flowed
+  // UNCAPPED into Redis keys — lobby:${id} (NX-created with a 2h TTL), both
+  // lock keys, and the activeLobbies set — so a multi-megabyte id inflated
+  // Redis at zero cost to the sender. The handler must reject anything that
+  // is non-empty after trim/uppercase and not /^[A-Z0-9-]{1,32}$/, via the
+  // same socket.emit('error', ...) pattern its sibling guards use, BEFORE any
+  // Redis write happens. Generated 6-char codes and DAILY-… ids must pass.
+
+  test('T1f: joinLobby rejects an oversized lobby id before any Redis write', async () => {
+    await connect();
+
+    client.emit('joinLobby', { name: 'Bloater', lobbyId: 'A'.repeat(50000), stableId: 'p_bloat' });
+
+    const msg = await waitFor(client, 'error');
+    expect(msg).toContain('Invalid lobby code');
+    // The whole point: nothing may reach Redis under the abusive key. The
+    // NX-create goes through mockPubClient.set; persistence through saveLobby.
+    expect(mockPubClient.set).not.toHaveBeenCalled();
+    expect(redisUtils.saveLobby).not.toHaveBeenCalled();
+    expect(redisUtils.addToActiveLobbies).not.toHaveBeenCalled();
+  });
+
+  test('T1f: joinLobby rejects a bad-charset lobby id (no lobby created)', async () => {
+    await connect();
+
+    // Underscore + punctuation are outside [A-Z0-9-]; length is fine — this
+    // pins the charset half of the guard, not just the cap.
+    client.emit('joinLobby', { name: 'Weird', lobbyId: 'AB_CD!', stableId: 'p_weird' });
+
+    const msg = await waitFor(client, 'error');
+    expect(msg).toContain('Invalid lobby code');
+    expect(mockPubClient.set).not.toHaveBeenCalled();
+    expect(redisUtils.saveLobby).not.toHaveBeenCalled();
+  });
+
+  test('T1f: joinLobby still admits a DAILY-style hyphenated id (≤32, A-Z/0-9/-)', async () => {
+    await connect();
+
+    // Same shape startDailyChallenge mints (DAILY-<stableId12>-<yyyymmdd>,
+    // uppercased + sliced to 32). The guard must not lock these out.
+    client.emit('joinLobby', { name: 'Daily', lobbyId: 'DAILY-ABC123DEF456-20260609', stableId: 'p_daily' });
+
+    const data = await waitFor(client, 'joined');
+    expect(data.lobbyId).toBe('DAILY-ABC123DEF456-20260609');
+  });
+
   // ========================
   // RECONNECTION
   // ========================
