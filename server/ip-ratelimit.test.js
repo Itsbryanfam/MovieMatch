@@ -237,4 +237,122 @@ describe('T3a/T3b — per-connection IP + per-IP rate-limit buckets', () => {
     expect(typeof serverSocket.data.clientIp).toBe('string');
     expect(serverSocket.data.clientIp.length).toBeGreaterThan(0);
   });
+
+  // -------------------------------------------------------------------------
+  // T3b — per-IP buckets: the new-socket-resets-everything hole
+  // -------------------------------------------------------------------------
+
+  test('T3b: two sockets, same IP — per-IP bucket spans both, per-socket buckets stay independent', async () => {
+    // The attack this defends: one IP opening N sockets to get N fresh
+    // per-socket buckets. The per-IP bucket must count ACROSS sockets while
+    // the per-socket buckets keep counting per socket (UX fairness intact).
+    const xff = { 'x-forwarded-for': '203.0.113.7' };
+    const a = await connect(xff);
+    const b = await connect(xff);
+
+    // Distinct queries so the (T3d) result cache can never collapse the
+    // second call — this test is about limiter accounting, not caching.
+    a.emit('heroActorSearch', { query: 'tom hanks' });
+    await waitFor(a, 'heroActorResults');
+    b.emit('heroActorSearch', { query: 'keanu reeves' });
+    await waitFor(b, 'heroActorResults');
+
+    // ONE shared IP bucket incremented by both sockets…
+    expect(pubClient.counts.get('ratelimit:ip:heroActorSearch:203.0.113.7')).toBe(2);
+    // …while each socket's own bucket saw exactly its own event.
+    expect(pubClient.counts.get(`ratelimit:heroActorSearch:${a.id}`)).toBe(1);
+    expect(pubClient.counts.get(`ratelimit:heroActorSearch:${b.id}`)).toBe(1);
+  });
+
+  test('T3b: spoofed left XFF entries cannot relocate the per-IP bucket', async () => {
+    // An attacker prepending fake entries must still land in the bucket of
+    // the proxy-appended (rightmost) address — otherwise per-IP limiting is
+    // trivially evadable by rotating the spoofed prefix.
+    const c = await connect({ 'x-forwarded-for': 'rotating-fake-1, 10.9.9.9, 198.51.100.9' });
+    c.emit('heroActorSearch', { query: 'tom hanks' });
+    await waitFor(c, 'heroActorResults');
+
+    expect(pubClient.counts.get('ratelimit:ip:heroActorSearch:198.51.100.9')).toBe(1);
+    // No bucket may be keyed by any attacker-controlled (non-rightmost) entry.
+    for (const key of pubClient.counts.keys()) {
+      expect(key).not.toContain('rotating-fake-1');
+      expect(key).not.toContain('10.9.9.9');
+    }
+  });
+
+  test('T3b: all three flagged events maintain per-IP buckets (joinLobby, autocomplete, heroActorSearch)', async () => {
+    // These are the expensive/pre-room surfaces T3 scopes the IP dimension
+    // to: joinLobby (covers lobby creation too — there is no separate
+    // createLobby handler), autocompleteSearch, and heroActorSearch.
+    const c = await connect({ 'x-forwarded-for': '203.0.113.42' });
+
+    c.emit('joinLobby', { name: 'IpDim', lobbyId: '', stableId: 'p_ipdim' });
+    // Unknown lobby → matchSystem bails after the limiter spend, which is
+    // all this test needs (the increment happens in the handler, pre-bail).
+    c.emit('autocompleteSearch', { query: 'tom', lobbyId: 'NOPE01' });
+    c.emit('heroActorSearch', { query: 'tom hanks' });
+    // Allow the three async handlers to settle (same wait idiom as
+    // socket.integration.test.js uses for fire-and-forget handlers).
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    expect(pubClient.counts.get('ratelimit:ip:joinLobby:203.0.113.42')).toBe(1);
+    expect(pubClient.counts.get('ratelimit:ip:autocomplete:203.0.113.42')).toBe(1);
+    expect(pubClient.counts.get('ratelimit:ip:heroActorSearch:203.0.113.42')).toBe(1);
+  });
+
+  test('T3b: non-flagged events get NO per-IP bucket (scope control)', async () => {
+    // Per-IP applies ONLY to the expensive/pre-room events — cheap in-room
+    // events keep their per-socket-only buckets so the extra Redis round
+    // trip isn't paid on every chat/typing/poster ping.
+    const c = await connect({ 'x-forwarded-for': '203.0.113.55' });
+    c.emit('requestPosters');
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    expect(pubClient.counts.get(`ratelimit:requestPosters:${c.id}`)).toBe(1);
+    for (const key of pubClient.counts.keys()) {
+      expect(key).not.toContain('ratelimit:ip:requestPosters');
+    }
+  });
+
+  test('T3b: per-IP ceiling is 4× the per-socket ceiling — under it passes, over it blocks', async () => {
+    // heroActorSearch borrows the autocomplete numbers (limit 20), so its
+    // per-IP ceiling is 80. Seed the shared bucket as if other sockets on
+    // this IP already spent 79 — the 80th increment must still pass.
+    pubClient.counts.set('ratelimit:ip:heroActorSearch:203.0.113.99', 79);
+    const under = await connect({ 'x-forwarded-for': '203.0.113.99' });
+    under.emit('heroActorSearch', { query: 'tom hanks' });
+    await waitFor(under, 'heroActorResults');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    // Bucket now sits at 80 (the ceiling). The 81st increment — from a
+    // brand-new socket whose per-socket bucket is EMPTY — must be dropped:
+    // that fresh-socket case is precisely the hole T3b closes.
+    const over = await connect({ 'x-forwarded-for': '203.0.113.99' });
+    let answered = false;
+    over.on('heroActorResults', () => { answered = true; });
+    over.emit('heroActorSearch', { query: 'keanu reeves' });
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    expect(answered).toBe(false);
+    // No further TMDB spend happened for the blocked call…
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // …and the per-socket bucket shows the block came from the IP dimension
+    // (1 is far below the per-socket limit of 20).
+    expect(pubClient.counts.get(`ratelimit:heroActorSearch:${over.id}`)).toBe(1);
+  });
+
+  test('T3b: per-IP bucket flap fails OPEN — event still allowed', async () => {
+    // adminLimiter philosophy: a degraded Redis must never lock players out.
+    // Fail ONLY the per-IP increment (per-socket keeps working) and the
+    // event must go through as if the IP bucket said "fine".
+    pubClient.state.failIncrPrefix = 'ratelimit:ip:';
+    const c = await connect({ 'x-forwarded-for': '203.0.113.13' });
+    c.emit('heroActorSearch', { query: 'tom hanks' });
+
+    const data = await waitFor(c, 'heroActorResults');
+    expect(Array.isArray(data.results)).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // The per-socket dimension still did its (unchanged) job.
+    expect(pubClient.counts.get(`ratelimit:heroActorSearch:${c.id}`)).toBe(1);
+  });
 });
