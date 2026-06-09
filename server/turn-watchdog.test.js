@@ -63,6 +63,20 @@ describe('audit #2 — turn watchdog authority', () => {
     redisUtils.saveLobby.mockResolvedValue(undefined);
     redisUtils.getSocketLobby.mockResolvedValue('LOBBY1');
     redisUtils.deleteSocketLobby.mockResolvedValue(undefined);
+    redisUtils.setSocketLobby.mockResolvedValue(undefined);
+    // T1e: handleDisconnect/rejoinLobby now mutate through withLobbyLock —
+    // the bare auto-mock resolves undefined, which reads as "lobby gone" and
+    // dead-ends both paths. Faithfully simulate the real contract against
+    // the getLobby/saveLobby mocks (same shape as socket.integration.test.js):
+    // read inside the lock → mutate → persist unless the mutator returned
+    // false → return the room.
+    redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+      const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+      if (!r) return null;
+      const res = await fn(r);
+      if (res !== false) await redisUtils.saveLobby(pub, id, r);
+      return r;
+    });
   });
 
   afterEach(() => {
