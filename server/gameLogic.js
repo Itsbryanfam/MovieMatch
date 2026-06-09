@@ -59,12 +59,23 @@ function armTurnTimeout(io, pubClient, id, state) {
   clearTurnTimeout(id);
   const turnTimeMs = state.turnTime || 45000;
   const timeoutId = setTimeout(async () => {
-    const lockToken = await redisUtils.acquireSubmitLock(pubClient, id);
-    if (!lockToken) {
-      activeTurnTimeouts.delete(id);
-      return;
-    }
+    // T1 audit fix T1a: lockToken is declared outside the try only so the
+    // finally can see it — the acquire itself MUST run INSIDE the try.
+    // node-redis v4 rejects every in-flight command when the socket drops,
+    // so this first await is exactly where a Redis flap surfaces at
+    // watchdog-fire time; with it outside the try, the rejection escaped the
+    // async callback (setTimeout discards the returned promise, so nothing
+    // can ever handle it) → unhandled rejection → process death → every
+    // live game on the instance dropped over one connection blip.
+    let lockToken = null;
     try {
+      lockToken = await redisUtils.acquireSubmitLock(pubClient, id);
+      if (!lockToken) {
+        // Lock held → a submit/forceNextTurn is in flight and will advance
+        // the turn itself. Bare return: the finally below performs the same
+        // activeTurnTimeouts cleanup the pre-T1a early-return did inline.
+        return;
+      }
       const liveRoom = await redisUtils.getLobby(pubClient, id);
       // Re-check expiry on the FRESH state — another lock holder may have
       // already advanced the turn, in which case turnExpiresAt is now in
@@ -77,7 +88,12 @@ function armTurnTimeout(io, pubClient, id, state) {
       logger.error(err, 'Timeout handler error');
     } finally {
       activeTurnTimeouts.delete(id);
-      await redisUtils.releaseSubmitLock(pubClient, id, lockToken).catch(() => {});
+      // T1a: token-guarded release — on the no-lock and acquire-threw paths
+      // there is nothing to release, and releasing anyway would burn a second
+      // Redis round-trip inside the very outage this restructure survives.
+      if (lockToken) {
+        await redisUtils.releaseSubmitLock(pubClient, id, lockToken).catch(() => {});
+      }
     }
   }, turnTimeMs + 4000);
 
