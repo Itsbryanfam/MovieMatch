@@ -87,6 +87,9 @@ describe('audit #2 — turn watchdog authority', () => {
   test('startGame arms the server turn watchdog', async () => {
     const state = playingRoom(0);
     state.status = 'waiting';
+    // T2c: startGame commits on a fresh in-lock re-read — wire the faithful
+    // lock mock's read (set in beforeEach) to the state under test.
+    redisUtils.getLobby.mockResolvedValue(state);
 
     expect(gameLogic.hasActiveTurnTimeout('LOBBY1')).toBe(false);
     await gameLogic.startGame(io, pubClient, 'LOBBY1', state);

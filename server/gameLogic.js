@@ -810,9 +810,23 @@ async function checkWinCondition(io, pubClient, id, state) {
 // GAME START
 // ---------------------------------------------------------------------------
 
-async function startGame(io, pubClient, id, state) {
+// T2c-ii (audit P1-3): startGame used to mutate the caller's snapshot and
+// save it holding NOTHING — so a host double-click ran the whole setup
+// twice (duplicate game_started telemetry + duplicate recordGamePlayed per
+// player), and the save could clobber any lobbymut write landing in the
+// window. The gate + mutation now commit inside withLobbyLock on a FRESH
+// re-read; the solo personal-best lookup (the one long await) is hoisted
+// BEFORE the lock; telemetry/recordGamePlayed/armTurnTimeout/broadcast fire
+// only when the commit landed.
+// opts.verifyFresh(fresh): optional caller gate re-checked on the in-lock
+// room — startLobby re-verifies the clicking socket still holds the host seat.
+async function startGame(io, pubClient, id, state, opts = {}) {
   const mode = state.gameMode || 'classic';
 
+  // Player-count gates on the snapshot: kept here (not only in the mutator)
+  // so the clicking host gets their immediate error toast, exactly as
+  // before. The mutator below re-validates on the fresh roster and declines
+  // silently if it changed in the window — same outcome as losing the race.
   if (mode === 'solo') {
     if (state.players.length < 1) {
       io.to(id).emit('error', 'Need at least 1 player!');
@@ -825,8 +839,8 @@ async function startGame(io, pubClient, id, state) {
       io.to(id).emit('error', 'Each team needs at least 1 player!');
       return;
     }
-    // Sort so all team-0 players come first in the turn order
-    state.players.sort((a, b) => (a.teamId ?? 0) - (b.teamId ?? 0));
+    // (The team sort MUTATES turn order, so it moved into the mutator —
+    // it must apply to the fresh room, not this snapshot.)
   } else {
     if (state.players.length < 2) {
       io.to(id).emit('error', 'Need at least 2 players!');
@@ -834,74 +848,108 @@ async function startGame(io, pubClient, id, state) {
     }
   }
 
-  state.status = 'playing';
-  state.chain = [];
-  state.usedMovies = [];
-  state.timerMultiplier = 0;
-  state.previousSharedActors = [];
-  // H1: Initialize the per-turn typo-retry counter. Without this, an old
-  // state object loaded from before this field existed would carry whatever
-  // stale value its serialized form had, biasing the very first turn.
-  state.currentTurnRetries = 0;
-  state.players.forEach(p => { p.isAlive = true; p.score = 0; });
-
-  // M5: Solo-mode-only enrichment — pick an objective for the run and
-  // load the player's personal-best chain length so the UI can show it
-  // ("Beat your best of 12!"). Other modes don't get either field, which
-  // the client checks for before rendering. Daily skips this on purpose:
-  // it has its own implicit objective (the daily seed) and its own
-  // scoring track via dailySystem, so adding another objective layer
-  // would muddle the screen.
+  // T2c-ii: hoist the one long await — the solo personal-best lookup —
+  // BEFORE the commit lock (the T2 design: long-await work first, on the
+  // snapshot; results applied inside). Best-effort — getStats swallows its
+  // own errors, so a Redis blip can't crash the game-start path.
+  let personalBestChain = 0;
   if (mode === 'solo') {
-    const obj = soloObjectivesSystem.pickObjective();
-    state.objective = soloObjectivesSystem.clientShape(obj);
-    state.objectiveHit = false;
-    state.bonusPoints = 0;
-    state.currentStreak = 0;
-    // Personal-best lookup. Best-effort — getStats swallows its own errors
-    // and returns a zero-shaped record on failure, so a Redis blip can't
-    // crash the game-start path.
     const solo = state.players[0];
     if (solo && solo.stableId) {
       try {
         const stats = await statsSystem.getStats(pubClient, solo.stableId);
-        state.personalBestChain = (stats && stats.byMode && stats.byMode.solo)
+        personalBestChain = (stats && stats.byMode && stats.byMode.solo)
           ? (stats.byMode.solo.longestChain | 0)
           : 0;
       } catch {
-        state.personalBestChain = 0;
+        personalBestChain = 0;
       }
-    } else {
-      state.personalBestChain = 0;
     }
-  } else {
-    // Defensive: clear the solo-only fields when starting a non-solo
-    // game (host could reuse the same lobby across modes via restart).
-    state.objective = null;
-    state.objectiveHit = false;
-    state.bonusPoints = 0;
-    state.currentStreak = 0;
-    state.personalBestChain = 0;
   }
 
-  // Classic and speed start at a random index; team and solo always start at 0
-  state.currentTurnIndex = 0;
-  if (mode === 'classic' || mode === 'speed') {
-    state.currentTurnIndex = Math.floor(Math.random() * state.players.length);
-  }
-  state.isValidating = false;
+  // T2c-ii: gate + mutation under the per-lobby mutex, on fresh state.
+  let committed = false; // side-channel: withLobbyLock returns the room even on decline
+  const room = await redisUtils.withLobbyLock(pubClient, id, (fresh) => {
+    // THE double-fire gate: only a 'waiting' room can start. The race
+    // loser's fresh read sees 'playing' here and declines — no duplicate
+    // telemetry, no duplicate stats, no second setup pass over a live game.
+    if (fresh.status !== 'waiting') return false;
+    // Caller-supplied fresh gate (startLobby: "clicker is still the host").
+    if (opts.verifyFresh && !opts.verifyFresh(fresh)) return false;
 
-  resetTimer(state);
+    // Re-validate the count gates against the FRESH roster and mode — a
+    // join/leave/setGameMode may have landed since the snapshot was read.
+    const freshMode = fresh.gameMode || 'classic';
+    if (freshMode === 'solo') {
+      if (fresh.players.length < 1) return false;
+    } else if (freshMode === 'team') {
+      if (fresh.players.filter(p => p.teamId === 0).length === 0 ||
+          fresh.players.filter(p => p.teamId === 1).length === 0) return false;
+      // Sort so all team-0 players come first in the turn order.
+      fresh.players.sort((a, b) => (a.teamId ?? 0) - (b.teamId ?? 0));
+    } else {
+      if (fresh.players.length < 2) return false;
+    }
 
+    fresh.status = 'playing';
+    fresh.chain = [];
+    fresh.usedMovies = [];
+    fresh.timerMultiplier = 0;
+    fresh.previousSharedActors = [];
+    // H1: Initialize the per-turn typo-retry counter. Without this, an old
+    // state object loaded from before this field existed would carry whatever
+    // stale value its serialized form had, biasing the very first turn.
+    fresh.currentTurnRetries = 0;
+    fresh.players.forEach(p => { p.isAlive = true; p.score = 0; });
+
+    // M5: Solo-mode-only enrichment — pick an objective for the run and
+    // attach the hoisted personal-best chain length so the UI can show it
+    // ("Beat your best of 12!"). Other modes don't get either field, which
+    // the client checks for before rendering. Daily skips this on purpose:
+    // it has its own implicit objective (the daily seed) and its own
+    // scoring track via dailySystem.
+    if (freshMode === 'solo') {
+      const obj = soloObjectivesSystem.pickObjective();
+      fresh.objective = soloObjectivesSystem.clientShape(obj);
+      fresh.objectiveHit = false;
+      fresh.bonusPoints = 0;
+      fresh.currentStreak = 0;
+      // Hoisted pre-lock. If the mode flipped TO solo inside the gate window
+      // (snapshot wasn't solo, so nothing was hoisted) degrade to 0 — the
+      // same value a stats miss produces.
+      fresh.personalBestChain = (mode === 'solo') ? personalBestChain : 0;
+    } else {
+      // Defensive: clear the solo-only fields when starting a non-solo
+      // game (host could reuse the same lobby across modes via restart).
+      fresh.objective = null;
+      fresh.objectiveHit = false;
+      fresh.bonusPoints = 0;
+      fresh.currentStreak = 0;
+      fresh.personalBestChain = 0;
+    }
+
+    // Classic and speed start at a random index; team and solo always start at 0
+    fresh.currentTurnIndex = 0;
+    if (freshMode === 'classic' || freshMode === 'speed') {
+      fresh.currentTurnIndex = Math.floor(Math.random() * fresh.players.length);
+    }
+    fresh.isValidating = false;
+
+    resetTimer(fresh);
+    committed = true;
+  });
+  if (!committed || !room) return;
+
+  // Side-effects ONLY for the call that actually started the game (T2c-ii).
   // H6: Telemetry — fired exactly once per game, at the start. Captures the
   // mode mix and player count distribution so we can answer "what modes do
   // people actually play?" and "what's the typical lobby size?" without
   // having to instrument every call site.
   telemetry.track(pubClient, 'game_started', {
-    mode,
-    playerCount: state.players.length,
-    hardcoreMode: !!state.hardcoreMode,
-    allowTvShows: !!state.allowTvShows,
+    mode: room.gameMode || 'classic',
+    playerCount: room.players.length,
+    hardcoreMode: !!room.hardcoreMode,
+    allowTvShows: !!room.allowTvShows,
   });
 
   // H5: Per-player gamesPlayed bump. Fire-and-forget — wrapped in
@@ -909,20 +957,19 @@ async function startGame(io, pubClient, id, state) {
   // still happens promptly. statsSystem swallows its own errors so a
   // failed write here can't crash the game-start path.
   Promise.all(
-    state.players
+    room.players
       .filter(p => p.stableId)
-      .map(p => statsSystem.recordGamePlayed(pubClient, p.stableId, mode))
+      .map(p => statsSystem.recordGamePlayed(pubClient, p.stableId, room.gameMode || 'classic'))
   ).catch(() => {});
 
   // Audit finding #2: arm the server watchdog for the FIRST turn. Without
   // this the opening turn had no server enforcement — the active client
   // could stall the entire table indefinitely by never sending
-  // forceNextTurn. nextTurn arms every subsequent turn; this closes the
-  // first-turn hole with the identical helper.
-  armTurnTimeout(io, pubClient, id, state);
+  // forceNextTurn. Post-lock per the R1 pattern (timer side-effects never
+  // extend the mutex section); the lock's save already persisted the room.
+  armTurnTimeout(io, pubClient, id, room);
 
-  await redisUtils.saveLobby(pubClient, id, state);
-  broadcastState(io, id, state);
+  broadcastState(io, id, room);
 }
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,16 @@ describe('gameLogic tests', () => {
       emit: jest.fn()
     };
     mockPubClient = {};
+    // T2c: startGame commits through withLobbyLock now. Faithful contract
+    // mock (read fresh inside the lock → mutate → persist unless the mutator
+    // returned false → return the room) — same shape as turn-watchdog.test.js.
+    redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+      const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+      if (!r) return null;
+      const res = await fn(r);
+      if (res !== false) await redisUtils.saveLobby(pub, id, r);
+      return r;
+    });
   });
 
   test('resetTimer sets turnExpiresAt for speed mode', () => {
@@ -39,6 +49,9 @@ describe('gameLogic tests', () => {
       ],
       status: 'waiting'
     };
+    // T2c: startGame commits on a fresh in-lock re-read — point the lock
+    // mock's read at the state under test.
+    redisUtils.getLobby.mockResolvedValue(state);
 
     await gameLogic.startGame(mockIo, mockPubClient, 'LOBBY1', state);
 

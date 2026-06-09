@@ -497,9 +497,21 @@ async function startLobby(ctx, socket, lobbyId) {
   // finished match, wiping chain/usedMovies, reviving the dead, and zeroing
   // scores. Mirrors the room.status checks every other host-only mutator
   // (setGameMode/kickPlayer/restartLobby) already enforces.
+  //
+  // T2c-ii (audit P1-3): these snapshot checks are now only the cheap
+  // fast-reject — two concurrent clicks both pass them (both reads see
+  // 'waiting'). The AUTHORITATIVE gate re-runs on FRESH state inside
+  // startGame's withLobbyLock mutator: status via startGame itself, the
+  // host seat via verifyFresh below — so the race loser declines instead of
+  // double-firing game_started telemetry/recordGamePlayed and re-running
+  // the whole game setup.
   if (room.status !== 'waiting') return;
   if (!room.players.find(p => p.id === socket.id)?.isHost) return;
-  await gameLogic.startGame(io, pubClient, lobbyId, room);
+  await gameLogic.startGame(io, pubClient, lobbyId, room, {
+    // Re-verify the clicking socket still holds the host seat on the
+    // in-lock fresh room (host migration can land in the gate window).
+    verifyFresh: (fresh) => !!fresh.players.find(p => p.id === socket.id)?.isHost,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,7 +1014,47 @@ async function handleDisconnect(ctx, socketId) {
 
           const isCurrentTurn = liveRoom.players[liveRoom.currentTurnIndex]?.id === livePlayer.id;
           if (isCurrentTurn) {
-            await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, liveRoom, 'Disconnected');
+            // T2c-i (audit P1-3): this was the LAST eliminateCurrentPlayer
+            // call site holding NO submit lock — the same class of gap T1c
+            // closed for quitGame's current-turn branch — and it passed the
+            // UNLOCKED liveRoom read above. Mirror quitGame/forceNextTurn
+            // exactly: acquire the pipeline lock → fresh in-lock re-read →
+            // re-verify → eliminate the FRESH room → token-guarded release.
+            const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+            // No lock = a submit/forceNextTurn/watchdog is mid-flight and
+            // will resolve this very turn itself. If the player really is
+            // gone, the armed turn watchdog eliminates them on the next
+            // expiry — skipping here is a no-op, not a leak.
+            if (!lockToken) return;
+            try {
+              // Every check below re-runs against state the previous lock
+              // holder finished writing — the pre-lock read only chose the
+              // branch.
+              const fresh = await redisUtils.getLobby(pubClient, lobbyId);
+              if (!fresh || fresh.status !== 'playing') return;
+              // Same dual lookup that produced livePlayer (stableId first,
+              // so a page-refresh rejoin that changed socket ids matches).
+              const freshPlayer = fresh.players.find(p => p.stableId === player.stableId || p.id === socketId);
+              // Rejoined (connected flipped true) or already eliminated
+              // while we waited — the grace kill must cancel, not double-fire.
+              if (!freshPlayer || freshPlayer.connected || !freshPlayer.isAlive) return;
+              // Turn moved on: "the current player" is now someone ELSE —
+              // eliminating off our stale view would kill the wrong player.
+              if (fresh.players[fresh.currentTurnIndex]?.id !== freshPlayer.id) return;
+              // extraVerify re-checks "still disconnected" AGAIN on the
+              // lobbymut-fresh room inside eliminateCurrentPlayer's commit
+              // (T2a) — a rejoin landing between this submit-locked check
+              // and that commit still cancels the kill.
+              await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, fresh, 'Disconnected', {
+                extraVerify: (f, v) => !v.connected,
+              });
+            } finally {
+              // Token-guarded by construction (returned above when acquire
+              // failed). .catch mirrors quitGame/forceNextTurn: a failed
+              // release self-heals via the lock's 30s TTL and must never
+              // mask an eliminate error.
+              await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
+            }
           } else {
             // R1: same lost-update race as quitGame's else branch — the
             // getLobby above this block is unlocked. Re-find the player on

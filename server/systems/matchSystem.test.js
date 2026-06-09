@@ -263,6 +263,8 @@ describe('matchSystem.submitMovie — title-not-found retry behaviour (H1)', () 
       // game — startGame must overwrite it, not preserve it.
       currentTurnRetries: 99,
     };
+    // T2c: wire the in-lock fresh read to the state under test.
+    redisUtils.getLobby.mockResolvedValue(state);
 
     await gameLogic.startGame(mockIo, mockPubClient, 'TEST', state);
 
