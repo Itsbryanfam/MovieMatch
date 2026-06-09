@@ -97,6 +97,18 @@ describe('gameLogic — nextTurn timer arming and cleanup', () => {
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     redisUtils.saveLobby.mockResolvedValue(undefined);
     redisUtils.getLobby.mockResolvedValue(null);
+    // T2b: nextTurn commits through withLobbyLock now (fresh re-read inside
+    // the lock). Faithful contract mock against this suite's getLobby/
+    // saveLobby mocks — same shape as turn-watchdog.test.js. Tests that
+    // drive nextTurn point getLobby at their state object so the in-lock
+    // "fresh" room is that same object.
+    redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+      const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+      if (!r) return null;
+      const res = await fn(r);
+      if (res !== false) await redisUtils.saveLobby(pub, id, r);
+      return r;
+    });
   });
 
   test('clearTurnTimeout is exported and removes nothing for an unknown id', () => {
@@ -119,6 +131,8 @@ describe('gameLogic — nextTurn timer arming and cleanup', () => {
       timerMultiplier: 0,
       turnTime: 1000, // short turn so the watchdog could fire quickly
     };
+    // T2b: wire the in-lock fresh read to the state under test.
+    redisUtils.getLobby.mockResolvedValue(state);
 
     await gameLogic.nextTurn(mockIo, mockPubClient, 'LOBBY1', state);
 
@@ -190,6 +204,8 @@ describe('gameLogic — nextTurn timer arming and cleanup', () => {
       timerMultiplier: 0,
       turnTime: 1000,
     };
+    // T2b: wire the in-lock fresh read to the state under test.
+    redisUtils.getLobby.mockResolvedValue(state);
 
     // First call arms timer A, second call arms timer B — the implementation
     // must clear A before arming B, otherwise we'd accumulate timer handles

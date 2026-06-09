@@ -431,27 +431,46 @@ function _applyTurnAdvance(state) {
   return true;
 }
 
+// T2b (audit P1-3): nextTurn used to mutate the caller's snapshot and save
+// the whole blob — under the submit lock only, so any lobbymut write that
+// committed since the snapshot was read got silently reverted. The submit
+// pipeline now advances the turn INSIDE its own commit mutator (matchSystem,
+// via applyTurnAdvance), and this exported orchestrator commits the same way:
+// fresh re-read under withLobbyLock, re-verify that the chain/turn position
+// is unchanged since the caller's snapshot, advance on the fresh room, then
+// arm/broadcast after the lock. A caller whose snapshot went stale gets a
+// clean decline instead of a clobbering save.
 async function nextTurn(io, pubClient, id, state) {
-  await checkWinCondition(io, pubClient, id, state);
-  if (state.status !== 'playing') return;
+  // Snapshot expectations for the in-lock re-verify: if either moved, some
+  // other writer already resolved this turn and advancing again would skip
+  // a player.
+  const expectedTurnIndex = state.currentTurnIndex;
+  const expectedChainLen = (state.chain || []).length;
 
-  clearTurnTimeout(id);
+  let advanced = false; // side-channel: withLobbyLock returns the room even on decline
+  const room = await redisUtils.withLobbyLock(pubClient, id, async (fresh) => {
+    // Authoritative win re-check on FRESH state (the old code checked the
+    // snapshot). When it fires it persists/broadcasts internally; declining
+    // the lock save afterwards is correct — there is nothing further to write.
+    await checkWinCondition(io, pubClient, id, fresh);
+    if (fresh.status !== 'playing') return false;
+    if (fresh.currentTurnIndex !== expectedTurnIndex) return false;
+    if ((fresh.chain || []).length !== expectedChainLen) return false;
+    // T2a helper: index advance + retry/flag/timer resets, applied to fresh.
+    if (!_applyTurnAdvance(fresh)) return false;
+    advanced = true;
+  });
 
-  // T2a: index advance + retry/flag/timer resets now live in the shared
-  // _applyTurnAdvance helper (the eliminate tail applies the identical
-  // mutation inside its lobbymut commit). Behavior here is unchanged.
-  if (!_applyTurnAdvance(state)) return;
-
-  // Audit finding #2: arm the server watchdog through the shared helper so
-  // startGame (first turn) and rejoin (current player returning within
-  // grace) get the exact same enforcement nextTurn does. Previously this
-  // block was inline here only, so the first turn of every game — and any
-  // turn after a bystander disconnect cleared the timer — had no server
-  // backstop and could be stalled forever by withholding forceNextTurn.
-  armTurnTimeout(io, pubClient, id, state);
-
-  await redisUtils.saveLobby(pubClient, id, state);
-  broadcastState(io, id, state);
+  if (advanced && room) {
+    // Audit finding #2: arm the server watchdog through the shared helper so
+    // startGame (first turn) and rejoin (current player returning within
+    // grace) get the exact same enforcement nextTurn does. armTurnTimeout
+    // self-clears any previous handle, which is why the old explicit
+    // clearTurnTimeout call is gone. Post-lock per the R1 pattern (io/timer
+    // side-effects never extend the mutex section).
+    armTurnTimeout(io, pubClient, id, room);
+    broadcastState(io, id, room);
+  }
 }
 
 // Audit finding #6: turn watchdogs (and reconnect-grace timers) live in an

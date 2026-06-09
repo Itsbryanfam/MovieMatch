@@ -108,6 +108,65 @@ function mkIo() {
 }
 
 // ---------------------------------------------------------------------------
+// T2b — the submit pipeline's success commit re-reads fresh under lobbymut
+// ---------------------------------------------------------------------------
+describe('T2b — submit pipeline commit under lobbymut', () => {
+  // The success commit arms the next turn's watchdog — clear it.
+  afterEach(() => gameLogic.clearTurnTimeout('L1'));
+
+  test('a lobbymut kill landing between the validation snapshot and the commit survives, and the move still applies', async () => {
+    const h = makeStoreHarness();
+    const { io } = mkIo();
+    const ctx = { io, pubClient: {}, TMDB_HEADERS: { Authorization: 'Bearer t', accept: 'application/json' }, logger: { error: jest.fn(), info: jest.fn(), warn: jest.fn() } };
+    h.seed('L1', {
+      id: 'L1', status: 'playing', gameMode: 'classic', currentTurnIndex: 0,
+      isValidating: false, turnExpiresAt: Date.now() + 60000, timerMultiplier: 0,
+      chain: [{ playerId: 'sock-b', playerName: 'Ben', movie: { id: 1, title: 'First', year: '2000', cast: [{ id: 42, name: 'Shared' }], mediaType: 'movie' }, matchedActors: [] }],
+      usedMovies: ['movie:1'], previousSharedActors: [], hardcoreMode: false,
+      spectators: [], allowTvShows: false, isPublic: false, currentTurnRetries: 0,
+      players: [
+        { id: 'sock-1', name: 'Sub', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 'k_s' },
+        { id: 'sock-x', name: 'Xena', isHost: false, isAlive: true, connected: true, score: 0, wins: 0, teamId: 1, stableId: 'k_x' },
+        { id: 'sock-b', name: 'Ben', isHost: false, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 'k_b' },
+      ],
+    });
+    // Direct-ID resolve for the submitted movie; its credits share actor 42
+    // with the chain head, so the play validates.
+    global.fetch.mockResolvedValue({ ok: true, json: async () => ({ id: 2, title: 'Second', release_date: '2005-01-01', poster_path: null }) });
+    redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [{ id: 42, name: 'Shared' }, { id: 7, name: 'Other' }] });
+
+    // The pipeline's reads are: (1) pre-lock quick-reject, (2) in-lock
+    // validation-flag commit, (3) the post-enrich snapshot the play is
+    // validated against, (4) the in-lock success commit. Land the concurrent
+    // lobbymut write (a non-current quit marking Xena dead) right AFTER read
+    // #3 — the snapshot now predates it, the exact audit P1-3 window.
+    h.injectAfterRead = {
+      afterRead: 3,
+      fn: () => h.mutateStore('L1', (r) => { r.players[1].isAlive = false; }),
+    };
+
+    await matchSystem.submitMovie(ctx, { id: 'sock-1', emit: jest.fn() }, { lobbyId: 'L1', movie: 'Second', tmdbId: 2, mediaType: 'movie' });
+
+    const final = h.snapshot('L1');
+    // Pre-T2b the success save was the stale post-enrich snapshot: Xena came
+    // back to life. The commit must re-read fresh and keep her dead.
+    expect(final.players[1].isAlive).toBe(false);
+    // The submitted move still applied on that same fresh room...
+    expect(final.chain).toHaveLength(2);
+    expect(final.chain[1].movie.id).toBe(2);
+    expect(final.usedMovies).toContain('movie:2');
+    // ...the submitter scored, and the turn advanced PAST the dead player.
+    expect(final.players[0].score).toBe(100);
+    expect(final.currentTurnIndex).toBe(2);
+    // The validation flag is released for the next turn.
+    expect(final.isValidating).toBe(false);
+    // No save anywhere in the pipeline may bypass the mutex — this catches
+    // the validation-flag write and any failure-path save too.
+    expect(h.nakedSaves).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // T2a — the eliminate/advance tail commits under lobbymut
 // ---------------------------------------------------------------------------
 describe('T2a — eliminate/advance tail commits under lobbymut', () => {

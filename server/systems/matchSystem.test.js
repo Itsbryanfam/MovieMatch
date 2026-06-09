@@ -238,6 +238,10 @@ describe('matchSystem.submitMovie — title-not-found retry behaviour (H1)', () 
       turnTime: 60000,
       currentTurnRetries: 2, // player A had used 2 retries
     };
+    // T2b: nextTurn commits on a fresh in-lock re-read now — point the
+    // faithful lock mock's read at the state under test so the advance
+    // lands on this same object.
+    redisUtils.getLobby.mockResolvedValue(state);
 
     await gameLogic.nextTurn(mockIo, mockPubClient, 'TEST', state);
 
