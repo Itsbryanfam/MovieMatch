@@ -34,6 +34,18 @@ beforeEach(() => {
   redisUtils.acquireSubmitLock.mockResolvedValue('tok');
   redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
   redisUtils.saveLobby.mockResolvedValue(undefined);
+  // T2 (audit P1-3): the submit pipeline's commits (validation flag, strike
+  // counter, success commit, eliminate tail) now go through withLobbyLock.
+  // Faithful contract mock against this file's getLobby/saveLobby mocks —
+  // the in-lock "fresh" read returns the same static room object the tests
+  // assert on, so commits stay visible.
+  redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+    const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+    if (!r) return null;
+    const res = await fn(r);
+    if (res !== false) await redisUtils.saveLobby(pub, id, r);
+    return r;
+  });
   // Cache miss + lock claim so getOrFetchCredits runs its fetch (which fails)
   // then hits the Phase 5b fallback. getOrFetchCredits is the REAL impl.
   redisUtils.getOrFetchCredits.mockImplementation((...a) => jest.requireActual('../redisUtils').getOrFetchCredits(...a));

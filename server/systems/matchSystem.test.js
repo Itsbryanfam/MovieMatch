@@ -25,6 +25,24 @@ jest.mock('../redisUtils');
 // "no results" so the title-not-found path is the natural fall-through.
 global.fetch = jest.fn();
 
+// T2 (audit P1-3): the submit pipeline and the eliminate tail now commit
+// through withLobbyLock (fresh re-read inside the lock; persist unless the
+// mutator declines with false). The bare auto-mock resolves undefined, which
+// reads as "lobby gone" and dead-ends every commit — so each describe wires
+// this faithful contract mock (same shape as socket.integration.test.js /
+// turn-watchdog.test.js) against its existing getLobby/saveLobby mocks.
+// Tests keep mocking getLobby with the room object itself, so the in-lock
+// "fresh" read returns that same object and existing assertions still hold.
+function mockFaithfulLobbyLock() {
+  redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+    const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+    if (!r) return null;
+    const res = await fn(r);
+    if (res !== false) await redisUtils.saveLobby(pub, id, r);
+    return r;
+  });
+}
+
 describe('matchSystem.submitMovie — title-not-found retry behaviour (H1)', () => {
   let mockIo;
   let mockSocket;
@@ -81,6 +99,8 @@ describe('matchSystem.submitMovie — title-not-found retry behaviour (H1)', () 
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     redisUtils.saveLobby.mockResolvedValue(undefined);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+    // T2: every pipeline commit goes through the lobbymut contract now.
+    mockFaithfulLobbyLock();
   });
 
   afterEach(() => {
@@ -273,6 +293,8 @@ describe('matchSystem.submitMovie — youWereEliminated payload (H3)', () => {
     redisUtils.acquireSubmitLock.mockResolvedValue('token-abc');
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     redisUtils.saveLobby.mockResolvedValue(undefined);
+    // T2: every pipeline commit goes through the lobbymut contract now.
+    mockFaithfulLobbyLock();
   });
 
   afterEach(() => {
@@ -542,6 +564,8 @@ describe('matchSystem.submitMovie — client mediaType/tmdbId validation (#8)', 
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     redisUtils.saveLobby.mockResolvedValue(undefined);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+    // T2: every pipeline commit goes through the lobbymut contract now.
+    mockFaithfulLobbyLock();
     global.fetch = jest.fn();
   });
 
@@ -624,6 +648,8 @@ describe('matchSystem.submitMovie — valid play commits and advances turn (CI2)
     // to their previous resolved value). The individual test that needs a
     // specific cast overrides this in its own body.
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+    // T2: every pipeline commit goes through the lobbymut contract now.
+    mockFaithfulLobbyLock();
   });
 
   afterEach(() => gameLogic.clearTurnTimeout('TEST'));
@@ -726,6 +752,8 @@ describe('submitMovie — post-enrich object-graph + catch null-guard (Phase 5a 
     redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
     redisUtils.saveLobby.mockResolvedValue(undefined);
     redisUtils.getOrFetchCredits.mockResolvedValue({ cast: [] });
+    // T2: every pipeline commit goes through the lobbymut contract now.
+    mockFaithfulLobbyLock();
   });
 
   afterEach(() => gameLogic.clearTurnTimeout('TEST'));

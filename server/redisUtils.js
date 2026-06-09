@@ -357,6 +357,28 @@ const SUBMIT_LOCK_RELEASE_SCRIPT = `
     return 0
   end`;
 
+// ============================================================================
+// T2 LOCK ORDERING RULE (audit P1-3) — read before touching either helper.
+// ============================================================================
+// Two lock classes guard the same lobby blob, and they are STRICTLY ordered:
+//   OUTER — lock:submit:<id> (acquireSubmitLock here): the PIPELINE-level
+//     dedup. Exactly one submission/turn-advance pipeline runs per lobby at a
+//     time (prevents double-eliminate / double-advance). It is held across
+//     long TMDB awaits, so it must never be the lock that guards data writes.
+//   INNER — lock:lobbymut:<id> (withLobbyLock below): the short DATA-COMMIT
+//     mutex. Every write of lobby:<id> happens inside it, on a room re-read
+//     inside the lock, with preconditions re-verified on that fresh room.
+// lobbymut MAY be acquired while holding submit — every commit in the submit
+// pipeline does exactly that. The submit lock must NEVER be acquired inside a
+// withLobbyLock mutator: that inverts the order and deadlocks the two
+// pipelines against each other until a TTL expires. Corollary: a mutator
+// passed to withLobbyLock must not call back into anything that takes the
+// submit lock (submitMovie / submitBotMove / forceNextTurn / quitGame / the
+// grace-expiry kill / the watchdog callback). Scheduling a timer whose
+// CALLBACK takes the submit lock later (armTurnTimeout, scheduleBotMove) is
+// fine — the acquisition happens long after the mutator returned.
+// ============================================================================
+
 async function acquireSubmitLock(pubClient, lobbyId) {
   // Unique 128-bit token tags this lock so a release after expiry can't
   // delete a successor's lock. Hex encoding keeps the value Redis-safe.
@@ -426,6 +448,11 @@ const LOBBY_MUTEX_TTL_MS = 5000;
 // keeps a brand-new lobby working if a read-after-write is briefly empty).
 // Without a seed, a null read means "lobby gone" → return null (callers
 // surface "unavailable"), exactly the pre-fix behavior for existing lobbies.
+//
+// T2 LOCK ORDERING (see the full rule above acquireSubmitLock): lobbymut is
+// the INNER lock — it may be taken while holding lock:submit:<id>, but a
+// mutator must NEVER acquire the submit lock (or call into any code path
+// that does). Inversion deadlocks both pipelines until a TTL expires.
 async function withLobbyLock(pubClient, id, mutator, opts = {}) {
   const token = require('crypto').randomBytes(16).toString('hex');
   const lockKey = `${LOBBY_MUTEX_PREFIX}${id}`;

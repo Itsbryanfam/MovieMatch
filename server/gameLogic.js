@@ -186,57 +186,48 @@ async function recordPlayerWin(pubClient, player) {
 // ELIMINATION
 // ---------------------------------------------------------------------------
 
-async function eliminateTeam(io, pubClient, id, state, teamId, reason) {
-  const teamLabel = teamId === 0 ? '🔴 Red' : '🔵 Blue';
-  // Structured payload: `kind` lets the client dispatch effects (sounds,
-  // shakes, vibration) without brittle substring matching on the human-
-  // readable `msg`. Future i18n won't break elimination effects.
-  io.to(id).emit('notification', { msg: `Team ${teamLabel} eliminated: ${reason}`, kind: 'elimination' });
-  state.players.forEach(p => {
-    if (p.teamId === teamId) p.isAlive = false;
-  });
-  await checkWinCondition(io, pubClient, id, state);
-  if (state.status === 'playing') {
-    await nextTurn(io, pubClient, id, state);
-  }
-}
+// T2a (audit P1-3): eliminateCurrentPlayer is the shared elimination tail for
+// every submit-lock holder (the turn watchdog, forceNextTurn, the bot whiff,
+// quitGame's current-turn branch, the grace-expiry kill, and the submit
+// pipeline's failure paths). It used to mutate the caller's SNAPSHOT and
+// persist it via checkWinCondition/nextTurn — a full-blob save of state read
+// up to ~1.2s earlier (the TMDB aftercare window), which silently REVERTED
+// any withLobbyLock write committed in that window (a non-current quit
+// resurrected, a spectator join dropped, an equipped title erased). Now:
+//   1. the long-await aftercare runs FIRST, on the snapshot, OUTSIDE any
+//      lock (chain state cannot change under the caller's submit lock);
+//   2. the data commit (mark dead → win-check → turn advance) re-reads FRESH
+//      state inside withLobbyLock and re-verifies the snapshot's
+//      preconditions — still playing, the SAME player still holds the turn,
+//      still alive, plus the caller's opts.extraVerify — declining with no
+//      write when the world moved on;
+//   3. timer side-effects (the next turn's watchdog) fire AFTER the lock,
+//      only when the commit actually landed.
+// The old standalone eliminateTeam was folded into the mutator's team branch
+// so the team tail commits under the same lock (it had no other callers).
+//
+// opts.extraVerify(fresh, freshVictim): optional extra precondition checked
+// inside the lock. The disconnect-grace path (T2c) passes "still
+// disconnected" so a rejoin that lands between its submit-locked pre-check
+// and this commit still cancels the kill.
+async function eliminateCurrentPlayer(io, pubClient, id, state, reason, opts = {}) {
+  // Victim identity is pinned from the caller's snapshot: the submit-lock
+  // holder decided WHO dies; the lock below only re-verifies that decision
+  // still holds on fresh state — it must never re-target a different player.
+  const victim = state.players[state.currentTurnIndex];
 
-async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
-  // L3: If spectators voted on this turn, settle their predictions
-  // BEFORE the elimination notification fires. Outcome here is "no" —
-  // the player did NOT get it. We compute correctness for each vote
-  // and broadcast a one-shot result that the client uses for its
-  // "you called it!" / "wrong call" toast.
-  _settlePredictions(io, id, state, /* outcome */ 'no');
-
-  if (state.gameMode === 'team') {
-    const player = state.players[state.currentTurnIndex];
-    const teamId = player ? player.teamId : 0;
-    await eliminateTeam(io, pubClient, id, state, teamId, reason);
-    return;
-  }
-  const player = state.players[state.currentTurnIndex];
-  if (player) {
-    player.isAlive = false;
-    io.to(id).emit('notification', { msg: `${player.name} eliminated: ${reason}`, kind: 'elimination' });
-    // H6: Telemetry — `reason` is a free-form string so we bucket it into a
-    // small set of stable categories. This is what lets us answer "what % of
-    // eliminations are typos?" without having to grep server logs.
-    telemetry.track(pubClient, 'eliminated', {
-      mode: state.gameMode,
-      reasonCategory: _categorizeReason(reason),
-      chainLength: (state.chain || []).length,
-    });
-  }
-  // Phase 7.1 (2): Timeout aftercare. The invalid-connection path already
-  // sends a private youWereEliminated (matchSystem); the timeout/freeze path
-  // only had a room-wide notification. Give a HUMAN (stableId truthy — bots
-  // are null), non-team (team eliminations returned above), still-connected
-  // player who ran out the clock the same learning card so they know what
-  // move they missed. Bounded + fail-closed: a missing suggestion or a slow
-  // TMDB must never delay nextTurn beyond _computeCouldHavePlayed's own
-  // timeout, and must never throw out of the elimination path.
-  if (player && player.stableId && player.connected && _categorizeReason(reason) === 'timeout') {
+  // Phase 7.1 (2) timeout aftercare, hoisted BEFORE the commit lock (T2a):
+  // _computeCouldHavePlayed awaits TMDB for up to COULD_HAVE_PLAYED_TIMEOUT_MS
+  // — exactly the long-await window the data lock must not span. Computed on
+  // the snapshot (the chain can't change while the caller holds the submit
+  // lock); the resulting payload is emitted inside the mutator only if the
+  // elimination commits. Gating is unchanged: HUMAN (stableId truthy — bots
+  // are null), still-connected, timeout-category reason. The team gate was
+  // implicit pre-T2a (the team branch returned before this block) and is
+  // explicit now that the branch lives inside the mutator.
+  let aftercarePayload = null;
+  if (victim && victim.stableId && victim.connected && state.gameMode !== 'team' &&
+      _categorizeReason(reason) === 'timeout') {
     try {
       // Lazy require — cycle-safe. matchSystem→gameLogic is the existing
       // require edge; adding a top-level require here would create a cycle.
@@ -246,10 +237,9 @@ async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
       if (last && last.movie) {
         // eliminateCurrentPlayer has no ctx TMDB headers (same situation as
         // the bot-turn hook). Reuse botSystem._tmdbHeaders() — the exact
-        // env-derived builder the no-ctx bot path already uses — rather than
-        // reading process.env a second time here.
+        // env-derived builder the no-ctx bot path already uses.
         const outs = await ms._computeCouldHavePlayed(state, pubClient, botSystem._tmdbHeaders());
-        io.to(player.id).emit('youWereEliminated', {
+        aftercarePayload = {
           lastChainEntry: {
             title: last.movie.title,
             year: last.movie.year,
@@ -261,16 +251,95 @@ async function eliminateCurrentPlayer(io, pubClient, id, state, reason) {
           // omit the key entirely when null so the client can distinguish
           // "no suggestions available" from an empty array.
           ...(outs && outs.length ? { outs } : {}),
-        });
+        };
       }
     } catch (e) {
       // Aftercare is best-effort — never let it break the elimination path.
       logger.error(e, 'timeout aftercare failed');
     }
   }
-  await checkWinCondition(io, pubClient, id, state);
-  if (state.status === 'playing') {
-    await nextTurn(io, pubClient, id, state);
+
+  // T2a: the data commit — fresh re-read, re-verify, mutate — all inside the
+  // per-lobby mutex so it composes with every other lobbymut writer. NOTE
+  // (lock ordering, see redisUtils): this runs with the caller's submit lock
+  // held — lobbymut-inside-submit is the legal order; the mutator itself
+  // must never call anything that takes the submit lock.
+  let advanced = false;  // a new turn started → arm watchdog post-lock
+  let committed = false; // decline = no write, no emits, no side-effects
+  const room = await redisUtils.withLobbyLock(pubClient, id, async (fresh) => {
+    const freshVictim = fresh.players[fresh.currentTurnIndex];
+    // Re-verify the snapshot's preconditions on FRESH state. Any mismatch
+    // means another writer resolved this turn first (or the game ended):
+    // eliminating anyway would kill the wrong player or double-advance.
+    if (fresh.status !== 'playing' ||
+        !victim || !freshVictim ||
+        freshVictim.id !== victim.id ||
+        !freshVictim.isAlive ||
+        (opts.extraVerify && !opts.extraVerify(fresh, freshVictim))) {
+      // Belt-and-braces carried over from the old code (which win-checked
+      // even when the indexed player was missing or already dead): a
+      // win-check on the fresh room heals an all-dead-but-still-playing
+      // room. It no-ops on any healthy room and, when it does fire, it
+      // persists + broadcasts internally itself.
+      await checkWinCondition(io, pubClient, id, fresh);
+      return false; // decline — nothing to persist beyond what win-check did
+    }
+
+    // L3: settle spectator predictions BEFORE the elimination notification
+    // (same order as pre-T2a) — on FRESH state so the cleared map persists.
+    _settlePredictions(io, id, fresh, /* outcome */ 'no');
+
+    if (fresh.gameMode === 'team') {
+      // Team branch (the old standalone eliminateTeam, folded in so the team
+      // tail commits under this same lock). Emit-then-mark preserves the old
+      // eliminateTeam ordering exactly.
+      const teamId = freshVictim.teamId ?? 0;
+      const teamLabel = teamId === 0 ? '🔴 Red' : '🔵 Blue';
+      // Structured payload: `kind` lets the client dispatch effects (sounds,
+      // shakes, vibration) without brittle substring matching on `msg`.
+      io.to(id).emit('notification', { msg: `Team ${teamLabel} eliminated: ${reason}`, kind: 'elimination' });
+      fresh.players.forEach(p => {
+        if (p.teamId === teamId) p.isAlive = false;
+      });
+    } else {
+      freshVictim.isAlive = false;
+      io.to(id).emit('notification', { msg: `${freshVictim.name} eliminated: ${reason}`, kind: 'elimination' });
+      // H6: Telemetry — `reason` is a free-form string so we bucket it into a
+      // small set of stable categories. Fire-and-forget (never awaited), and
+      // emitted inside the mutator so a DECLINED elimination is never counted.
+      telemetry.track(pubClient, 'eliminated', {
+        mode: fresh.gameMode,
+        reasonCategory: _categorizeReason(reason),
+        chainLength: (fresh.chain || []).length,
+      });
+      // The aftercare card rides INSIDE the commit so it (a) only fires when
+      // the elimination actually lands and (b) keeps its historical position:
+      // after the room-wide notification, before any win notification.
+      if (aftercarePayload) {
+        io.to(freshVictim.id).emit('youWereEliminated', aftercarePayload);
+      }
+    }
+
+    // Win-check on FRESH state. When it fires it persists/broadcasts itself
+    // (it remains a standalone entry point for the non-submit quit/grace
+    // else-branches, so it keeps its own save — a harmless double-write of
+    // the same object inside this lock); when the game continues, the
+    // advance below mutates fresh and the lock's save persists everything.
+    await checkWinCondition(io, pubClient, id, fresh);
+    if (fresh.status === 'playing') {
+      // Synchronous turn advance on the fresh room. Arming the watchdog is
+      // an in-process timer side-effect and stays OUTSIDE the lock.
+      advanced = _applyTurnAdvance(fresh);
+    }
+    committed = true;
+  });
+
+  // Side-effects AFTER the lock, only for a committed advance. The win paths
+  // already broadcast + schedule their reset inside checkWinCondition; a
+  // declined commit must produce no observable effect at all.
+  if (committed && room && room.status === 'playing' && advanced) {
+    armTurnTimeout(io, pubClient, id, room);
+    broadcastState(io, id, room);
   }
 }
 
@@ -331,12 +400,13 @@ function _categorizeReason(reason) {
 // TURN MANAGEMENT
 // ---------------------------------------------------------------------------
 
-async function nextTurn(io, pubClient, id, state) {
-  await checkWinCondition(io, pubClient, id, state);
-  if (state.status !== 'playing') return;
-
-  clearTurnTimeout(id);
-
+// T2a: the synchronous core of a turn advance, extracted from nextTurn so the
+// lobbymut commit paths (eliminateCurrentPlayer's mutator here, the submit
+// pipeline's success commit in matchSystem) can apply it to the FRESH in-lock
+// room. Pure mutation — no Redis, no timers, no emits — so it is always safe
+// inside a withLobbyLock mutator. Returns false when no live player exists
+// (callers skip arming a watchdog for a dead room).
+function _applyTurnAdvance(state) {
   let iterations = 0;
   do {
     state.currentTurnIndex = (state.currentTurnIndex + 1) % state.players.length;
@@ -345,14 +415,32 @@ async function nextTurn(io, pubClient, id, state) {
 
   // Guard: all players ended up dead — checkWinCondition should have caught this,
   // but don't arm a new timer on a dead player if it somehow slips through.
-  if (!state.players[state.currentTurnIndex].isAlive) return;
+  if (!state.players[state.currentTurnIndex].isAlive) return false;
 
   // H1: Reset the per-turn "title not found" retry budget. The counter is
   // scoped to a single player's turn — once the turn advances (whether via
   // a successful play or an elimination), the next player starts fresh.
   state.currentTurnRetries = 0;
 
+  // T2a: a new turn always starts with a clean validation flag. This also
+  // self-heals a flag stranded by a process crash mid-submit, which would
+  // otherwise block every future submit via the pre-lock isValidating check.
+  state.isValidating = false;
+
   resetTimer(state);
+  return true;
+}
+
+async function nextTurn(io, pubClient, id, state) {
+  await checkWinCondition(io, pubClient, id, state);
+  if (state.status !== 'playing') return;
+
+  clearTurnTimeout(id);
+
+  // T2a: index advance + retry/flag/timer resets now live in the shared
+  // _applyTurnAdvance helper (the eliminate tail applies the identical
+  // mutation inside its lobbymut commit). Behavior here is unchanged.
+  if (!_applyTurnAdvance(state)) return;
 
   // Audit finding #2: arm the server watchdog through the shared helper so
   // startGame (first turn) and rejoin (current player returning within
@@ -892,9 +980,16 @@ module.exports = {
   // Exported so the rejoin path emits the identical client-safe shape
   // (audit finding #1 — no stableId / raw-spectator leak).
   toClientState,
-  eliminateTeam,
+  // T2a: eliminateTeam is no longer exported — its body was folded into
+  // eliminateCurrentPlayer's lobbymut mutator (it had no callers outside
+  // this file, and keeping a raw mutate+save path exported would invite a
+  // future caller to bypass the commit discipline).
   eliminateCurrentPlayer,
   nextTurn,
+  // T2a: the synchronous turn-advance core, exported so matchSystem's submit
+  // commit can apply it to the fresh in-lock room (T2b) without nesting a
+  // second withLobbyLock inside its mutator.
+  applyTurnAdvance: _applyTurnAdvance,
   resetTimer,
   checkWinCondition,
   startGame,
