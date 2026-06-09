@@ -133,21 +133,57 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   const lockKey = `${cacheKey}:fetching`;
 
   // Cache hit — fast path. Most calls land here in steady state.
-  const cached = await pubClient.get(cacheKey);
+  // T1 audit fix T1d: this read (and the lock SET below) previously ran
+  // OUTSIDE the try that owns the TMDB-fetch + Phase-5b-fallback path.
+  // node-redis v4 rejects in-flight commands when the socket flaps, so a
+  // blip exactly here propagated to matchSystem's enrichWithCredits catch,
+  // which answers `cast: []` — zero shared actors — and the player is
+  // eliminated "Invalid movie connection" on a CORRECT move. A Redis error
+  // on this path must instead degrade to cache-MISS semantics and fall
+  // through to the fetch (which has its own try + local-DB fallback).
+  let cached = null;
+  try {
+    cached = await pubClient.get(cacheKey);
+  } catch {
+    cached = null; // flap = miss; TMDB below is the actual source of truth
+  }
   if (cached) {
-    return JSON.parse(cached);
+    try {
+      return JSON.parse(cached);
+    } catch {
+      // T1d: corrupt cache entry (torn write / manual poke) is a miss, not a
+      // fatal — fall through; the fresh write below self-heals the key.
+    }
   }
 
   // Try to claim the right to fetch. NX returns null if another worker is
   // already fetching the same movie — without this, five concurrent submits
   // for the same uncached title would all hit TMDB.
-  const gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
-  if (!gotLock) {
+  // T1d: a REJECTED set (Redis flap — distinct from a clean null) forfeits
+  // stampede protection for this call on purpose: a duplicate TMDB fetch is
+  // an acceptable price, eliminating a player on a correct move is not
+  // (correctness over efficiency in degraded mode). lockSubsystemUp also
+  // gates the wait-and-retry below — retrying a flapping Redis would burn
+  // 250ms inside the submit lock just to reject again.
+  let gotLock = null;
+  let lockSubsystemUp = true;
+  try {
+    gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
+  } catch {
+    lockSubsystemUp = false;
+  }
+  if (!gotLock && lockSubsystemUp) {
     // Another worker is already fetching. Briefly wait and retry the cache —
     // typical TMDB call returns in <1s, so 250ms catches most of them.
     await new Promise(r => setTimeout(r, 250));
-    const retry = await pubClient.get(cacheKey);
-    if (retry) return JSON.parse(retry);
+    // T1d: the retry read degrades identically — a flap or corrupt JSON here
+    // means we fetch ourselves rather than reject out to the eliminator.
+    try {
+      const retry = await pubClient.get(cacheKey);
+      if (retry) return JSON.parse(retry);
+    } catch {
+      // fall through and fetch ourselves
+    }
     // Cache still empty after the wait — fall through and fetch ourselves
     // rather than hang. We'd rather make a duplicate TMDB call than block
     // the user's submit indefinitely.
