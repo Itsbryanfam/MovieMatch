@@ -117,6 +117,18 @@ const TMDB_FETCH_TIMEOUT_MS = 5000;
 //   v2 — { cast: [{ id, name }] } (H4 — id-based actor matching)
 const CREDITS_CACHE_VERSION = 'v2';
 
+// T1 audit fix T1d-ext: lazy-memoized module logger for degraded-path
+// warnings (same pattern + rationale as botSystem._getLogger): pino is only
+// instantiated the first time a degraded log actually fires, so requiring
+// this module stays side-effect-free for the many unit tests that drive it
+// with a bare mock pubClient. Memoized so repeated flaps reuse one instance
+// and keep stable pid correlation in prod logs.
+let _logger = null;
+function _getLogger() {
+  if (!_logger) _logger = require('pino')();
+  return _logger;
+}
+
 /**
  * Get credits from Redis cache or fetch from TMDB and cache for 30 days.
  *
@@ -231,7 +243,21 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
         .map(actor => ({ id: actor.id, name: actor.name }))
     };
 
-    await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    // T1 audit fix T1d-ext: the write-back is Redis-only bookkeeping that
+    // runs AFTER TMDB already answered — at this point `stripped` is valid
+    // credits we hold. It used to share the fetch path's try, so a socket
+    // flap on this single SET fell into the catch below; for titles outside
+    // the local fallback DB that re-threw → matchSystem's enrichWithCredits
+    // catch → cast: [] → player eliminated on a CORRECT move. Isolated
+    // try/catch: log and continue. Worst case of a lost write-back is one
+    // duplicate TMDB fetch on the next miss — never a wrong elimination.
+    // (The other post-success Redis call, the lock-release del in finally,
+    // already swallows errors via .catch.)
+    try {
+      await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    } catch (cacheErr) {
+      _getLogger().warn(cacheErr, 'credits cache write-back failed — returning fetched credits uncached');
+    }
 
     return stripped;
   } catch (err) {

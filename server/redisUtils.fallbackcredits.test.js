@@ -118,6 +118,42 @@ test('T1d: stampede-lock SET rejects → protection forfeited, fetch proceeds, n
   expect(p.del).not.toHaveBeenCalled();
 });
 
+// T1 audit (2026-06-09), fix T1d-ext: completes T1d's boundary work on the
+// POST-fetch side. After a SUCCESSFUL TMDB fetch, the 7-day cache write-back
+// still ran inside the try whose catch is fallback-or-rethrow — so a Redis
+// flap on that single SET threw away credits we were already HOLDING, and
+// for titles outside the local fallback DB the rethrow reached matchSystem's
+// enrichWithCredits catch → cast: [] → player eliminated on a CORRECT move.
+// Contract pinned here: once TMDB has answered, Redis-only bookkeeping
+// failures must never change the return value.
+test('T1d-ext: write-back SET rejects after successful fetch → real credits still returned', async () => {
+  const p = pub();
+  // Title NOT in the local fallback DB — the exact case where the pre-fix
+  // catch re-threw instead of returning the credits already in hand.
+  const fb = jest.spyOn(fallbackMovies, 'getFallbackById').mockReturnValue(null);
+  p.set.mockImplementation(async (k, v, opts) => {
+    // Only the credits-PAYLOAD write flaps — identified by its EX:604800
+    // cache TTL (same discriminator the other tests in this file use). The
+    // NX stampede lock (EX:10) stays healthy so this isolates the write-back
+    // failure mode from the lock-acquire flap covered by the T1d test above.
+    if (opts && opts.EX === 604800) throw new Error('Socket closed unexpectedly');
+    p._store.set(k, v);
+    return 'OK';
+  });
+  global.fetch.mockResolvedValue({ ok: true, json: async () => ({ cast: [{ id: 6, name: 'F' }] }) });
+
+  // Pre-fix this REJECTED (catch → fallback miss → rethrow) despite TMDB
+  // having succeeded. Post-fix the flap is logged and the credits returned.
+  await expect(redisUtils.getOrFetchCredits(p, 7, 'movie', H))
+    .resolves.toEqual({ cast: [{ id: 6, name: 'F' }] });
+  // We HOLD real credits — the fallback DB must not even be consulted
+  // (pre-fix the catch DID consult it on this path before re-throwing).
+  expect(fb).not.toHaveBeenCalled();
+  // Lock-release invariant survives the flap: finally still dels :fetching.
+  expect(p.del).toHaveBeenCalledTimes(1);
+  expect(p.del.mock.calls[0][0]).toMatch(/:fetching$/);
+});
+
 test('healthy fetch path unchanged: still strips + caches with 7-day EX', async () => {
   const p = pub();
   const spy = jest.spyOn(fallbackMovies, 'getFallbackById');
