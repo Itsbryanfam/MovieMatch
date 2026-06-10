@@ -108,6 +108,7 @@ A **Daily Challenge** runs alongside the multiplayer modes — every player on a
 - Per-socket Redis rate limiting on every client event (join, rejoin, submit, chat, reactions, typing, predictions, settings, lobby browser, daily, etc.)
 - XSS protection — user-controlled content is rendered with structural DOM APIs (`textContent` / `createElement`), never interpolated into `innerHTML`; `innerHTML` is used only for static, non-user-data templates
 - Graceful shutdown with Redis drain on `SIGTERM`/`SIGINT`
+- **Crash-safe turn watchdogs** — turn timeouts are in-process (`setTimeout` handles aren't serializable to Redis), so on boot every in-flight lobby's watchdog is re-armed (`recoverActiveTurns`), and a 30-second sweep (`sweepMissingTurnWatchdogs`) re-arms any mid-flight lobby the current process isn't already watching. Net effect: a crash, deploy, or scale event can't leave a playing game soft-locked with an expired turn and nobody watching it
 - In-memory poster cache with 30-minute background refresh
 - **Lightweight telemetry** — Redis sorted-set sink, 7 instrumented events, admin endpoint at `/api/admin/stats`
 - Versioned credits cache key (`credits:v2:`) for safe schema migrations
@@ -175,6 +176,8 @@ npm test         # run test suite (182 tests across 20 suites)
 Open [http://localhost:3000](http://localhost:3000).
 
 **Optional — drop-in audio samples:** Place 5 MP3 files in `public/sfx/` (`success.mp3`, `fail.mp3`, `tick.mp3`, `win.mp3`, `elimination.mp3`) to replace the synthesized fallbacks. No code changes needed; missing files keep using the synth.
+
+**Regenerating the movie pools (rarely):** The Daily Challenge starter list (`data/dailyMovies.json`) and the TMDB-outage fallback DB (`data/fallbackMovies.json`) are **committed static artifacts** — the server reads them with a plain `readFileSync` at runtime, never hitting TMDB on the hot path. They're regenerated only occasionally via `npm run build:daily-movies` and `npm run build:fallback-movies` (both require `TMDB_READ_TOKEN` in your environment). The generated JSON is committed by design so deploys stay fast and don't depend on TMDB being reachable at boot.
 
 ---
 
