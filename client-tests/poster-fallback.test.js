@@ -60,6 +60,21 @@ describe('poster load-failure fallback (audit #3)', () => {
     expect(item.querySelector('.mini-poster.placeholder')).not.toBeNull();
   });
 
+  // T4g audit fix: autocomplete mini-posters get async decode + lazy loading.
+  // A long suggestion list may render rows below the fold the user never sees,
+  // so lazy defers their fetch; async decode keeps the dropdown responsive.
+  test('autocomplete mini-poster carries decoding="async" and loading="lazy"', () => {
+    renderAutocompleteResults([
+      { title: 'Iron Man', year: 2008, id: 1726, poster: 'https://image.tmdb.org/t/p/w200/test.jpg' },
+    ]);
+    const img = document.querySelector('#autocomplete-container img.mini-poster');
+    expect(img).not.toBeNull();
+    // Assert the IDL properties (what the code sets, and what the browser
+    // honours) — jsdom stores these but does not reflect them to attributes.
+    expect(img.decoding).toBe('async');
+    expect(img.loading).toBe('lazy');
+  });
+
   test('a chain-replay poster that fails to load is replaced by the placeholder', () => {
     // The daily-result "▶ Replay your chain" panel builds its own poster
     // <img>s via _buildReplayEntry. Pre-fix this was the ONE poster site

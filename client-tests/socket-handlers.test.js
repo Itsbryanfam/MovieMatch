@@ -303,6 +303,28 @@ describe('socketClient handlers — screen transitions', () => {
     expect(list.textContent).toContain('2 / 6');
   });
 
+  // ------------------------------------------------------------------------
+  // T4g — hero poster carousel images get async decode (but NOT lazy: the
+  // carousel is the always-visible page background).
+  // ------------------------------------------------------------------------
+
+  test('posters carousel images carry decoding="async" and are NOT lazy-loaded', () => {
+    fakeSocket.trigger('posters', [
+      'https://image.tmdb.org/t/p/w92/a.jpg',
+      'https://image.tmdb.org/t/p/w92/b.jpg',
+    ]);
+    const imgs = document.querySelectorAll('#poster-carousel img');
+    expect(imgs.length).toBeGreaterThan(0);
+    imgs.forEach((img) => {
+      // IDL property (jsdom stores it but doesn't reflect to an attribute).
+      expect(img.decoding).toBe('async');
+      // Always visible → loading is left UNSET (no observer overhead). The key
+      // invariant is simply that it is not 'lazy' — assert that so a future
+      // copy-paste from the autocomplete path can't slip lazy in.
+      expect(img.loading).not.toBe('lazy');
+    });
+  });
+
   test('timer bar starts full in speed mode (15s turn)', () => {
     jest.useFakeTimers();
     try {

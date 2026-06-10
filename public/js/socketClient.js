@@ -283,6 +283,11 @@ export function initSocket() {
 
       seamlessPosters.forEach(url => {
         const img = document.createElement('img');
+        // T4g audit fix: decode off the main thread so the marquee animation
+        // doesn't jank while each poster decodes. NOT loading="lazy" here — the
+        // carousel is always visible (it's the page background), so lazy would
+        // only add IntersectionObserver overhead with nothing to defer.
+        img.decoding = 'async';
         img.src = url;
         rowDiv.appendChild(img);
       });
