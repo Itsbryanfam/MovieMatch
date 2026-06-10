@@ -471,25 +471,31 @@ describe('T3c — connection throttle middleware', () => {
     return { socket: c, result };
   }
 
-  test('T3c: cap is 20 new connections per 60s window', () => {
-    // Pin the constants the audit fix promises — a silent tweak to either
-    // shows up here, not in production behavior nobody is watching.
-    expect(CONNECTION_LIMIT).toBe(20);
+  test('T3c/T7a: default cap is 60 new connections per 60s window', () => {
+    // T7a: the ceiling was raised 20→60 because MovieMatch is a party game —
+    // a household/classroom/dorm/CGNAT egresses MANY legit players through ONE
+    // IP (8-player room = 8 sockets + reconnects; a classroom = 30+), so the
+    // old 20/min bricked real users with connect_error: rate_limited. Pin the
+    // new default + the unchanged window — a silent tweak shows up here, not
+    // in production behavior nobody is watching.
+    expect(CONNECTION_LIMIT).toBe(60);
     expect(CONNECTION_WINDOW_SEC).toBe(60);
   });
 
-  test('T3c: 20th connection in-window is admitted, 21st is rejected with rate_limited', async () => {
+  test('T3c: cap-th connection in-window is admitted, the next is rejected with rate_limited', async () => {
     const xff = { 'x-forwarded-for': '198.51.100.50' };
-    // Seed as if 19 connections already landed in this window — the next
-    // one is the 20th (the cap itself, still admitted: limit is "per
-    // minute", so count must EXCEED the cap to reject).
+    // T7a: seed off the CONFIGURED limit (not a hardcoded 19) so this boundary
+    // test survives future tuning of CONNECTION_RATE_LIMIT_PER_MIN — it only
+    // ever asserts "the cap-th is admitted, the (cap+1)-th is refused".
+    // Seed as if (cap-1) connections already landed: the next is the cap
+    // itself (still admitted — count must EXCEED the cap to reject).
     pubClient.counts.set('ratelimit:conn:198.51.100.50', CONNECTION_LIMIT - 1);
 
-    const twentieth = tryConnect(xff);
-    await expect(twentieth.result).resolves.toBe('connected');
+    const atCap = tryConnect(xff);
+    await expect(atCap.result).resolves.toBe('connected');
 
-    const twentyFirst = tryConnect(xff);
-    await expect(twentyFirst.result).resolves.toBe('rate_limited');
+    const overCap = tryConnect(xff);
+    await expect(overCap.result).resolves.toBe('rate_limited');
   });
 
   test('T3c: rejection is per-IP — a different IP connects fine while one is capped', async () => {
@@ -523,6 +529,59 @@ describe('T3c — connection throttle middleware', () => {
     pubClient.state.failAllMulti = true;
     const t = tryConnect({ 'x-forwarded-for': '198.51.100.88' });
     await expect(t.result).resolves.toBe('connected');
+  });
+});
+
+// ===========================================================================
+// T7a — CONNECTION_RATE_LIMIT_PER_MIN env override
+// ===========================================================================
+// WHY a separate describe: the override is read at module-load time, so the
+// test must set the env var, blow away the require cache, and re-require the
+// module — which it cannot do inside the shared throttle harness above (that
+// captures CONNECTION_LIMIT once at the top-level require). Operators tune
+// this for big shared-NAT deployments (a school running one public IP) where
+// even 60/min is too low, so the override path is load-bearing and must be
+// pinned, not just the default.
+
+describe('T7a — CONNECTION_RATE_LIMIT_PER_MIN env override', () => {
+  // Snapshot + restore the env var so this block can re-evaluate
+  // connectionThrottle under different env without leaking the mutated value
+  // into any other test. jest.isolateModules gives each require a FRESH module
+  // registry — the only reliable way to re-run a module's top-level env parse
+  // under Jest (plain require.cache deletion doesn't force re-execution in
+  // Jest's own module sandbox).
+  const ENV_KEY = 'CONNECTION_RATE_LIMIT_PER_MIN';
+  let savedEnv;
+
+  beforeEach(() => { savedEnv = process.env[ENV_KEY]; });
+
+  afterEach(() => {
+    if (savedEnv === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = savedEnv;
+  });
+
+  // Re-evaluate the module in isolation with the env var currently set, and
+  // return its resolved CONNECTION_LIMIT.
+  function freshLimit() {
+    let limit;
+    jest.isolateModules(() => {
+      // Intentional fresh require to re-run the module's top-level env parse.
+      limit = require('./connectionThrottle').CONNECTION_LIMIT;
+    });
+    return limit;
+  }
+
+  test('a valid override is honored as the cap', () => {
+    process.env[ENV_KEY] = '150';
+    expect(freshLimit()).toBe(150);
+  });
+
+  test('unset / NaN / non-positive overrides fall back to the 60 default', () => {
+    for (const bad of [undefined, '', 'abc', '0', '-5']) {
+      if (bad === undefined) delete process.env[ENV_KEY];
+      else process.env[ENV_KEY] = bad;
+      expect(freshLimit()).toBe(60);
+    }
   });
 });
 

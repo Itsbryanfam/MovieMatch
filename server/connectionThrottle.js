@@ -20,11 +20,26 @@
 // different buckets per layer).
 const { deriveClientIp } = require('./clientIp');
 
-// 20 new connections per IP per minute. Generous for humans — a player
-// reconnecting through flaky wifi or refresh-spamming the page stays far
-// under it (each refresh is ONE connection) — while capping a socket-minting
-// attacker at 20 fresh per-socket budgets a minute instead of unlimited.
-const CONNECTION_LIMIT = 20;
+// T7a audit fix: default raised 20→60, and made env-tunable.
+// WHY: MovieMatch is a PARTY game — a household/classroom/dorm/CGNAT egresses
+// MANY legitimate players through ONE shared public IP (an 8-player room = 8
+// sockets + reconnects; a classroom = 30+ devices). The old hard 20/min cap
+// false-positived those real users, bricking a whole household behind a single
+// `connect_error: rate_limited`. 60 comfortably clears the worst legit burst
+// (a large class all loading at once) while still bounding a socket-minting
+// attacker to a fixed budget per minute instead of unlimited. Operators with
+// even bigger shared-NAT footprints (a school on one egress IP) can raise it
+// further via CONNECTION_RATE_LIMIT_PER_MIN without a code change.
+const DEFAULT_CONNECTION_LIMIT = 60;
+// Parse the override once at module load. Fall back to the default on unset,
+// NaN, or any non-positive value — a misconfigured `0`/`-1`/`abc` must NEVER
+// silently disable the throttle (which a literal 0 would, since the strict-
+// greater check below could never trip) nor invert it; it degrades to the
+// safe documented default instead.
+const _envLimit = parseInt(process.env.CONNECTION_RATE_LIMIT_PER_MIN, 10);
+const CONNECTION_LIMIT = (Number.isFinite(_envLimit) && _envLimit > 0)
+  ? _envLimit
+  : DEFAULT_CONNECTION_LIMIT;
 const CONNECTION_WINDOW_SEC = 60;
 
 /**
@@ -52,8 +67,9 @@ function createConnectionThrottle(pubClient) {
         .incr(key)
         .expire(key, CONNECTION_WINDOW_SEC)
         .exec();
-      // Strictly-greater: the 20th connection in a window is admitted, the
-      // 21st is refused — "20/min" means 20 ARE allowed.
+      // Strictly-greater: the CONNECTION_LIMIT-th connection in a window is
+      // admitted, the (limit+1)-th is refused — "N/min" means N ARE allowed.
+      // (T7a: limit is the env-tunable cap resolved at module load above.)
       if (results[0] > CONNECTION_LIMIT) return next(new Error('rate_limited'));
       return next();
     } catch {
