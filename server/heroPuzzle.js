@@ -23,7 +23,9 @@
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w200';
-const TMDB_FETCH_TIMEOUT_MS = 5000;
+// T4c audit fix: shared 5s TMDB fetch ceiling (was duplicated across four
+// modules). constants.js is a leaf module — no require cycle.
+const { TMDB_FETCH_TIMEOUT_MS } = require('./constants');
 
 // T3d audit fix (P2): hero search cache controls.
 // Version segment in the key — bump on payload-shape change so old entries

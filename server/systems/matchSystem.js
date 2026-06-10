@@ -14,10 +14,13 @@ const soloObjectivesSystem = require('./soloObjectivesSystem');
 const themesSystem = require('./themesSystem');
 // Phase 5b: local fallback movie DB (leaf module — fs/path only, no cycle).
 const fallbackMovies = require('./fallbackMovies');
+// T4c audit fix: shared 5s TMDB fetch ceiling (was a local duplicate const
+// below). constants.js is a leaf module — no require cycle.
+const { TMDB_FETCH_TIMEOUT_MS } = require('../constants');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
-const TMDB_FETCH_TIMEOUT_MS = 5000;
+// T4c: TMDB_FETCH_TIMEOUT_MS now imported from ../constants (see import above).
 
 // Phase 6a — Post-Game Learning Breakdown.
 // Upper bound on the best-effort "a move you could have played" computation.

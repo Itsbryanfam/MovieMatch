@@ -28,4 +28,14 @@ const MAX_PLAYERS_PER_LOBBY = 8;
 // literal on BOTH sides so an edit to either fails CI.
 const SEAT_HUES = Object.freeze([350, 25, 45, 140, 188, 220, 270, 312]);
 
-module.exports = { MAX_PLAYERS_PER_LOBBY, SEAT_HUES };
+// T4c audit fix: the 5s ceiling on every outbound TMDB fetch (AbortSignal.timeout)
+// was independently declared as `const TMDB_FETCH_TIMEOUT_MS = 5000` in four
+// modules (heroPuzzle, redisUtils, lobbySystem, matchSystem) — the exact
+// duplicated-value-drifts bug class this file exists to kill. WHY 5s: a hung
+// TMDB response must never stall a submit/turn pipeline indefinitely (the
+// player would be frozen on the hero/turn screen), and 5s is comfortably above
+// TMDB's p99 while still bounding worst-case latency. constants.js is a leaf
+// module (requires nothing), so importing it here introduces no require cycle.
+const TMDB_FETCH_TIMEOUT_MS = 5000;
+
+module.exports = { MAX_PLAYERS_PER_LOBBY, SEAT_HUES, TMDB_FETCH_TIMEOUT_MS };

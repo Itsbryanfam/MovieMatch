@@ -1,5 +1,9 @@
 // Phase 5b: local fallback movie DB (leaf module — fs/path only, no cycle).
 const fallbackMovies = require('./systems/fallbackMovies');
+// T4c audit fix: single source of truth for the 5s TMDB fetch ceiling (was
+// duplicated here + in heroPuzzle/lobbySystem/matchSystem). constants.js is a
+// leaf module — no require cycle.
+const { TMDB_FETCH_TIMEOUT_MS } = require('./constants');
 
 async function getLobby(pubClient, id) {
   const data = await pubClient.get(`lobby:${id}`);
@@ -104,10 +108,10 @@ async function setPlayerWins(pubClient, playerId, wins) {
   await pubClient.setEx(`playerWins:${playerId}`, 30 * 24 * 60 * 60, wins.toString());
 }
 
-// 5s ceiling matches the timeout used by every other TMDB call in matchSystem.
-// Critical: this function runs inside the submit-movie lock — any hang here
-// freezes the game for the entire room until the 30s lock TTL expires.
-const TMDB_FETCH_TIMEOUT_MS = 5000;
+// T4c: TMDB_FETCH_TIMEOUT_MS now imported from ./constants (single source of
+// truth). Critical here: this module's fetches run inside the submit-movie
+// lock — any hang would freeze the room until the 30s lock TTL expires, which
+// is exactly why the 5s ceiling exists.
 
 // L10: Cache schema version. Bump this whenever the shape of the cached
 // credits payload changes — old entries simply expire over the 7-day TTL,

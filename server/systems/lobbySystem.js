@@ -12,7 +12,9 @@ const posterCache = require('../posterCache');
 const telemetry = require('../telemetry');
 const dailySystem = require('./dailySystem');
 // Player hard-cap constant (single source of truth — see server/constants.js).
-const { MAX_PLAYERS_PER_LOBBY, SEAT_HUES } = require('../constants');
+// T4c audit fix: TMDB_FETCH_TIMEOUT_MS joins this shared import (was a local
+// duplicate const below) so the 5s ceiling has one definition repo-wide.
+const { MAX_PLAYERS_PER_LOBBY, SEAT_HUES, TMDB_FETCH_TIMEOUT_MS } = require('../constants');
 // Phase 5a: bot factory + in-process bot-timer cleanup (lobbySystem→botSystem
 // is a plain acyclic top-level require — botSystem only top-level-requires
 // fs/path — so no lazy-require / cycle concern here).
@@ -20,7 +22,7 @@ const botSystem = require('./botSystem');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
-const TMDB_FETCH_TIMEOUT_MS = 5000;
+// T4c: TMDB_FETCH_TIMEOUT_MS now imported from ../constants (see import above).
 
 // Unambiguous charset for lobby codes (Crockford base32 — no 0/O, 1/I/L)
 const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
