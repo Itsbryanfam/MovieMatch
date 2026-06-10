@@ -174,6 +174,92 @@ describe('statsSystem.recordPlay — favorite connector tracking', () => {
     expect(mockPubClient.multi).toHaveBeenCalledTimes(1);
   });
 
+  // T4d audit fix: MAX_CONNECTOR_ENTRIES is now actually enforced. Pre-fix the
+  // hash grew unboundedly with distinct co-actors; now one hLen check per call
+  // stops NEW connector adds once the hash is at/over the cap — while STILL
+  // refreshing the TTL so an at-cap active player's connectors don't expire.
+  test('at-cap connectors hash: no new fields added, but TTL still refreshed', async () => {
+    const statsMulti = {
+      hIncrBy: jest.fn().mockReturnThis(),
+      hSet: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
+    const connMulti = {
+      hIncrBy: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
+    let i = 0;
+    const mockPubClient = {
+      multi: jest.fn(() => (++i === 1 ? statsMulti : connMulti)),
+      // Report the hash as already AT the cap (1000) so the guard trips.
+      hLen: jest.fn().mockResolvedValue(1000),
+    };
+
+    await statsSystem.recordPlay(mockPubClient, 'p_capped', ['New Actor']);
+
+    // The cap was consulted on the connectors hash.
+    expect(mockPubClient.hLen).toHaveBeenCalledWith('stats:connectors:p_capped');
+    // NO new connector field was written (the hash is full of distinct actors).
+    expect(connMulti.hIncrBy).not.toHaveBeenCalled();
+    // ...but the TTL refresh STILL fired so the existing connectors don't
+    // expire out from under an active-but-capped player.
+    expect(connMulti.expire).toHaveBeenCalledWith(
+      'stats:connectors:p_capped',
+      90 * 24 * 60 * 60
+    );
+  });
+
+  test('below-cap connectors hash: new fields ARE added (guard does not over-trip)', async () => {
+    const statsMulti = {
+      hIncrBy: jest.fn().mockReturnThis(),
+      hSet: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
+    const connMulti = {
+      hIncrBy: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
+    let i = 0;
+    const mockPubClient = {
+      multi: jest.fn(() => (++i === 1 ? statsMulti : connMulti)),
+      hLen: jest.fn().mockResolvedValue(42), // well below the 1000 cap
+    };
+
+    await statsSystem.recordPlay(mockPubClient, 'p_room', ['Tom Hanks']);
+
+    expect(connMulti.hIncrBy).toHaveBeenCalledWith('stats:connectors:p_room', 'Tom Hanks', 1);
+    expect(connMulti.expire).toHaveBeenCalledWith('stats:connectors:p_room', 90 * 24 * 60 * 60);
+  });
+
+  test('hLen failure (Redis blip) degrades to not-at-cap so a legit connector is not dropped', async () => {
+    const statsMulti = {
+      hIncrBy: jest.fn().mockReturnThis(),
+      hSet: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
+    const connMulti = {
+      hIncrBy: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
+    let i = 0;
+    const mockPubClient = {
+      multi: jest.fn(() => (++i === 1 ? statsMulti : connMulti)),
+      hLen: jest.fn().mockRejectedValue(new Error('Socket closed unexpectedly')),
+    };
+
+    await statsSystem.recordPlay(mockPubClient, 'p_blip', ['Meg Ryan']);
+
+    // The blip is swallowed; the connector write proceeds (correctness over
+    // an exact cap when the cap check itself is unavailable).
+    expect(connMulti.hIncrBy).toHaveBeenCalledWith('stats:connectors:p_blip', 'Meg Ryan', 1);
+  });
+
   test('clamps each actor name to 64 chars', async () => {
     // Defensive — a freak name (or a future bug that passes raw text)
     // shouldn't write huge HASH keys. The stats system's correctness

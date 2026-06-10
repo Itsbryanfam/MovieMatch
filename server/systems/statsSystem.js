@@ -116,20 +116,41 @@ async function recordPlay(pubClient, stableId, matchedActors) {
     // Use a separate hash so the main stats blob stays small and easy to
     // HGETALL-and-render.
     if (Array.isArray(matchedActors) && matchedActors.length > 0) {
-      const ops = pubClient.multi();
-      let added = 0;
-      for (const actor of matchedActors) {
-        if (typeof actor !== 'string' || !actor) continue;
-        // Cap at MAX_CONNECTOR_ENTRIES to bound the hash size. We don't
-        // actually enforce the cap atomically (would require a Lua script);
-        // instead we count opportunistically and stop adding when over.
-        // Worst case: a few extra entries past the cap on a hot night —
-        // not worth the complexity of a hard guard.
-        const trimmed = actor.length > 64 ? actor.slice(0, 64) : actor;
-        ops.hIncrBy(_connectorsKey(stableId), trimmed, 1);
-        added++;
-        if (added >= 10) break; // sanity per-call cap so a corrupt array can't pile on
+      // T4d audit fix: actually ENFORCE MAX_CONNECTOR_ENTRIES. The per-call
+      // cap of 10 below only bounded ADDITIONS-per-call — the hash itself grew
+      // unboundedly with distinct co-actors (cardinality, not volume: a player
+      // who connects via 50k different actors over 90 days would accumulate a
+      // 50k-field hash). One hLen check per call closes that: once the hash is
+      // at/over the cap we stop adding NEW connectors (HINCRBY would create
+      // fields for never-seen actors). WHY only one read: a single round-trip
+      // is cheap, and a hot night briefly overshooting the cap by a handful is
+      // harmless — the goal is a hard ceiling on cardinality, not exactness.
+      // The TTL refresh runs EITHER WAY (an at-cap active player must not have
+      // their connectors expire out from under them just because we stopped
+      // adding), so a capped player's favoriteConnector readout stays alive.
+      let atCap = false;
+      try {
+        const len = await pubClient.hLen(_connectorsKey(stableId));
+        atCap = typeof len === 'number' && len >= MAX_CONNECTOR_ENTRIES;
+      } catch {
+        // hLen failed (Redis blip) — treat as not-at-cap and proceed; a missed
+        // cap check is far less harmful than dropping a legit connector write.
+        atCap = false;
       }
+
+      const ops = pubClient.multi();
+      if (!atCap) {
+        let added = 0;
+        for (const actor of matchedActors) {
+          if (typeof actor !== 'string' || !actor) continue;
+          const trimmed = actor.length > 64 ? actor.slice(0, 64) : actor;
+          ops.hIncrBy(_connectorsKey(stableId), trimmed, 1);
+          added++;
+          if (added >= 10) break; // sanity per-call cap so a corrupt array can't pile on
+        }
+      }
+      // TTL refresh regardless of the cap — see the WHY above. (When atCap and
+      // the multi has only this one op, it's a cheap single-command pipeline.)
       ops.expire(_connectorsKey(stableId), STATS_RETENTION_SEC);
       await ops.exec();
     }
