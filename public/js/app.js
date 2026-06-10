@@ -84,6 +84,42 @@ export function initLobbySettingsHandlers(socket, getLobbyId) {
 }
 
 // ============================================================================
+// MODAL FOCUS RESTORATION (L6 / T4h) — exported for unit testing
+// ============================================================================
+
+/**
+ * T4h audit fix: restore focus to the element that had it before a modal
+ * opened — but ONLY if that element is still in the document. Pre-fix the
+ * observer called priorFocus.focus() unconditionally; if the opener was
+ * removed from the DOM while the modal was open (a re-render, a list item that
+ * vanished, the opener button itself being replaced), .focus() either threw or
+ * silently no-op'd on a detached node, dumping keyboard users at the top of the
+ * page. Now we check isConnected and fall back to a safe landmark.
+ *
+ * Extracted (like initLobbySettingsHandlers) so it's unit-testable without
+ * standing up the whole MutationObserver init.
+ *
+ * @param {Element|null} priorFocus  Element that had focus before the modal opened.
+ * @param {Element}      [fallback]  Where to send focus if priorFocus is gone.
+ *                                   Defaults to document.body.
+ */
+export function restoreModalFocus(priorFocus, fallback) {
+  // isConnected is true only while the node is in the live document tree — the
+  // exact "was it removed mid-modal?" signal. Guard typeof focus too: exotic
+  // activeElement values (SVG, foreign nodes) may lack the method.
+  if (priorFocus && priorFocus.isConnected && typeof priorFocus.focus === 'function') {
+    try { priorFocus.focus(); return; } catch { /* fall through to fallback */ }
+  }
+  // Prior opener is gone (or un-focusable) — send focus to a safe element so a
+  // keyboard user lands somewhere sane instead of nowhere. document.body is the
+  // universal fallback; callers may pass a more specific landmark.
+  const safe = (fallback && typeof fallback.focus === 'function') ? fallback : document.body;
+  if (safe && typeof safe.focus === 'function') {
+    try { safe.focus(); } catch { /* last resort: nothing more we can do */ }
+  }
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -729,11 +765,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (target && typeof target.focus === 'function') target.focus();
       } else if (!isOpen && modal._wasOpen) {
         modal._wasOpen = false;
-        // Restore focus to whoever opened the modal so keyboard users don't
-        // get dumped at the top of the page.
-        if (priorFocus && typeof priorFocus.focus === 'function') {
-          try { priorFocus.focus(); } catch {}
-        }
+        // T4h: restore focus to whoever opened the modal — but the guarded
+        // helper falls back to document.body if that opener was removed from
+        // the DOM mid-modal, so keyboard users are never silently dumped onto
+        // a detached node.
+        restoreModalFocus(priorFocus);
       }
     }).observe(modal, { attributes: true, attributeFilter: ['class'] });
   });

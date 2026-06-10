@@ -6,6 +6,9 @@
 // contract so the prompt wrappers (Task 1/2) are correct by construction.
 const { loadIndexHtml } = require('./fixtures');
 import { createPromptModal } from '../public/js/ui.js';
+// T4h: modal focus-restore guard, extracted from app.js's MutationObserver so
+// it can be unit-tested directly (the initLobbySettingsHandlers precedent).
+import { restoreModalFocus } from '../public/js/app.js';
 
 function baseConfig(over = {}) {
   return {
@@ -170,5 +173,62 @@ describe('createPromptModal — Phase 7.3 modal factory', () => {
     const t = document.querySelector('.modal-prompt-title');
     expect(t.querySelector('img')).toBeNull();
     expect(t.textContent).toBe('<img src=x onerror=alert(1)>');
+  });
+});
+
+// T4h audit fix: when a modal closes, focus is restored to its opener — but
+// ONLY if that opener is still in the DOM. If it was removed mid-modal,
+// .focus() must NOT be called on the dead node (it no-ops or throws and dumps
+// keyboard users at the top of the page); we fall back to a safe element.
+describe('restoreModalFocus — T4h focus-restore guard', () => {
+  beforeEach(() => { loadIndexHtml(); });
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  test('restores focus to a still-connected opener', () => {
+    const btn = document.createElement('button');
+    document.body.appendChild(btn);
+    const spy = jest.spyOn(btn, 'focus');
+
+    restoreModalFocus(btn);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(btn);
+  });
+
+  test('detached opener: focus() NOT called on the dead node, falls back to document.body', () => {
+    const btn = document.createElement('button');
+    document.body.appendChild(btn);
+    const spy = jest.spyOn(btn, 'focus');
+    // Remove the opener from the DOM mid-modal (the exact regression scenario).
+    btn.remove();
+    expect(btn.isConnected).toBe(false);
+
+    const bodySpy = jest.spyOn(document.body, 'focus');
+    restoreModalFocus(btn);
+
+    // The dead node is never focused...
+    expect(spy).not.toHaveBeenCalled();
+    // ...and focus lands on the safe fallback instead.
+    expect(bodySpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('detached opener with an explicit fallback landmark focuses the fallback', () => {
+    const btn = document.createElement('button');
+    document.body.appendChild(btn);
+    btn.remove();
+    const landmark = document.createElement('a');
+    landmark.href = '#';
+    document.body.appendChild(landmark);
+    const landmarkSpy = jest.spyOn(landmark, 'focus');
+
+    restoreModalFocus(btn, landmark);
+
+    expect(landmarkSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('null priorFocus falls back without throwing', () => {
+    const bodySpy = jest.spyOn(document.body, 'focus');
+    expect(() => restoreModalFocus(null)).not.toThrow();
+    expect(bodySpy).toHaveBeenCalledTimes(1);
   });
 });
