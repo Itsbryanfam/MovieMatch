@@ -203,6 +203,11 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // appends the real client IP as the LAST x-forwarded-for entry, while
     // client-supplied entries sit further LEFT and must be ignored — mirroring
     // Express `trust proxy: 1`, so socket and HTTP limiters key the same IP.
+    // Defensive init: socket.io v4 always supplies socket.data = {}, but
+    // harness-built fake sockets (my-stats-enrichment.test.js) don't — and a
+    // throw HERE would abort the whole connection callback, silently
+    // unregistering every handler below. Never let an IP nicety do that.
+    if (!socket.data) socket.data = {};
     socket.data.clientIp = deriveClientIp(socket.handshake);
 
     // Send cached posters on connect so the background renders immediately
