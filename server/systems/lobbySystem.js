@@ -996,6 +996,12 @@ async function handleDisconnect(ctx, socketId) {
 
     if (shouldTearDown) {
       gameLogic.clearTurnTimeout(lobbyId);
+      // T4b audit fix: clear any pending game-reset timer too — a torn-down
+      // lobby's id may be reused (deterministic daily ids, or a player creating
+      // a new lobby), and a stale reset firing against a deleted/new lobby is
+      // exactly the cross-game leak T4b closes. In-process clear, same place as
+      // the turn/bot timer cleanup above.
+      gameLogic.clearGameResetTimeout(lobbyId);
       // Clear the in-process bot-move timer too so a pending bot fire can't
       // act against a torn-down lobby. Top-level botSystem ref (acyclic).
       botSystem.clearBotTimeout(lobbyId);

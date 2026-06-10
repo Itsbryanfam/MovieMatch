@@ -10,6 +10,16 @@ const logger = require('pino')();
 // Stored in-process (not Redis) because setTimeout handles are not serializable.
 const activeTurnTimeouts = new Map();
 
+// T4b audit fix: in-memory map for active game-reset timers, one per lobby.
+// Same in-process/not-serializable rationale as activeTurnTimeouts. WHY a map
+// (the timers used to be anonymous and never cleared): game N's +25s reset
+// could fire several seconds INTO game N+1's recap after a quick host restart,
+// flipping the live finished-room back to 'waiting' under the next game's feet.
+// Keyed by lobby id so scheduleGameReset can replace-on-schedule (clearing the
+// prior timer), startGame can clear it when a new game begins, and the
+// lobby-teardown path can clear it on deleteLobby.
+const activeGameResetTimers = new Map();
+
 // Post-game viewing window: how long a finished lobby stays 'finished'
 // before scheduleGameReset flips it back to 'waiting' (which makes every
 // client re-render the lobby and replaces the game-over banner). WHY 25s
@@ -33,6 +43,18 @@ function clearTurnTimeout(id) {
   if (activeTurnTimeouts.has(id)) {
     clearTimeout(activeTurnTimeouts.get(id));
     activeTurnTimeouts.delete(id);
+  }
+}
+
+// T4b audit fix: clear a lobby's pending game-reset timer if one is armed.
+// Called by scheduleGameReset before arming a fresh one (replace-on-schedule),
+// by startGame when a new game begins (so a prior game's reset can't fire into
+// the new one), and by the lobby-teardown path on deleteLobby. Same shape as
+// clearTurnTimeout — idempotent, safe to call when nothing is armed.
+function clearGameResetTimeout(id) {
+  if (activeGameResetTimers.has(id)) {
+    clearTimeout(activeGameResetTimers.get(id));
+    activeGameResetTimers.delete(id);
   }
 }
 
@@ -560,34 +582,64 @@ function promoteSpectators(state) {
   state.spectators = connected.slice(slotsAvailable);
 }
 
-function scheduleGameReset(io, pubClient, id) {
+// finishedAt is the per-finish generation token stamped by the win handlers.
+// The reset timer captures it and re-verifies it inside the lock so a stale
+// timer cannot reset a NEWER finished game (T4b).
+function scheduleGameReset(io, pubClient, id, finishedAt) {
+  // T4b audit fix: track the timer in activeGameResetTimers and clear any
+  // prior one first (replace-on-schedule). Pre-fix the timers were anonymous
+  // and never cleared, so a quick host-restart could let game N's reset fire
+  // into game N+1's recap. Now at most one reset timer exists per lobby and it
+  // is cancellable on game start / lobby teardown.
+  clearGameResetTimeout(id);
   // .unref() so this best-effort cleanup timer never by itself keeps a Node
   // process (or a Jest worker) alive past test teardown. The timer still fires
   // for the entire lifetime of a running server — .unref() only stops it from
   // pinning a process that would otherwise exit. A missed reset on abrupt
   // shutdown is harmless; the lobby status is re-checked inside the callback.
-  setTimeout(async () => {
+  const timeoutId = setTimeout(async () => {
+    // The timer fired — drop our map entry so a later clear is a no-op and the
+    // map doesn't leak handles for lobbies that already reset.
+    activeGameResetTimers.delete(id);
     try {
-      const liveState = await redisUtils.getLobby(pubClient, id);
-      if (liveState && liveState.status === 'finished') {
+      // T4b: the finished→waiting read-modify-write previously ran UNLOCKED
+      // (getLobby → mutate → saveLobby), so a concurrent lobbymut write landing
+      // in that window (a late join, a settings change, the next game starting)
+      // was silently clobbered by this full-blob save. Run the whole RMW inside
+      // withLobbyLock on a FRESH in-lock re-read; the mutator returns false to
+      // DECLINE (no save, no broadcast) when the room is no longer the same
+      // finished game, mirroring the T2 commit discipline. broadcast happens
+      // OUTSIDE the lock on the room the helper returns (the R1 pattern).
+      let didReset = false;
+      const room = await redisUtils.withLobbyLock(pubClient, id, (liveState) => {
+        // Re-verify on the lobbymut-fresh room: still finished, AND the SAME
+        // finished game we scheduled for. A different finishedAt means game N+1
+        // started and finished in the reset window — resetting it here would
+        // clobber the newer game's recap. status !== 'finished' means a restart
+        // or new start already moved on. Either way: decline.
+        if (!liveState || liveState.status !== 'finished') return false;
+        if (finishedAt != null && liveState.finishedAt !== finishedAt) return false;
         // M4: capture the just-finished chain length so the public lobby
         // browser can advertise it on the next listing. Done BEFORE the
         // reset so we don't accidentally read 0 from the freshly-cleared
         // chain. Persists across the reset (it's metadata, not game state).
         liveState.lastChainLength = (liveState.chain || []).length;
         liveState.status = 'waiting';
+        liveState.finishedAt = null; // generation consumed — clear the token
         liveState.players = liveState.players.filter(p => p.connected);
         promoteSpectators(liveState);
         if (liveState.players.length > 0 && !liveState.players.some(p => p.isHost)) {
           liveState.players[0].isHost = true;
         }
-        await redisUtils.saveLobby(pubClient, id, liveState);
-        broadcastState(io, id, liveState);
-      }
+        didReset = true;
+      });
+      if (didReset && room) broadcastState(io, id, room);
     } catch (err) {
       logger.error(err, 'Game reset error');
     }
-  }, GAME_RESET_DELAY_MS).unref();
+  }, GAME_RESET_DELAY_MS);
+  timeoutId.unref();
+  activeGameResetTimers.set(id, timeoutId);
 }
 
 function resetTimer(state) {
@@ -628,6 +680,12 @@ async function checkTeamWin(io, pubClient, id, state) {
   clearTurnTimeout(id);
   state.status = 'finished';
   state.turnExpiresAt = null;
+  // T4b audit fix: stamp a per-finish generation token. scheduleGameReset
+  // captures this value and re-verifies it inside the lock so a stale reset
+  // timer from a PRIOR finished game can't flip a NEWER finished game back to
+  // 'waiting'. Date.now() is monotonic-enough here (two finishes a millisecond
+  // apart still differ across a host-restart-then-replay).
+  state.finishedAt = Date.now();
 
   const winningTeamId = teamAlive[0] ? 0 : 1;
   const winningPlayers = state.players.filter(p => p.teamId === winningTeamId);
@@ -662,7 +720,7 @@ async function checkTeamWin(io, pubClient, id, state) {
   ).catch(() => {});
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
-  scheduleGameReset(io, pubClient, id);
+  scheduleGameReset(io, pubClient, id, state.finishedAt);
 }
 
 async function checkSoloWin(io, pubClient, id, state) {
@@ -672,6 +730,9 @@ async function checkSoloWin(io, pubClient, id, state) {
   clearTurnTimeout(id);
   state.status = 'finished';
   state.turnExpiresAt = null;
+  // T4b: per-finish generation token (see checkTeamWin) — guards the reset
+  // timer against firing on a newer game that also finished.
+  state.finishedAt = Date.now();
 
   const solo = state.players[0];
   const isDaily = state.gameMode === 'daily';
@@ -747,7 +808,7 @@ async function checkSoloWin(io, pubClient, id, state) {
   }
   await redisUtils.saveLobby(pubClient, id, state);
   broadcastState(io, id, state);
-  scheduleGameReset(io, pubClient, id);
+  scheduleGameReset(io, pubClient, id, state.finishedAt);
 }
 
 async function checkClassicWin(io, pubClient, id, state) {
@@ -757,6 +818,8 @@ async function checkClassicWin(io, pubClient, id, state) {
     clearTurnTimeout(id);
     state.status = 'finished';
     state.turnExpiresAt = null;
+    // T4b: per-finish generation token (see checkTeamWin).
+    state.finishedAt = Date.now();
 
     const winner = alivePlayers[0];
     winner.wins = (winner.wins || 0) + 1;
@@ -782,7 +845,7 @@ async function checkClassicWin(io, pubClient, id, state) {
     }
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
-    scheduleGameReset(io, pubClient, id);
+    scheduleGameReset(io, pubClient, id, state.finishedAt);
 
   } else if (alivePlayers.length === 0) {
     // All players eliminated simultaneously (e.g. both disconnect at once).
@@ -790,9 +853,11 @@ async function checkClassicWin(io, pubClient, id, state) {
     clearTurnTimeout(id);
     state.status = 'finished';
     state.turnExpiresAt = null;
+    // T4b: per-finish generation token (see checkTeamWin).
+    state.finishedAt = Date.now();
     await redisUtils.saveLobby(pubClient, id, state);
     broadcastState(io, id, state);
-    scheduleGameReset(io, pubClient, id);
+    scheduleGameReset(io, pubClient, id, state.finishedAt);
   }
 }
 
@@ -934,11 +999,23 @@ async function startGame(io, pubClient, id, state, opts = {}) {
       fresh.currentTurnIndex = Math.floor(Math.random() * fresh.players.length);
     }
     fresh.isValidating = false;
+    // T4b: a new game starts — clear any stale finish-generation token so the
+    // public-lobby / recovery code never mistakes this live game for a
+    // finished one. (The prior game's reset timer, if any, is cleared below
+    // post-commit; this also makes its in-lock finishedAt re-verify decline.)
+    fresh.finishedAt = null;
 
     resetTimer(fresh);
     committed = true;
   });
   if (!committed || !room) return;
+
+  // T4b: a new game is starting on this lobby — cancel any pending game-reset
+  // timer left over from the PREVIOUS finished game so it can't fire mid-game
+  // and flip this live room back to 'waiting'. Post-commit per the R1 pattern
+  // (in-process timer work stays outside the mutex). The finishedAt re-verify
+  // in scheduleGameReset's callback is the belt; this clear is the suspenders.
+  clearGameResetTimeout(id);
 
   // Side-effects ONLY for the call that actually started the game (T2c-ii).
   // H6: Telemetry — fired exactly once per game, at the start. Captures the
@@ -1061,6 +1138,11 @@ module.exports = {
   startGame,
   validateConnection,
   clearTurnTimeout,
+  // T4b audit fix: cancel a lobby's pending game-reset timer. Exported so the
+  // lobby-teardown path (lobbySystem.handleDisconnect) can clear it alongside
+  // clearTurnTimeout/clearBotTimeout before deleteLobby, and so tests can
+  // assert the replace-on-schedule / clear-on-start behavior.
+  clearGameResetTimeout,
   // Audit finding #2: shared watchdog arming + introspection, reused by
   // startGame, nextTurn, rejoin, and the boot-recovery sweep (#6).
   armTurnTimeout,
