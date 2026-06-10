@@ -294,6 +294,10 @@ async function fetchBackgroundPosters() {
 }
 
 const { setupSocketHandlers } = require('./server/socketHandlers');
+// T3c audit fix: per-IP cap on NEW socket connections — the Express limiter
+// above explicitly skips /socket.io/, so without this an attacker could mint
+// unlimited fresh sockets (each with fresh per-socket rate-limit buckets).
+const { createConnectionThrottle } = require('./server/connectionThrottle');
 const redisUtils = require('./server/redisUtils');
 const posterCache = require('./server/posterCache');
 const telemetry = require('./server/telemetry');
@@ -338,10 +342,19 @@ async function startApp() {
     logger.error(err, 'Redis connection failed');
   }
 
-  io = new Server(server, { 
+  io = new Server(server, {
     adapter: createAdapter(pubClient, subClient),
     cors: { origin: process.env.FRONTEND_URL || 'http://localhost:3000' }
   });
+
+  // T3c audit fix: connection-rate throttle MUST register before the
+  // connection handlers — io.use() middleware runs at handshake time, so an
+  // over-cap IP is refused (client sees connect_error 'rate_limited') before
+  // any per-connection work (posters/themes/ruleKits push) happens. 20/min
+  // per IP, Redis-bucketed, FAIL-OPEN on Redis errors; rightmost-XFF IP
+  // derivation is shared with socketHandlers via server/clientIp.js so both
+  // layers always agree on which IP a client is.
+  io.use(createConnectionThrottle(pubClient));
 
   setupSocketHandlers(io, pubClient, TMDB_HEADERS);
 

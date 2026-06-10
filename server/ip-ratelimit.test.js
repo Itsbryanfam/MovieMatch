@@ -356,3 +356,123 @@ describe('T3a/T3b — per-connection IP + per-IP rate-limit buckets', () => {
     expect(pubClient.counts.get(`ratelimit:heroActorSearch:${c.id}`)).toBe(1);
   });
 });
+
+// ===========================================================================
+// T3c — io.use() connection throttle (per-IP cap on NEW connections)
+// ===========================================================================
+// The per-event buckets (T3b) bound what an admitted socket can do; this
+// middleware bounds how fast one IP can mint NEW sockets in the first place.
+// Without it, the connection loop itself (handshake + posters/themes/kits
+// push per connect) is free amplification, and an attacker can keep cycling
+// fresh sockets to dodge any per-socket accounting.
+
+const { createConnectionThrottle, CONNECTION_LIMIT, CONNECTION_WINDOW_SEC } = require('./connectionThrottle');
+
+describe('T3c — connection throttle middleware', () => {
+  let httpServer, io, port;
+  const pubClient = makeCountingPubClient();
+  let clients = [];
+
+  beforeAll((done) => {
+    httpServer = http.createServer();
+    io = new Server(httpServer, { cors: { origin: '*' } });
+    // Middleware only — no event handlers. The throttle decision happens
+    // before any handler would run, which is exactly the property under test.
+    io.use(createConnectionThrottle(pubClient));
+    httpServer.listen(0, () => {
+      port = httpServer.address().port;
+      done();
+    });
+  });
+
+  afterAll((done) => {
+    io.close();
+    httpServer.close(done);
+  });
+
+  beforeEach(() => {
+    pubClient.reset();
+  });
+
+  afterEach(() => {
+    // disconnect() unconditionally — rejected clients are not `connected`
+    // but still hold a manager that would otherwise keep retrying (and keep
+    // the Jest worker alive).
+    for (const c of clients) c.disconnect();
+    clients = [];
+  });
+
+  // Returns { socket, result } where result resolves 'connected' or the
+  // connect_error message — a throttle test needs BOTH outcomes first-class.
+  function tryConnect(extraHeaders) {
+    const c = Client(`http://localhost:${port}`, {
+      forceNew: true,
+      transports: ['websocket'],
+      // reconnection off: a rejected handshake must settle as a final
+      // observable outcome, not loop retries in the background of the test.
+      reconnection: false,
+      ...(extraHeaders ? { extraHeaders } : {}),
+    });
+    clients.push(c);
+    const result = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timeout waiting for connect outcome')), 2000);
+      c.once('connect', () => { clearTimeout(timer); resolve('connected'); });
+      c.once('connect_error', (err) => { clearTimeout(timer); resolve(err.message); });
+    });
+    return { socket: c, result };
+  }
+
+  test('T3c: cap is 20 new connections per 60s window', () => {
+    // Pin the constants the audit fix promises — a silent tweak to either
+    // shows up here, not in production behavior nobody is watching.
+    expect(CONNECTION_LIMIT).toBe(20);
+    expect(CONNECTION_WINDOW_SEC).toBe(60);
+  });
+
+  test('T3c: 20th connection in-window is admitted, 21st is rejected with rate_limited', async () => {
+    const xff = { 'x-forwarded-for': '198.51.100.50' };
+    // Seed as if 19 connections already landed in this window — the next
+    // one is the 20th (the cap itself, still admitted: limit is "per
+    // minute", so count must EXCEED the cap to reject).
+    pubClient.counts.set('ratelimit:conn:198.51.100.50', CONNECTION_LIMIT - 1);
+
+    const twentieth = tryConnect(xff);
+    await expect(twentieth.result).resolves.toBe('connected');
+
+    const twentyFirst = tryConnect(xff);
+    await expect(twentyFirst.result).resolves.toBe('rate_limited');
+  });
+
+  test('T3c: rejection is per-IP — a different IP connects fine while one is capped', async () => {
+    // The throttle must never become a global outage lever: capping one
+    // abusive IP cannot affect anyone else.
+    pubClient.counts.set('ratelimit:conn:198.51.100.50', CONNECTION_LIMIT + 5);
+    const blocked = tryConnect({ 'x-forwarded-for': '198.51.100.50' });
+    await expect(blocked.result).resolves.toBe('rate_limited');
+
+    const other = tryConnect({ 'x-forwarded-for': '203.0.113.200' });
+    await expect(other.result).resolves.toBe('connected');
+  });
+
+  test('T3c: shares rightmost-XFF derivation — spoofed left entries cannot dodge the conn bucket', async () => {
+    // Same trust rule as T3a/T3b (one shared helper, not a re-implementation):
+    // only the proxy-appended rightmost entry picks the bucket.
+    const t = tryConnect({ 'x-forwarded-for': 'fake-a, fake-b, 198.51.100.77' });
+    await expect(t.result).resolves.toBe('connected');
+
+    expect(pubClient.counts.get('ratelimit:conn:198.51.100.77')).toBe(1);
+    for (const key of pubClient.counts.keys()) {
+      expect(key).not.toContain('fake-a');
+      expect(key).not.toContain('fake-b');
+    }
+  });
+
+  test('T3c: Redis flap fails OPEN — connection admitted', async () => {
+    // Same fail-open contract as T3b and the adminLimiter: if Redis is down
+    // the app is already degraded; refusing handshakes on top of that would
+    // turn a Redis blip into a full front-door outage.
+    pubClient.state.failAllMulti = true;
+    const t = tryConnect({ 'x-forwarded-for': '198.51.100.88' });
+    await expect(t.result).resolves.toBe('connected');
+  });
+});
