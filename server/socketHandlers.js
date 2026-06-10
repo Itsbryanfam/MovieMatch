@@ -396,10 +396,23 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
     on('startDailyChallenge', async ({ name, stableId }) => {
       if (await rateLimit(socket.id, 'dailyChallenge', RATE_LIMITS.dailyChallenge.limit, RATE_LIMITS.dailyChallenge.windowMs)) return;
+      // T7b audit fix: clamp stableId at 64 BEFORE it can flow into
+      // dailySystem.claimDailyAttempt → `daily:attempt:<date>:<stableId>`.
+      // The empty/non-string check lives in lobbySystem.startDailyChallenge,
+      // but it did NOT bound the UPPER length — so an oversized client stableId
+      // minted a multi-KB Redis key (the later `.slice(0,12)` only protects the
+      // LOBBY id, not this attempt key). Reject ONLY the over-cap STRING case
+      // here (silent return, mirroring requestMyStats' >64 guard — a legit
+      // stableId is `p_`+32 hex = 34 chars, so nothing real trips this; an
+      // over-cap payload is junk that deserves no feedback and no Redis
+      // footprint). The missing/non-string case is intentionally left to fall
+      // through so lobbySystem still emits its user-facing "requires a stable
+      // identity" error (preserving that UX-feedback path unchanged).
+      if (typeof stableId === 'string' && stableId.length > 64) return;
       // Defensive name sanitization same as joinLobby — keeps the daily
-      // attempt record's display name within bounds. stableId validation
-      // is done inside startDailyChallenge (it's the auth signal for the
-      // attempt-NX claim).
+      // attempt record's display name within bounds. The remaining stableId
+      // validation (empty/non-string → user-facing error) stays inside
+      // startDailyChallenge (it's the auth signal for the attempt-NX claim).
       const cleanName = clampString(name, 24);
       await lobbySystem.startDailyChallenge(ctx, socket, { name: cleanName, stableId });
     });

@@ -820,6 +820,32 @@ describe('Socket.io Integration', () => {
     }
   });
 
+  test('T7b: startDailyChallenge with an oversized stableId makes no daily claim', async () => {
+    // Guard: unlike joinLobby/requestMyStats/setEquippedTitle (which all cap
+    // stableId at 64), the daily handler used to forward stableId UNCLAMPED
+    // into dailySystem.claimDailyAttempt → daily:attempt:<date>:<stableId>
+    // Redis key. The .slice(0,12) that protects the LOBBY id happens later and
+    // does NOT cover that key, so a multi-KB stableId minted a multi-KB Redis
+    // key for free. The handler must now reject (silent return, mirroring
+    // requestMyStats' >64 guard) BEFORE any claim is attempted.
+    const claimSpy = jest.spyOn(dailySystem, 'claimDailyAttempt').mockResolvedValue(null);
+    try {
+      await connect();
+      // 65 chars — one past the 64 cap the sibling handlers enforce. The legit
+      // client stableId is `p_` + 32 hex = 34 chars, so nothing real trips this.
+      client.emit('startDailyChallenge', { name: 'Huge', stableId: 'p_' + 'a'.repeat(63) });
+      // Sentinel barrier: a same-socket requestDailyLeaderboard reply can only
+      // arrive after the (rejected) startDailyChallenge fully processed, so if
+      // the claim were going to fire it would have by now.
+      await flushSocket(client);
+      // No NX claim may be attempted for an over-cap identity — the oversized
+      // value never reached the Redis-key construction.
+      expect(claimSpy).not.toHaveBeenCalled();
+    } finally {
+      claimSpy.mockRestore();
+    }
+  });
+
   test('startDailyChallenge for an already-played day emits dailyAlreadyPlayed (no new lobby)', async () => {
     // Happy path through the "already played today" branch — the lightest fully
     // observable success path (no TMDB seed fetch / lobby bootstrap needed).
