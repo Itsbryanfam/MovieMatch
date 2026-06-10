@@ -126,6 +126,64 @@ export function restoreModalFocus(priorFocus, fallback) {
 }
 
 // ============================================================================
+// LEADERBOARD RENDERER — exported for behavior testing
+// ============================================================================
+// T6c: hoisted from inside the DOMContentLoaded closure to module scope and
+// exported (export-only — the body is byte-for-byte unchanged, it only reads
+// the same module-scope ui.js DOM bindings and the global fetch it always did).
+// This lets leaderboard-render.test.js exercise the REAL render through the
+// jsdom fixture DOM instead of regex-extracting the function body from source
+// text. The DOMContentLoaded wiring below still references it by name (module
+// function declarations are in scope there).
+export async function loadLeaderboard() {
+  leaderboardModal.classList.remove('hidden');
+  leaderboardList.innerHTML = '';
+  // Phase 7.10 — DS-01 pass 2: classes migrated to 03-game.css.
+  // .empty-hint--lg preserves the previous 2rem inline padding override.
+  const loadingDiv = document.createElement('div');
+  loadingDiv.className = 'empty-hint empty-hint--lg';
+  loadingDiv.textContent = 'Loading...';
+  leaderboardList.appendChild(loadingDiv);
+  try {
+    const res = await fetch('/api/leaderboard');
+    const data = await res.json();
+    leaderboardList.innerHTML = '';
+    if (!data.length) {
+      const emptyDiv = document.createElement('div');
+      emptyDiv.className = 'empty-hint empty-hint--lg';
+      emptyDiv.textContent = 'No wins recorded yet. Play a game!';
+      leaderboardList.appendChild(emptyDiv);
+      return;
+    }
+    data.forEach((entry, i) => {
+      // Phase 7.10 — DS-01 pass 2: row/rank/name/wins styling moved to
+      // .leaderboard-* component classes in 03-game.css.
+      const row = document.createElement('div');
+      row.className = 'leaderboard-row';
+      const rank = document.createElement('span');
+      rank.className = 'leaderboard-rank';
+      rank.textContent = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i + 1);
+      const name = document.createElement('span');
+      name.className = 'leaderboard-name';
+      name.textContent = entry.name;
+      const wins = document.createElement('span');
+      wins.className = 'leaderboard-wins';
+      wins.textContent = entry.wins + ' 🏆';
+      row.appendChild(rank);
+      row.appendChild(name);
+      row.appendChild(wins);
+      leaderboardList.appendChild(row);
+    });
+  } catch (err) {
+    leaderboardList.innerHTML = '';
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'empty-hint empty-hint--lg';
+    errorDiv.textContent = 'Failed to load leaderboard.';
+    leaderboardList.appendChild(errorDiv);
+  }
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -648,54 +706,9 @@ document.addEventListener('DOMContentLoaded', () => {
     runTutorial().catch(() => {});
   });
 
-  async function loadLeaderboard() {
-    leaderboardModal.classList.remove('hidden');
-    leaderboardList.innerHTML = '';
-    // Phase 7.10 \u2014 DS-01 pass 2: classes migrated to 03-game.css.
-    // .empty-hint--lg preserves the previous 2rem inline padding override.
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'empty-hint empty-hint--lg';
-    loadingDiv.textContent = 'Loading...';
-    leaderboardList.appendChild(loadingDiv);
-    try {
-      const res = await fetch('/api/leaderboard');
-      const data = await res.json();
-      leaderboardList.innerHTML = '';
-      if (!data.length) {
-        const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'empty-hint empty-hint--lg';
-        emptyDiv.textContent = 'No wins recorded yet. Play a game!';
-        leaderboardList.appendChild(emptyDiv);
-        return;
-      }
-      data.forEach((entry, i) => {
-        // Phase 7.10 \u2014 DS-01 pass 2: row/rank/name/wins styling moved to
-        // .leaderboard-* component classes in 03-game.css.
-        const row = document.createElement('div');
-        row.className = 'leaderboard-row';
-        const rank = document.createElement('span');
-        rank.className = 'leaderboard-rank';
-        rank.textContent = i === 0 ? '\uD83E\uDD47' : i === 1 ? '\uD83E\uDD48' : i === 2 ? '\uD83E\uDD49' : '#' + (i + 1);
-        const name = document.createElement('span');
-        name.className = 'leaderboard-name';
-        name.textContent = entry.name;
-        const wins = document.createElement('span');
-        wins.className = 'leaderboard-wins';
-        wins.textContent = entry.wins + ' \uD83C\uDFC6';
-        row.appendChild(rank);
-        row.appendChild(name);
-        row.appendChild(wins);
-        leaderboardList.appendChild(row);
-      });
-    } catch (err) {
-      leaderboardList.innerHTML = '';
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'empty-hint empty-hint--lg';
-      errorDiv.textContent = 'Failed to load leaderboard.';
-      leaderboardList.appendChild(errorDiv);
-    }
-  }
-
+  // T6c: loadLeaderboard hoisted to module scope (see export above) so it can
+  // be behavior-tested directly. The click wiring is unchanged \u2014 it still binds
+  // the same function by name.
   leaderboardBtn?.addEventListener('click', loadLeaderboard);
 
   // =========================================================================

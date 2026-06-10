@@ -1,14 +1,26 @@
-// client-tests/turn-motion.test.js — Phase 7.7 Task 0
-// WHY: turn-motion.js is the pure zero-import seam (red-carpet.js/chain-recap.js
-// pattern) the filmstrip DOM driver consumes. This suite pins the §3.1 Phase
-// schema (order/determinism/frozen timings/atMs running-sum/caller-supplied
-// think), the isClutchSave boundary, the zero-identity invariant, the barrel
-// wiring (the 7.6 lesson — consumers resolve it via ./ui.js), and that the
-// clutch boundary stays in agreement with timer-panic.js's 'panic' band.
-const fs = require('fs');
-const path = require('path');
+/**
+ * @jest-environment jsdom
+ */
+// client-tests/turn-motion.test.js — Phase 7.7 Task 0 (T6c behavior conversion)
+// WHY: turn-motion.js is the pure zero-import seam the filmstrip DOM driver
+// (choreographTurn in ui-render.js) consumes. The pure schema/predicate tests
+// below import + call + assert OUTPUT (already behavior, not source text). T6c
+// removes the one source-substring assertion that remained — the old
+// "barrel re-exports turn-motion" test that did fs.readFileSync + a .toContain
+// on ui.js source. It is replaced by:
+//   (1) a re-export-BY-USE test (import the seam through the ui.js barrel and
+//       assert it behaves identically to the leaf import), and
+//   (2) a DOM test that ties isClutchSave's boundary to the REAL rendered
+//       motion class (.clutch on the now-playing hero), so the predicate's
+//       contract is observable in the rendered filmstrip rather than asserted
+//       against a string.
+const { loadIndexHtml, makePlayingState } = require('./fixtures');
 const { buildTurnTimeline, isClutchSave } = require('../public/js/ui/turn-motion.js');
 const { timerSeverity } = require('../public/js/ui/timer-panic.js');
+// Barrel re-exports: imported here so the "by use" test can prove the ui.js
+// barrel forwards the same seam (replacing the old source-substring grep).
+const barrel = require('../public/js/ui.js');
+const { initUIElements, renderGame, markClutchSave } = barrel;
 
 const NAMES = ['handoff', 'think', 'submit', 'reveal', 'impact'];
 
@@ -88,11 +100,18 @@ describe('isClutchSave — predicate', () => {
 });
 
 describe('integration invariants', () => {
-  test('barrel wiring — public/js/ui.js re-exports turn-motion (the 7.6 lesson)', () => {
-    // Source assertion (not an import) so this pure suite never loads the
-    // DOM-heavy barrel; pins that consumers/other tests resolve the seam.
-    const barrel = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'ui.js'), 'utf8');
-    expect(barrel).toContain("export * from './ui/turn-motion.js'");
+  // T6c: re-export BY USE (replaces the old fs.readFileSync source-substring
+  // grep). If the ui.js barrel forwards the seam, the functions imported from
+  // the barrel behave identically to the leaf imports — a behavioral proof the
+  // re-export wiring is live, not a string match against source.
+  test('ui.js barrel re-exports the turn-motion seam (proven by behavior)', () => {
+    expect(typeof barrel.buildTurnTimeline).toBe('function');
+    expect(typeof barrel.isClutchSave).toBe('function');
+    // Same output as the leaf import for a representative input.
+    expect(barrel.buildTurnTimeline({ thinkMs: 1000, clutch: true }))
+      .toEqual(buildTurnTimeline({ thinkMs: 1000, clutch: true }));
+    expect(barrel.isClutchSave({ valid: true, secondsRemaining: 3 }))
+      .toBe(isClutchSave({ valid: true, secondsRemaining: 3 }));
   });
 
   test('clutch boundary stays in agreement with timer-panic.js panic band', () => {
@@ -105,5 +124,52 @@ describe('integration invariants', () => {
     }
     expect(timerSeverity(6)).not.toBe('panic');
     expect(isClutchSave({ valid: true, secondsRemaining: 6 })).toBe(false);
+  });
+});
+
+// T6c: DOM behavior — tie isClutchSave's predicate to the REAL rendered motion
+// class. When a clutch save is signalled, the filmstrip's now-playing hero node
+// gets the .clutch motion class + one .clutch-flash overlay; an ordinary save
+// gets neither. This exercises the seam through the actual render driver
+// (choreographTurn ← renderGame) rather than asserting on source text. (The
+// exhaustive one-shot-consume / settled cases are owned by render-chain.test.js;
+// here we pin only the predicate↔motion-class correspondence.)
+describe('isClutchSave ↔ rendered .clutch motion class (DOM)', () => {
+  beforeEach(() => { loadIndexHtml(); initUIElements(); });
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  const display = () => document.getElementById('chain-display');
+  const heroNode = () => display().querySelector('.reel-node.now-playing');
+
+  function chainOf(n) {
+    // n filmstrip entries; the last is the now-playing hero choreographTurn drives.
+    return Array.from({ length: n }, (_, i) => ({
+      movie: { title: `M${i}`, year: 2000 + i, cast: ['A'], poster: '' },
+      playerName: 'Host',
+      matchedActors: i === 0 ? [] : ['A'],
+    }));
+  }
+
+  test('a clutch-range save (secondsRemaining ≤ 5) renders .clutch + one .clutch-flash', () => {
+    // Sanity: the predicate classifies this move as a clutch save…
+    expect(isClutchSave({ valid: true, secondsRemaining: 3 })).toBe(true);
+    // …and the render driver, when told a clutch occurred, paints the class.
+    markClutchSave();
+    renderGame(makePlayingState({ chain: chainOf(2) }), 'host_id', false);
+
+    expect(heroNode().classList.contains('clutch')).toBe(true);
+    expect(heroNode().querySelectorAll('.clutch-flash')).toHaveLength(1);
+  });
+
+  test('a non-clutch save (secondsRemaining > 5) renders no .clutch class', () => {
+    // Predicate says NOT a clutch save…
+    expect(isClutchSave({ valid: true, secondsRemaining: 9 })).toBe(false);
+    // …and without markClutchSave() the rendered hero carries no clutch motion.
+    renderGame(makePlayingState({ chain: chainOf(2) }), 'host_id', false);
+
+    expect(heroNode().classList.contains('clutch')).toBe(false);
+    expect(display().querySelector('.clutch-flash')).toBeNull();
+    // Every settled turn ends in the .settled end-state regardless.
+    expect(heroNode().classList.contains('settled')).toBe(true);
   });
 });
