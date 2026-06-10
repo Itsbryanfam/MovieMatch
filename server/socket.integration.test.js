@@ -628,6 +628,42 @@ describe('Socket.io Integration', () => {
   });
 
   // ========================
+  // HERO ACTOR SEARCH (T3d)
+  // ========================
+  // T3 audit fix: heroActorSearch is pre-room (no lobby membership) and
+  // proxies to TMDB /search/person on the shared token, so junk queries are
+  // pure cost. The handler must reject sub-2-char queries (after trim)
+  // BEFORE spending rate-limit budget or touching TMDB.
+
+  test('T3d: heroActorSearch drops a sub-2-char query before limiter or TMDB spend', async () => {
+    // Spy on global fetch — heroPuzzle.searchPersonForHero calls the bare
+    // global, and "no TMDB spend" is the property under test. Restored at
+    // the end so other tests' (non-)use of fetch is untouched.
+    const realFetch = global.fetch;
+    global.fetch = jest.fn();
+    try {
+      await connect();
+
+      let answered = false;
+      client.on('heroActorResults', () => { answered = true; });
+      // ' a ' trims to a single char — the guard is min-2 AFTER trim, so
+      // whitespace padding can't smuggle a junk query through.
+      client.emit('heroActorSearch', { query: ' a ' });
+      await new Promise(resolve => setTimeout(resolve, 250));
+
+      expect(answered).toBe(false);
+      // Zero TMDB spend…
+      expect(global.fetch).not.toHaveBeenCalled();
+      // …and zero limiter spend: the rate-limit pipeline runs through
+      // pubClient.multi(), which must never have been started for a query
+      // the guard should kill first.
+      expect(mockPubClient.multi).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
+
+  // ========================
   // ERROR BOUNDARY
   // ========================
 

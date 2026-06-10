@@ -355,6 +355,55 @@ describe('T3a/T3b — per-connection IP + per-IP rate-limit buckets', () => {
     // The per-socket dimension still did its (unchanged) job.
     expect(pubClient.counts.get(`ratelimit:heroActorSearch:${c.id}`)).toBe(1);
   });
+
+  // -------------------------------------------------------------------------
+  // T3d — heroActorSearch hardening, end-to-end through the handler
+  // -------------------------------------------------------------------------
+
+  test('T3d: sub-2-char query is dropped BEFORE any fetch or limiter spend', async () => {
+    // A 1-char fragment is useless for the dropdown but still costs a TMDB
+    // call and rate-limit budget if it gets past the guard. It must die at
+    // the top of the handler: zero fetches, zero bucket increments.
+    const c = await connect({ 'x-forwarded-for': '203.0.113.61' });
+    let answered = false;
+    c.on('heroActorResults', () => { answered = true; });
+    // ' a ' trims to 1 char — the guard is min length AFTER trim, so
+    // whitespace padding can't smuggle a 1-char query through.
+    c.emit('heroActorSearch', { query: ' a ' });
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    expect(answered).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+    // No limiter spend: neither the per-socket nor the per-IP bucket may
+    // have been touched (junk queries must not eat a player's real budget).
+    expect(pubClient.counts.get(`ratelimit:heroActorSearch:${c.id}`)).toBeUndefined();
+    expect(pubClient.counts.get('ratelimit:ip:heroActorSearch:203.0.113.61')).toBeUndefined();
+  });
+
+  test('T3d: repeated hero searches hit the Redis cache — exactly one TMDB fetch', async () => {
+    // End-to-end proof the handler actually wires the cache (a unit test on
+    // heroPuzzle alone could pass while the handler forgot to pass the Redis
+    // client). Identical normalized query twice → one upstream call, both
+    // emits answered with the same client-facing payload.
+    const c = await connect({ 'x-forwarded-for': '203.0.113.62' });
+
+    c.emit('heroActorSearch', { query: 'Tom Hanks' });
+    const first = await waitFor(c, 'heroActorResults');
+    // Different raw casing/whitespace, same normalized key — must be a hit.
+    c.emit('heroActorSearch', { query: '  tom   HANKS ' });
+    const second = await waitFor(c, 'heroActorResults');
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // Cache stores the CLIENT-FACING shape — a hit serves the wire payload
+    // verbatim, zero re-mapping, zero TMDB work.
+    expect(second.results).toEqual(first.results);
+    expect(first.results[0]).toEqual({
+      tmdbId: 31,
+      name: 'Tom Hanks',
+      profilePath: 'https://image.tmdb.org/t/p/w200/x.jpg',
+      knownFor: ['Forrest Gump'],
+    });
+  });
 });
 
 // ===========================================================================
@@ -474,5 +523,105 @@ describe('T3c — connection throttle middleware', () => {
     pubClient.state.failAllMulti = true;
     const t = tryConnect({ 'x-forwarded-for': '198.51.100.88' });
     await expect(t.result).resolves.toBe('connected');
+  });
+});
+
+// ===========================================================================
+// T3d — searchPersonForHero result cache (unit level, T1d degraded-mode
+// discipline: cache errors = miss; write-back isolated so a flap can't
+// discard fetched results)
+// ===========================================================================
+
+const heroPuzzle = require('./heroPuzzle');
+
+describe('T3d — searchPersonForHero Redis result cache', () => {
+  const TMDB_HEADERS = { Authorization: 'Bearer test_token', accept: 'application/json' };
+  // Same payload/expected pair as the socket-level test, kept local so this
+  // describe stands alone (no shared mutable fixtures across describes).
+  const tmdbPersonPayload = {
+    results: [
+      { id: 31, name: 'Tom Hanks', profile_path: '/x.jpg', known_for: [{ title: 'Forrest Gump' }] },
+    ],
+  };
+  const expectedClientShape = [{
+    tmdbId: 31,
+    name: 'Tom Hanks',
+    profilePath: 'https://image.tmdb.org/t/p/w200/x.jpg',
+    knownFor: ['Forrest Gump'],
+  }];
+  const realFetch = global.fetch;
+  let pub;
+
+  beforeEach(() => {
+    pub = makeCountingPubClient();
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => tmdbPersonPayload }));
+  });
+
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  test('miss → fetch + write-back; normalized-equal query → hit with zero fetch', async () => {
+    const first = await heroPuzzle.searchPersonForHero('Tom Hanks', TMDB_HEADERS, pub);
+    expect(first).toEqual(expectedClientShape);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // Key is the NORMALIZED query (lowercase/trim/collapse-whitespace) so
+    // cosmetic input variants share one entry instead of refetching.
+    expect(pub.kv.has('herosearch:v1:tom hanks')).toBe(true);
+
+    const second = await heroPuzzle.searchPersonForHero('  tom   HANKS ', TMDB_HEADERS, pub);
+    expect(second).toEqual(expectedClientShape);
+    // The whole point of the cache: a hit does ZERO TMDB work.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('cache-read flap degrades to MISS — results still served from TMDB', async () => {
+    // T1d discipline: node-redis rejects in-flight commands on a socket
+    // flap; a read error here must mean "miss", never "search broken".
+    pub.state.failGetPrefix = 'herosearch:';
+    const results = await heroPuzzle.searchPersonForHero('Tom Hanks', TMDB_HEADERS, pub);
+    expect(results).toEqual(expectedClientShape);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('write-back flap cannot discard fetched results (T1d-ext discipline)', async () => {
+    // The write-back runs AFTER TMDB answered — at that point we HOLD valid
+    // results, and a Redis blip on the SET must not throw them away (the
+    // exact bug class fixed for credits in commits 09cf70f/7ebeaa5).
+    pub.state.failSetPrefix = 'herosearch:';
+    const results = await heroPuzzle.searchPersonForHero('Tom Hanks', TMDB_HEADERS, pub);
+    expect(results).toEqual(expectedClientShape);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    // Nothing landed in the cache — the price of the flap is a future
+    // re-fetch, never a lost answer.
+    expect(pub.kv.has('herosearch:v1:tom hanks')).toBe(false);
+  });
+
+  test('corrupt cache entry is a miss and self-heals on the fresh write-back', async () => {
+    // Torn write / manual poke: parse failure must fall through to fetch
+    // (same as getOrFetchCredits' corrupt-entry handling), and the fresh
+    // write-back replaces the bad blob.
+    pub.kv.set('herosearch:v1:tom hanks', '{ not json');
+    const results = await heroPuzzle.searchPersonForHero('Tom Hanks', TMDB_HEADERS, pub);
+    expect(results).toEqual(expectedClientShape);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(pub.kv.get('herosearch:v1:tom hanks'))).toEqual(expectedClientShape);
+  });
+
+  test('no pubClient (backward-compatible signature) → plain uncached fetch', async () => {
+    // The cache is additive: callers without a Redis client (or a future
+    // degraded boot path) keep the original direct-fetch behavior.
+    const results = await heroPuzzle.searchPersonForHero('Tom Hanks', TMDB_HEADERS);
+    expect(results).toEqual(expectedClientShape);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('non-OK TMDB response returns [] and is NOT cached', async () => {
+    // Caching an upstream error for 6h would pin a transient TMDB blip into
+    // a long outage for that query — error responses must stay uncached.
+    global.fetch = jest.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }));
+    const results = await heroPuzzle.searchPersonForHero('Tom Hanks', TMDB_HEADERS, pub);
+    expect(results).toEqual([]);
+    expect(pub.kv.has('herosearch:v1:tom hanks')).toBe(false);
   });
 });

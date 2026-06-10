@@ -1,16 +1,19 @@
 // ============================================================================
 // HERO PUZZLE — Phase 7.9 Playable Hero server module
 // ============================================================================
-// Pre-room socket flow. No lobby state, no game state, no Redis. Used by
-// the hero landing page to serve a one-move chain puzzle to first-time
-// visitors before they commit to joining a room.
+// Pre-room socket flow. No lobby state, no game state. Redis appears ONLY as
+// the optional search-result cache in searchPersonForHero (T3d audit fix) —
+// puzzle bank/validation remain pure in-memory. Used by the hero landing
+// page to serve a one-move chain puzzle to first-time visitors before they
+// commit to joining a room.
 //
 // Exports:
 //   - HERO_PUZZLE_BANK    — curated puzzle bank (server-authoritative)
 //   - pickRandomPuzzle()  — random pick for the heroPuzzleRequest handler
 //   - toClientPuzzle()    — strip the answer set before wire transmission
 //   - validateGuess()     — authoritative correct/incorrect classification
-//   - searchPersonForHero(query, TMDB_HEADERS) — TMDB /search/person passthrough
+//   - searchPersonForHero(query, TMDB_HEADERS, pubClient?) — TMDB
+//     /search/person passthrough with an optional 6h Redis result cache
 //
 // NOTE: matchSystem.autocompleteSearch CANNOT be reused here — it requires
 // an existing lobby + socket-in-lobby membership (matchSystem.js:93-95).
@@ -21,6 +24,37 @@
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w200';
 const TMDB_FETCH_TIMEOUT_MS = 5000;
+
+// T3d audit fix (P2): hero search cache controls.
+// Version segment in the key — bump on payload-shape change so old entries
+// can never be read under a new schema (same rationale + history pattern as
+// CREDITS_CACHE_VERSION in redisUtils.js): v1 — [{ tmdbId, name,
+// profilePath, knownFor }] (the exact client-facing shape).
+const HERO_SEARCH_CACHE_VERSION = 'v1';
+// 6 hours: actor search results drift on the order of weeks (new credits,
+// new headshots) — far slower than this TTL — while autocomplete traffic
+// for popular prefixes repeats within minutes. Long enough to absorb the
+// repeat traffic, short enough that nobody notices staleness.
+const HERO_SEARCH_CACHE_TTL_SEC = 6 * 60 * 60;
+
+// T3d: lazy-memoized module logger for degraded-path warnings — identical
+// pattern + rationale to redisUtils._getLogger: pino is only instantiated
+// the first time a degraded log actually fires, so requiring this module
+// stays side-effect-free for unit tests; memoized so repeated flaps reuse
+// one instance (stable pid correlation in prod logs).
+let _logger = null;
+function _getLogger() {
+  if (!_logger) _logger = require('pino')();
+  return _logger;
+}
+
+// T3d: one normalization for the cache key — lowercase + trim + collapse
+// internal whitespace runs. 'Tom Hanks', ' tom   hanks ' and 'TOM HANKS'
+// are the same TMDB search; without this each cosmetic variant would be a
+// separate miss and a separate hit on the shared token.
+function normalizeHeroQuery(query) {
+  return query.trim().toLowerCase().replace(/\s+/g, ' ');
+}
 
 // Curated hero puzzle bank. 5 hand-picked pairs with single memorable
 // shared actors. tmdbIds are real and validated against TMDB.
@@ -124,16 +158,53 @@ function validateGuess(pairId, actorTmdbId) {
 // calls in matchSystem.js:99, scoped to people only and trimmed for the
 // hero dropdown (top 5 results, posterPath-shaped knownFor preserved for
 // the optional dropdown thumbnail).
-async function searchPersonForHero(query, TMDB_HEADERS) {
+//
+// T3d audit fix (P2): optional 6h Redis result cache, modeled on
+// redisUtils.getOrFetchCredits' read/write discipline (T1d/T1d-ext —
+// commits 09cf70f/7ebeaa5): cache errors degrade to MISS, the write-back is
+// isolated so a flap can't discard results TMDB already returned. The cache
+// stores the CLIENT-FACING shape below, so a hit does ZERO TMDB work and
+// zero re-mapping. pubClient is OPTIONAL (trailing param) so the function
+// stays backward-compatible and pure-fetch when no Redis client is wired.
+// No NX stampede lock (unlike getOrFetchCredits): autocomplete queries are
+// interactive — a 250ms lock-wait would be felt in the dropdown, and the
+// worst case without it is one duplicate person-search, not a wrong answer.
+async function searchPersonForHero(query, TMDB_HEADERS, pubClient = null) {
   if (typeof query !== 'string' || query.length === 0) return [];
+  // T3d: normalized key so cosmetic variants ('Tom Hanks' / ' tom  hanks ')
+  // share one entry. Computed up front — read and write-back must agree.
+  const cacheKey = `herosearch:${HERO_SEARCH_CACHE_VERSION}:${normalizeHeroQuery(query)}`;
+
+  if (pubClient) {
+    // T3d (T1d discipline): the read is wrapped so a node-redis flap —
+    // which rejects in-flight commands — means "miss", never "search
+    // broken". TMDB below is the actual source of truth.
+    let cached = null;
+    try {
+      cached = await pubClient.get(cacheKey);
+    } catch {
+      cached = null; // flap = miss; fall through to the fetch
+    }
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch {
+        // Corrupt entry (torn write / manual poke) is a miss, not a fatal —
+        // the fresh write-back below self-heals the key.
+      }
+    }
+  }
+
   const res = await fetch(
     `${TMDB_API_BASE}/search/person?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`,
     { headers: TMDB_HEADERS, signal: AbortSignal.timeout(TMDB_FETCH_TIMEOUT_MS) }
   );
+  // Upstream errors are NEVER cached — pinning a transient TMDB blip into a
+  // 6h outage for that query would be worse than no cache at all.
   if (!res.ok) return [];
   const data = await res.json();
   const results = data.results || [];
-  return results.slice(0, 5).map(r => ({
+  const clientResults = results.slice(0, 5).map(r => ({
     tmdbId: r.id,
     name: r.name,
     profilePath: r.profile_path ? `${TMDB_POSTER_BASE}${r.profile_path}` : null,
@@ -142,6 +213,22 @@ async function searchPersonForHero(query, TMDB_HEADERS) {
       .map(k => k.title || k.name || '')
       .filter(Boolean),
   }));
+
+  if (pubClient) {
+    // T3d (T1d-ext discipline): the write-back runs AFTER TMDB answered —
+    // at this point clientResults is a valid answer we hold. Isolated
+    // try/catch: a Redis flap on this SET logs and continues; the price of
+    // a lost write-back is one future re-fetch, never a dropped response.
+    // (Empty result sets ARE cached — a 200 with no matches is a real
+    // answer, and common misspellings repeat just like hits do.)
+    try {
+      await pubClient.set(cacheKey, JSON.stringify(clientResults), { EX: HERO_SEARCH_CACHE_TTL_SEC });
+    } catch (cacheErr) {
+      _getLogger().warn(cacheErr, 'hero search cache write-back failed — returning fetched results uncached');
+    }
+  }
+
+  return clientResults;
 }
 
 module.exports = {

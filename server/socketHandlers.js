@@ -483,12 +483,21 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // Dedicated channel — does NOT share the autocomplete rate-limit bucket
       // with live-game autocompleteSearch (different surface, different bucket
       // name so a malicious hero spam doesn't deny live-game players).
+      // Max-length guard (100) predates T3 and stays — it bounds the
+      // encodeURIComponent blow-up and the Redis cache key length alike.
       if (typeof query !== 'string' || query.length === 0 || query.length > 100) return;
+      // T3d: minimum 2 chars AFTER trim. A 1-char fragment is useless for
+      // the dropdown but still costs a TMDB call — and it must be rejected
+      // BEFORE the limiter below so junk can't eat a player's real budget.
+      // Trim first so whitespace padding can't smuggle a 1-char query in.
+      if (query.trim().length < 2) return;
       // T3b: clientIp added — pre-room, membership-free, straight to TMDB:
       // the cheapest token-burn lever in the app, so the per-IP bucket is
       // most important here.
       if (await rateLimit(socket.id, 'heroActorSearch', RATE_LIMITS.autocomplete.limit, RATE_LIMITS.autocomplete.windowMs, socket.data.clientIp)) return;
-      const results = await heroPuzzle.searchPersonForHero(query, TMDB_HEADERS);
+      // T3d: pubClient wired through for the 6h person-search result cache —
+      // a cache hit answers entirely from Redis with zero TMDB spend.
+      const results = await heroPuzzle.searchPersonForHero(query, TMDB_HEADERS, pubClient);
       socket.emit('heroActorResults', { query, results });
     });
 
