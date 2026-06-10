@@ -6,6 +6,26 @@
 const fs = require('fs');
 const path = require('path');
 
+// T4e audit fix: lazy-memoized pino logger (same pattern + rationale as
+// botSystem._getLogger / redisUtils._getLogger). WHY lazy: _load runs at first
+// fallback consultation and several unit tests drive this module directly;
+// instantiating pino at module-load would add a side-effect to every such
+// require. Memoized so repeated loads reuse one instance with stable pid.
+let _logger = null;
+function _getLogger() {
+  if (!_logger) _logger = require('pino')();
+  return _logger;
+}
+
+// T4e: a "healthy" fallback DB is committed at ~900+ entries (pinned by
+// fallbackMovies.data.test.js: >= 900). If a load returns far fewer than that
+// it's almost certainly a truncated/partially-written file or a generator
+// regression — and a silently-degraded fallback is WORSE than none, because
+// it's the layer that prevents wrongful eliminations during a TMDB outage.
+// Threshold ~25% of the committed floor (900) → 200: low enough that the real
+// dataset never trips it, high enough to catch a near-empty/truncated load.
+const FALLBACK_MIN_HEALTHY_COUNT = 200;
+
 // Lazy-load + cache. Static readFileSync is fine here for the same reason
 // dailySystem's is: a one-time synchronous boot-ish read of a static file,
 // never a hot path (the fallback is only hit on a TMDB failure). UNLIKE
@@ -18,11 +38,42 @@ function _load() {
   try {
     const filePath = path.join(__dirname, '..', '..', 'data', 'fallbackMovies.json');
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (Array.isArray(parsed)) all = parsed;
+    if (Array.isArray(parsed)) {
+      all = parsed;
+    } else {
+      // Valid JSON but not an array — the file exists but its shape is wrong
+      // (generator wrote an object, manual edit clobbered the top level, etc).
+      // Loud + empty, same as a parse failure: a malformed resilience DB must
+      // not silently masquerade as a working one.
+      _getLogger().error(
+        { type: typeof parsed },
+        'fallbackMovies.json is not an array — fallback DB EMPTY; TMDB-outage resilience degraded'
+      );
+      all = [];
+    }
   } catch (err) {
-    // Missing/corrupt → empty. Never throw: a broken fallback file must not
-    // block boot or change healthy-path behavior.
+    // T4e audit fix: previously this catch SILENTLY set all = [] — a
+    // missing/corrupt file turned the entire TMDB-outage resilience layer into
+    // an empty DB with zero operator signal, so during the very outage it's
+    // meant to cover, players would be wrongly eliminated on correct moves with
+    // nothing in the logs to explain it. Log LOUDLY (error) so the degradation
+    // is visible, then still boot empty (never throw — a broken fallback file
+    // must not block startup or change healthy-path behavior).
+    _getLogger().error(err, 'failed to read/parse fallbackMovies.json — fallback DB EMPTY; TMDB-outage resilience degraded');
     all = [];
+  }
+
+  // T4e: even on a successful parse, warn when the count is suspiciously low —
+  // a truncated/half-written file can parse as a valid-but-tiny array, which
+  // the catch above never sees. Skips the warn for a legitimately empty array
+  // already reported as an error above? No: an empty array reaches here as a
+  // successful-parse 0-length result, so this single check covers both the
+  // "tiny" and "empty-but-parsed" degraded shapes with one loud warning.
+  if (all.length < FALLBACK_MIN_HEALTHY_COUNT) {
+    _getLogger().warn(
+      { loaded: all.length, expectedAtLeast: FALLBACK_MIN_HEALTHY_COUNT },
+      'fallbackMovies.json loaded suspiciously few entries — fallback DB likely truncated/corrupt; TMDB-outage resilience degraded'
+    );
   }
   const byId = new Map();
   // Index by id, skipping entries with a missing/non-integer id: TMDB ids are
