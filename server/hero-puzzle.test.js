@@ -4,7 +4,8 @@
 
 const {
   HERO_PUZZLE_BANK,
-  pickRandomPuzzle,
+  // T5d ESLint: dropped unused pickRandomPuzzle from this require destructure
+  // (imported but never exercised in this suite) — behavior-neutral.
   toClientPuzzle,
   validateGuess,
 } = require('./heroPuzzle');

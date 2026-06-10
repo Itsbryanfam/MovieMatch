@@ -25,6 +25,7 @@ const appJs = fs.readFileSync(appJsPath, 'utf8');
 // in app.js.
 // WHY \r?\n: the repo uses CRLF line endings on Windows; the regex must
 // handle both LF and CRLF so the tests are cross-platform stable.
+// eslint-disable-next-line no-regex-spaces -- T5d: the two literal spaces match the exact 2-space source indentation of the closing brace in app.js. Rewriting to ` {2}` is equivalent but pointlessly perturbs a regex that intentionally mirrors source text; leave the byte-for-byte form.
 const leaderboardFnMatch = appJs.match(/async function loadLeaderboard\([\s\S]*?\r?\n  \}\r?\n\r?\n/);
 const leaderboardFnBody = leaderboardFnMatch ? leaderboardFnMatch[0] : '';
 

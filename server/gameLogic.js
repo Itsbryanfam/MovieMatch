@@ -159,6 +159,7 @@ function toClientState(state) {
     ...state,
     // Strip stableId from every player — it's the rejoin bearer secret and
     // must never leave the server in any client-bound payload.
+    // eslint-disable-next-line no-unused-vars -- T5d: `stableId` is destructured ONLY to omit it from ...rest; the binding being "unused" is the entire point. Renaming it to _stableId would strip the wrong key and LEAK the real stableId. Do NOT auto-fix.
     players: state.players.map(({ stableId, ...rest }) => rest),
     // Never ship the raw spectator list (carries stableId + socket ids);
     // only the connected count is needed by the UI.

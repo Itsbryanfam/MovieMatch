@@ -1,7 +1,8 @@
 // ============================================================================
 // fallbackMovies.test.js — Phase 5b read-once loader.
 // ============================================================================
-const path = require('path');
+// T5d ESLint: removed `const path = require('path')` — it was required but
+// never used in this suite (behavior-neutral dead-require removal).
 
 // T4e: the loader now logs via a lazily-required pino instance on the
 // degraded paths (small/empty/corrupt loads). Real pino writes through fs, but

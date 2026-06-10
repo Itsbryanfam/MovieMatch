@@ -523,6 +523,7 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // the client falls back to its cached bundled outcome on timeout.
       if (typeof pairId !== 'string' || pairId.length === 0 || pairId.length > 100) return;
       if (typeof actorTmdbId !== 'number' || !Number.isInteger(actorTmdbId)) return;
+      // eslint-disable-next-line no-useless-assignment -- T5d: defensive input clamp. validateGuess() ignores actorName today so the '' write is currently unread, but it is deliberate sanitization kept so any future code path that DOES read actorName sees a bounded value, never oversize/attacker-controlled input. Removing it would be a behavior change-in-waiting.
       if (typeof actorName !== 'string' || actorName.length > 200) actorName = '';
       if (await rateLimit(socket.id, 'heroGuessSubmit', RATE_LIMITS.submitMovie.limit, RATE_LIMITS.submitMovie.windowMs)) return;
       const result = heroPuzzle.validateGuess(pairId, actorTmdbId);

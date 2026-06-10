@@ -9,27 +9,36 @@
 // ============================================================================
 
 import {
-  initUIElements, renderLobby, renderGame, renderTeamScreen,
-  showNotification, renderAutocompleteResults, closeMobileAc,
-  openShareModal, showGameOverBanner, resetMobileTab, playRecap,
-  showEliminationFlash, showSelfEliminationScreen, showWinFlash,
-  showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
+  // T5d ESLint: dropped genuinely-unused imports from this list (initUIElements,
+  // renderTeamScreen, closeMobileAc, openShareModal, showGameOverBanner,
+  // showEliminationFlash, showWinFlash, showConfetti, lobbyScreen, gameScreen,
+  // notificationOverlay, notificationText) — imported but never referenced here
+  // (the two that grep twice only reappear inside comments). Trimming an
+  // import {} list is behavior-neutral.
+  renderLobby, renderGame,
+  showNotification, renderAutocompleteResults,
+  resetMobileTab, playRecap,
+  showSelfEliminationScreen,
+  showGhostAttempt, showToast, renderDailyResult, renderMyStats,
   toast, gameEvent, submissionPill, // Phase 7.2: feedback router
   timerSeverity, // Phase 7.4: pure timer-severity seam (Panic Timer)
   isClutchSave, markClutchSave, // Phase 7.7: clutch-save predicate + one-shot flag
   showScreen, // WHY: Phase 3 Task D — canonical group-normaliser for screen transitions
   renderRuleKitChips, // Phase 6c: renders lobby quick-kit chips from server-delivered list
   // DOM elements
-  publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
-  heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
+  publicLobbiesList, posterCarousel,
+  heroScreen, waitingRoom, lobbyCodeDisplay,
   chatMessages
 } from './ui.js';
 
-import { prepareAudio, playSuccess, playFail, playTick, playSfx, vibrate, escapeHtml, getStableId } from './utils.js';
+// T5d ESLint: dropped unused prepareAudio, playSuccess, escapeHtml (imported,
+// never called here) — behavior-neutral import-list trim.
+import { playFail, playTick, playSfx, vibrate, getStableId } from './utils.js';
 
 import {
   getSocket, setSocket, getCurrentLobbyId, getMyPlayerId, getGameState,
-  getIsSpectator, getIsDaily, getTurnInterval, getLastTickSound,
+  // T5d ESLint: dropped unused getTurnInterval (imported, never read here).
+  getIsSpectator, getIsDaily, getLastTickSound,
   setTurnInterval, setLastTickSound, clearTurnTimer,
   onJoined, onStateUpdate, onRejoined, resetSession
 } from './state.js';
@@ -703,7 +712,9 @@ export function initSocket() {
   // Players who didn't vote get the tally line only.
   // -----------------------------------------------------------------------
 
-  socket.on('predictionResult', ({ outcome, correct, total, perVoter }) => {
+  // T5d ESLint: dropped unused `outcome` from the destructuring — it was never
+  // read in this handler (behavior-neutral; ignoring a payload field is a no-op).
+  socket.on('predictionResult', ({ correct, total, perVoter }) => {
     if (!total) return; // no votes this turn — nothing to surface
     const myVoteCorrect = perVoter && perVoter[socket.id];
     const overall = `${correct} of ${total} called it`;

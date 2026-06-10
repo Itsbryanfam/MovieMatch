@@ -26,7 +26,8 @@ beforeEach(() => { jest.clearAllMocks(); });
 test('fetches, strips, and caches on miss (7-day TTL)', async () => {
   const pub = mockPubClient();
   // NX lock claim returns OK (no other fetcher), cache miss first.
-  pub.set.mockImplementation(async (k, v, opts) => { pub._store.set(k, v); return 'OK'; });
+  // T5d ESLint: third mock arg (set options) is unused here — _-prefixed.
+  pub.set.mockImplementation(async (k, v, _opts) => { pub._store.set(k, v); return 'OK'; });
   global.fetch.mockResolvedValue({
     ok: true,
     json: async () => ({

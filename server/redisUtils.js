@@ -157,6 +157,7 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   // eliminated "Invalid movie connection" on a CORRECT move. A Redis error
   // on this path must instead degrade to cache-MISS semantics and fall
   // through to the fetch (which has its own try + local-DB fallback).
+  // eslint-disable-next-line no-useless-assignment -- T5d: the `= null` init is intentional defensive scaffolding paired with the catch below (cache-miss-on-Redis-flap semantics — see the multi-line WHY above this block). Not auto-fixable without weakening that contract.
   let cached = null;
   try {
     cached = await pubClient.get(cacheKey);

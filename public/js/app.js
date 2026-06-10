@@ -20,16 +20,22 @@ import {
   mountHeroPuzzle, // Phase 7.9: Playable Hero driver mount
   submissionPill, // Phase 7.2 (CG-03): keeps submitted title visible during TMDB round-trip
   createPromptModal, buildNamePromptConfig, buildJoinPromptConfig, // Phase 7.3 (MI-02): shared prompt-modal factory + builders
-  playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
-  privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
-  tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
+  // T5d ESLint: dropped genuinely-unused imports (lobbyScreen, heroScreen,
+  // gameScreen, publicPanel, joinPanel, hardcoreToggle, tvShowsToggle,
+  // closeHowToPlay, closeCredits, closeLeaderboard, shareModal) — they were
+  // imported but never referenced in this file. Removing names from an
+  // import {} list is behavior-neutral (the still-used names and ui.js's
+  // module side effects are unchanged).
+  playerNameInput, logo, waitingRoom,
+  privatePanel, lobbyIdInput,
+  publicRoomToggle, joinBtn, startBtn, showPublicBtn,
   showPrivateBtn, backToJoinBtn, backToJoinBtn2, refreshLobbiesBtn,
   heroPlayBtn, heroCodeBtn, heroDailyBtn, howToPlayBtn, creditsBtn, howToPlayModal,
-  creditsModal, closeHowToPlay, closeCredits, leaderboardBtn,
-  leaderboardModal, closeLeaderboard, leaderboardList, submitBtn,
+  creditsModal, leaderboardBtn,
+  leaderboardModal, leaderboardList, submitBtn,
   movieInput, autocompleteContainer, chatInput, modeChips, joinRedBtn,
   joinBlueBtn, teamBackBtn, teamStartBtn, teamScreen, downloadCardBtn,
-  copyCardBtn, shareCanvas, shareModal
+  copyCardBtn, shareCanvas
 } from './ui.js';
 
 import { initSocket, leaveLobby } from './socketClient.js';

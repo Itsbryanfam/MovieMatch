@@ -98,7 +98,9 @@ export function playChainReplay(container, chain, options = {}) {
 // Build a single replay-entry DOM node. Uses the same shape as the live
 // chain renderer (poster + title + cast) but with a `.replay-entry` class
 // so CSS can give it a fade-in animation and a slightly tighter layout.
-function _buildReplayEntry(item, index, allItems) {
+// T5d ESLint: trailing `allItems` param is unused — prefixed with _ to mark it
+// intentionally-unused (kept positionally for call-site/signature parity).
+function _buildReplayEntry(item, index, _allItems) {
   const div = document.createElement('div');
   div.className = 'chain-item replay-entry';
   if (index > 0) div.classList.add('shared-highlight');

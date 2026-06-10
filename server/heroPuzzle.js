@@ -181,6 +181,7 @@ async function searchPersonForHero(query, TMDB_HEADERS, pubClient = null) {
     // T3d (T1d discipline): the read is wrapped so a node-redis flap —
     // which rejects in-flight commands — means "miss", never "search
     // broken". TMDB below is the actual source of truth.
+    // eslint-disable-next-line no-useless-assignment -- T5d: the `= null` init is intentional defensive scaffolding paired with the catch below; keeping it makes the cache-miss-on-Redis-flap contract explicit regardless of how the try/catch evolves. Behavior-load-bearing, not auto-fixable.
     let cached = null;
     try {
       cached = await pubClient.get(cacheKey);

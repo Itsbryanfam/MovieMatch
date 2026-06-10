@@ -34,6 +34,7 @@ const FALLBACK_MIN_HEALTHY_COUNT = 200;
 let _cache = null; // { byId: Map<number,entry>, all: entry[] }
 function _load() {
   if (_cache) return _cache;
+  // eslint-disable-next-line no-useless-assignment -- T5d: the `= []` init is the intentional safe-default the try/catch/else all reassign; keeping it guarantees `all` is always an array even if a future edit adds a path that skips the explicit assignments. Defensive, not auto-fixable.
   let all = [];
   try {
     const filePath = path.join(__dirname, '..', '..', 'data', 'fallbackMovies.json');
