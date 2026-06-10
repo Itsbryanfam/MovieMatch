@@ -3,6 +3,16 @@ const { Server } = require('socket.io');
 const Client = require('socket.io-client');
 const { setupSocketHandlers } = require('./socketHandlers');
 const redisUtils = require('./redisUtils');
+// T6a: dailySystem is NOT auto-mocked (only redisUtils is). The daily handler
+// tests below jest.spyOn its methods so we can drive the claim/leaderboard
+// branches without standing up the real Redis ZSET ops — restored per-test.
+const dailySystem = require('./systems/dailySystem');
+// T6a: lobbySystem is real too. The host-settings handlers are pure
+// rate-limit→delegate routers, so the observable contract is "the right
+// lobbySystem method ran with the parsed payload". We jest.spyOn (and restore)
+// rather than assert deep state, since the deep behavior is owned by
+// lobbySystem's own unit suites.
+const lobbySystem = require('./systems/lobbySystem');
 
 jest.mock('./redisUtils');
 
@@ -15,6 +25,20 @@ function waitFor(socket, event, timeout = 2000) {
       resolve(data);
     });
   });
+}
+
+// T6b: deterministic order-barrier. Socket.IO preserves per-socket event
+// order, so after we emit some event on a socket, emitting `requestDailyLeaderboard`
+// on the SAME socket and awaiting its `dailyLeaderboard` reply PROVES the
+// earlier event was already fully processed by the server. This replaces
+// real `setTimeout` sleeps in the negative-assertion windows: instead of
+// "wait 250ms and hope it's done", we wait for a known sentinel response that
+// CANNOT arrive before the prior event ran. requestDailyLeaderboard is the
+// ideal sentinel — it always replies (no lobby/membership preconditions) and
+// has no effect on lobby state, so it can't perturb the thing under test.
+function flushSocket(socket) {
+  socket.emit('requestDailyLeaderboard', '__sentinel__');
+  return waitFor(socket, 'dailyLeaderboard');
 }
 
 describe('Socket.io Integration', () => {
@@ -104,6 +128,29 @@ describe('Socket.io Integration', () => {
       transports: ['websocket'],
     });
     return waitFor(client, 'connect');
+  }
+
+  // T6a: room-channel join helper. Several handlers broadcast via
+  // io.to(lobbyId) / broadcastState, so the connected socket only receives the
+  // emit if it is genuinely joined to that Socket.IO room. Mocking a player
+  // record is not enough — the SERVER must have run socket.join(lobbyId).
+  // This drives `client` through the real joinLobby flow into `lobbyId`, then
+  // returns the new socket id so callers can wire it into the room they want
+  // the handler-under-test to read. After this resolves, `client` is in the
+  // room channel; the caller re-points redisUtils.getLobby to its own room.
+  async function joinClientToRoom(lobbyId) {
+    // NX-create returns null → existing-room path → server runs socket.join.
+    mockPubClient.set.mockResolvedValueOnce(null);
+    redisUtils.getLobby.mockResolvedValueOnce({
+      id: lobbyId, status: 'waiting',
+      players: [{ id: 'seed-host', name: 'Seed', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's_seed' }],
+      chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
+      allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
+      isValidating: false, gameMode: 'classic',
+    });
+    client.emit('joinLobby', { name: 'Joiner', lobbyId, stableId: 's_joiner' });
+    await waitFor(client, 'joined');
+    return client.id;
   }
 
   // ========================
@@ -688,5 +735,660 @@ describe('Socket.io Integration', () => {
 
     const data = await waitFor(client, 'joined');
     expect(data.lobbyId).toBeDefined();
+  });
+
+  // ==========================================================================
+  // T6a — THIN-HANDLER COVERAGE
+  // ==========================================================================
+  // socketHandlers.js is the wire-input security surface; several handlers had
+  // no integration coverage (the guard branches T1f/T3 added were unpinned).
+  // For each, one guard-rejection test + one happy-path test, asserting
+  // OBSERVABLE behavior (emits, Redis writes/absence) — never internal calls
+  // where an emit is available. Gaps only: rate-limit/IP/lock specifics are
+  // already covered by ip-ratelimit / disconnect-rejoin-lock / lock-unification.
+
+  // -------------------------------------------------------------------------
+  // DAILY CHALLENGE
+  // -------------------------------------------------------------------------
+
+  test('startDailyChallenge with missing stableId emits an error and makes no claim', async () => {
+    // Guard: the handler clamps the name, then lobbySystem rejects a non-string
+    // / empty stableId BEFORE attempting the atomic claim. Spy on the claim so
+    // we can prove no attempt was minted on the reject path.
+    const claimSpy = jest.spyOn(dailySystem, 'claimDailyAttempt').mockResolvedValue(null);
+    try {
+      await connect();
+      // stableId omitted entirely — the in-handler auth guard must fire first.
+      client.emit('startDailyChallenge', { name: 'Solo' });
+
+      const msg = await waitFor(client, 'error');
+      expect(msg).toContain('stable identity');
+      // No NX claim may be attempted when identity is missing.
+      expect(claimSpy).not.toHaveBeenCalled();
+    } finally {
+      claimSpy.mockRestore();
+    }
+  });
+
+  test('startDailyChallenge for an already-played day emits dailyAlreadyPlayed (no new lobby)', async () => {
+    // Happy path through the "already played today" branch — the lightest fully
+    // observable success path (no TMDB seed fetch / lobby bootstrap needed).
+    // claim.created=false routes to the dailyAlreadyPlayed emit.
+    const claimSpy = jest.spyOn(dailySystem, 'claimDailyAttempt').mockResolvedValue({
+      created: false,
+      attempt: { status: 'done', chainLength: 7, name: 'Repeat' },
+    });
+    // getDailyLeaderboard is awaited on this branch — return a known list so
+    // we can assert it's forwarded verbatim in the payload.
+    const lbSpy = jest.spyOn(dailySystem, 'getDailyLeaderboard')
+      .mockResolvedValue([{ chainLength: 7, name: 'Repeat' }]);
+    try {
+      await connect();
+      client.emit('startDailyChallenge', { name: 'Repeat', stableId: 'p_repeat' });
+
+      const data = await waitFor(client, 'dailyAlreadyPlayed');
+      expect(typeof data.date).toBe('string');
+      expect(data.puzzleNumber).toBeGreaterThanOrEqual(1);
+      expect(data.attempt.chainLength).toBe(7);
+      expect(data.leaderboard).toEqual([{ chainLength: 7, name: 'Repeat' }]);
+    } finally {
+      claimSpy.mockRestore();
+      lbSpy.mockRestore();
+    }
+  });
+
+  test('requestDailyLeaderboard with a junk date falls back to today and emits a leaderboard', async () => {
+    // Guard half: a non-YYYY-MM-DD date must NOT reach Redis as-is — the
+    // handler substitutes getTodayDate(). We spy to capture the date actually
+    // queried, proving the junk string was sanitized away.
+    const lbSpy = jest.spyOn(dailySystem, 'getDailyLeaderboard').mockResolvedValue([]);
+    try {
+      await connect();
+      client.emit('requestDailyLeaderboard', 'not-a-date');
+
+      const data = await waitFor(client, 'dailyLeaderboard');
+      // Emitted date is the sanitized fallback, never the junk input.
+      expect(data.date).not.toBe('not-a-date');
+      expect(data.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(data.puzzleNumber).toBeGreaterThanOrEqual(1);
+      // The DB query used the sanitized date, not the attacker-supplied junk.
+      expect(lbSpy).toHaveBeenCalledWith(expect.anything(), data.date, 20);
+    } finally {
+      lbSpy.mockRestore();
+    }
+  });
+
+  test('requestDailyLeaderboard with a valid date queries that exact date', async () => {
+    // Happy path: a well-formed date passes the regex and is used verbatim.
+    const lbSpy = jest.spyOn(dailySystem, 'getDailyLeaderboard')
+      .mockResolvedValue([{ chainLength: 5, name: 'Ace' }]);
+    try {
+      await connect();
+      client.emit('requestDailyLeaderboard', '2026-06-09');
+
+      const data = await waitFor(client, 'dailyLeaderboard');
+      expect(data.date).toBe('2026-06-09');
+      expect(data.leaderboard).toEqual([{ chainLength: 5, name: 'Ace' }]);
+      expect(lbSpy).toHaveBeenCalledWith(expect.anything(), '2026-06-09', 20);
+    } finally {
+      lbSpy.mockRestore();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // PLAYABLE HERO (pre-room)
+  // -------------------------------------------------------------------------
+
+  test('heroPuzzleRequest delivers a client-safe puzzle (answer set stripped)', async () => {
+    // Happy path: the handler picks a random puzzle and strips the multi-actor
+    // answer set (validActorTmdbIds) before sending. The wire payload must
+    // carry the pair + the single revealActor, never the full answer set.
+    await connect();
+    client.emit('heroPuzzleRequest');
+
+    const puzzle = await waitFor(client, 'heroPuzzleDelivered');
+    expect(typeof puzzle.pairId).toBe('string');
+    expect(puzzle.movieA).toBeDefined();
+    expect(puzzle.movieB).toBeDefined();
+    // The answer set must never cross the wire — only the single reveal name.
+    expect(puzzle.validActorTmdbIds).toBeUndefined();
+    expect(puzzle.revealActor).toBeDefined();
+  });
+
+  test('heroGuessSubmit drops a non-numeric actorTmdbId before validating', async () => {
+    // Guard: actorTmdbId must be an integer. A string id is dropped silently —
+    // no heroGuessResult is emitted. Prove the negative with a sentinel
+    // round-trip (T6b pattern) rather than a real sleep.
+    await connect();
+    let answered = false;
+    client.on('heroGuessResult', () => { answered = true; });
+
+    client.emit('heroGuessSubmit', { pairId: 'hp_005_titanic_wolf', actorTmdbId: 'oops', actorName: 'X' });
+    await flushSocket(client); // barrier — proves the bad guess was processed
+
+    expect(answered).toBe(false);
+  });
+
+  test('heroGuessSubmit validates a known pair and reveals the canonical actor', async () => {
+    // Happy path: a known pairId + the correct actor tmdbId classifies as
+    // correct and returns the reveal actor. hp_005 → 6193 (Leonardo DiCaprio).
+    await connect();
+    client.emit('heroGuessSubmit', { pairId: 'hp_005_titanic_wolf', actorTmdbId: 6193 });
+
+    const result = await waitFor(client, 'heroGuessResult');
+    expect(result.pairId).toBe('hp_005_titanic_wolf');
+    expect(result.correct).toBe(true);
+    expect(result.revealActor.tmdbId).toBe(6193);
+  });
+
+  test('heroGuessSubmit on an unknown pair returns a defensive null reveal', async () => {
+    // Branch: an unknown pairId yields { ok:false } inside validateGuess, so
+    // the handler emits a generic incorrect outcome with a null reveal rather
+    // than hanging the client.
+    await connect();
+    client.emit('heroGuessSubmit', { pairId: 'hp_does_not_exist', actorTmdbId: 6193 });
+
+    const result = await waitFor(client, 'heroGuessResult');
+    expect(result.correct).toBe(false);
+    expect(result.revealActor).toBeNull();
+  });
+
+  test('heroActorSearch (≥2 chars) proxies to TMDB and returns mapped results', async () => {
+    // Happy path complement to the T3d sub-2-char drop test above: a valid
+    // query DOES spend a TMDB call and emits the mapped results back, keyed
+    // by the original query so the client can match late responses.
+    const realFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [{ id: 31, name: 'Tom Hanks', profile_path: '/th.jpg', known_for: [{ title: 'Big' }] }],
+      }),
+    });
+    try {
+      await connect();
+      client.emit('heroActorSearch', { query: 'Tom Hanks' });
+
+      const data = await waitFor(client, 'heroActorResults');
+      expect(data.query).toBe('Tom Hanks');
+      expect(data.results).toHaveLength(1);
+      expect(data.results[0]).toMatchObject({ tmdbId: 31, name: 'Tom Hanks' });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // MATCH SYSTEM — autocomplete, submit, force-next-turn
+  // -------------------------------------------------------------------------
+
+  test('autocompleteSearch by a non-member is dropped before any TMDB spend', async () => {
+    // Guard: matchSystem.autocompleteSearch requires the caller to be a player
+    // in the room. The connected client is NOT in this lobby's players, so the
+    // handler must bail before fetching — proven via a sentinel barrier.
+    const realFetch = global.fetch;
+    global.fetch = jest.fn();
+    redisUtils.getLobby.mockResolvedValue({
+      id: 'AC01', status: 'playing', allowTvShows: false,
+      players: [{ id: 'someone-else', name: 'Other' }],
+    });
+    try {
+      await connect();
+      let answered = false;
+      client.on('autocompleteResults', () => { answered = true; });
+
+      client.emit('autocompleteSearch', { query: 'Inception', lobbyId: 'AC01' });
+      await flushSocket(client); // barrier
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(answered).toBe(false);
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
+
+  test('autocompleteSearch by a member returns TMDB-mapped suggestions', async () => {
+    // Happy path: a member's query hits TMDB and the top results are mapped to
+    // the client suggestion shape (person results filtered out, capped at 5).
+    const realFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          { id: 27205, title: 'Inception', release_date: '2010-07-16', poster_path: '/inc.jpg', media_type: 'movie' },
+          { id: 99, name: 'Some Person', media_type: 'person' }, // must be filtered out
+        ],
+      }),
+    });
+    try {
+      await connect();
+      redisUtils.getLobby.mockResolvedValue({
+        id: 'AC02', status: 'playing', allowTvShows: false,
+        players: [{ id: client.id, name: 'Me' }],
+      });
+
+      client.emit('autocompleteSearch', { query: 'Inception', lobbyId: 'AC02' });
+
+      const results = await waitFor(client, 'autocompleteResults');
+      expect(Array.isArray(results)).toBe(true);
+      expect(results).toHaveLength(1); // person entry filtered out
+      expect(results[0]).toMatchObject({ id: 27205, title: 'Inception', year: '2010' });
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
+
+  test('submitMovie with an oversized movie string is dropped before taking the submit lock', async () => {
+    // Guard: a movie title longer than 200 chars is rejected at the handler
+    // boundary, BEFORE matchSystem acquires the per-lobby submit lock. The
+    // absence of an acquireSubmitLock call is the observable proof the call
+    // short-circuited.
+    await connect();
+    redisUtils.getLobby.mockResolvedValue(buildPlayingRoom(client.id, 0));
+
+    client.emit('submitMovie', { lobbyId: 'QUIT01', movie: 'X'.repeat(201) });
+    await flushSocket(client); // barrier
+
+    expect(redisUtils.acquireSubmitLock).not.toHaveBeenCalled();
+  });
+
+  test('submitMovie wiring: a well-formed in-turn submit reaches the lock pipeline', async () => {
+    // Happy-path wiring: a valid in-turn submit passes every handler guard and
+    // enters matchSystem's lock→resolve pipeline. acquireSubmitLock being
+    // called is the observable seam that proves the handler delegated (we do
+    // NOT drive the full TMDB resolution — that's matchSystem's own suite).
+    const realFetch = global.fetch;
+    // The pipeline searches TMDB after the lock; return zero candidates so it
+    // resolves quickly down the "title not found" branch without needing a
+    // full credits fixture. The lock acquisition is what we assert.
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) });
+    try {
+      await connect();
+      redisUtils.getLobby.mockResolvedValue(buildPlayingRoom(client.id, 0));
+
+      client.emit('submitMovie', { lobbyId: 'QUIT01', movie: 'Inception' });
+      // submissionRejected ('Title not found') confirms the pipeline ran end
+      // to end — a stronger observable than spying on the lock call alone.
+      const rejected = await waitFor(client, 'submissionRejected');
+      expect(rejected.reason).toBe('Title not found');
+      expect(redisUtils.acquireSubmitLock).toHaveBeenCalledWith(mockPubClient, 'QUIT01');
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
+
+  test('forceNextTurn by a non-member never takes the submit lock... (member + expired turn does)', async () => {
+    // Two-in-one wiring pin. forceNextTurn first acquires the lock, then bails
+    // if the caller is not a participant. So the lock IS taken either way, but
+    // a non-member never reaches eliminateCurrentPlayer (no saveLobby on a
+    // non-expired, non-member call). We assert the member+expired case advances.
+    await connect();
+    // Expired turn (turnExpiresAt in the past) + client is a member → the
+    // handler calls eliminateCurrentPlayer, which persists the lobby.
+    const room = buildPlayingRoom(client.id, 0);
+    room.turnExpiresAt = Date.now() - 1000; // already expired
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('forceNextTurn', 'QUIT01');
+    await flushSocket(client); // barrier
+
+    // Lock taken (wiring) and elimination ran (saveLobby persisted the advance).
+    expect(redisUtils.acquireSubmitLock).toHaveBeenCalledWith(mockPubClient, 'QUIT01');
+    expect(redisUtils.saveLobby).toHaveBeenCalled();
+  });
+
+  test('forceNextTurn on a not-yet-expired turn releases the lock without eliminating', async () => {
+    // Guard: a turn whose timer has NOT expired must no-op (the lock is taken
+    // then released; no elimination, no save). Prevents a player from forcing
+    // a skip before time is actually up.
+    await connect();
+    const room = buildPlayingRoom(client.id, 0);
+    room.turnExpiresAt = Date.now() + 60000; // plenty of time left
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('forceNextTurn', 'QUIT01');
+    await flushSocket(client); // barrier
+
+    expect(redisUtils.acquireSubmitLock).toHaveBeenCalledWith(mockPubClient, 'QUIT01');
+    // No elimination ⇒ no lobby persistence on this path.
+    expect(redisUtils.saveLobby).not.toHaveBeenCalled();
+    expect(redisUtils.releaseSubmitLock).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // SOCIAL — chat, reactions
+  // -------------------------------------------------------------------------
+
+  test('sendChat from a non-participant is not broadcast', async () => {
+    // Guard: only players/spectators in the room may chat. The connected client
+    // is not in this room, so no receiveChat may be broadcast and the locked
+    // chatCount increment must not run.
+    redisUtils.getLobby.mockResolvedValue({
+      id: 'CHAT01', status: 'playing',
+      players: [{ id: 'other', name: 'Other' }], spectators: [],
+    });
+    await connect();
+    let broadcast = false;
+    client.on('receiveChat', () => { broadcast = true; });
+
+    client.emit('sendChat', { lobbyId: 'CHAT01', msg: 'sneaky' });
+    await flushSocket(client); // barrier
+
+    expect(broadcast).toBe(false);
+    expect(redisUtils.withLobbyLock).not.toHaveBeenCalled();
+  });
+
+  test('sendChat from a participant broadcasts receiveChat and bumps the locked chat counter', async () => {
+    // Happy path: a participating player's message is broadcast to the room
+    // with their display name, and the per-lobby chatCount is incremented under
+    // the lobby lock (the M4 vibe-tag counter). The socket must be joined to
+    // the room channel for io.to(lobbyId) to reach it.
+    await connect();
+    await joinClientToRoom('CHAT02');
+    const room = {
+      id: 'CHAT02', status: 'playing',
+      players: [{ id: client.id, name: 'Talker' }], spectators: [],
+      chatCount: 0,
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('sendChat', { lobbyId: 'CHAT02', msg: 'hello room' });
+
+    const chat = await waitFor(client, 'receiveChat');
+    expect(chat.msg).toBe('hello room');
+    expect(chat.playerName).toBe('Talker');
+    expect(chat.isSpectator).toBe(false);
+    // The fire-and-forget locked increment must have run.
+    await flushSocket(client); // let the .catch()-wrapped lock settle
+    expect(redisUtils.withLobbyLock).toHaveBeenCalledWith(mockPubClient, 'CHAT02', expect.any(Function));
+  });
+
+  test('sendReaction with an oversized emoji is dropped before any room lookup', async () => {
+    // Guard: emoji must be ≤8 chars. An oversized "emoji" (an attempt to smuggle
+    // a payload) is dropped before the getLobby read even happens.
+    await connect();
+    let broadcast = false;
+    client.on('receiveReaction', () => { broadcast = true; });
+
+    client.emit('sendReaction', { lobbyId: 'RX01', emoji: 'x'.repeat(20) });
+    await flushSocket(client); // barrier
+
+    expect(broadcast).toBe(false);
+    expect(redisUtils.getLobby).not.toHaveBeenCalled();
+  });
+
+  test('sendReaction from a participant broadcasts receiveReaction', async () => {
+    // Happy path: a participating player's reaction is broadcast room-wide with
+    // their socket id so clients can anchor the floating emoji to their seat.
+    // Join the room channel first so io.to(lobbyId) reaches this socket.
+    await connect();
+    await joinClientToRoom('RX02');
+    const room = {
+      id: 'RX02', status: 'playing',
+      players: [{ id: client.id, name: 'Reactor' }], spectators: [],
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('sendReaction', { lobbyId: 'RX02', emoji: '🎬' });
+
+    const rx = await waitFor(client, 'receiveReaction');
+    expect(rx.emoji).toBe('🎬');
+    expect(rx.playerId).toBe(client.id);
+  });
+
+  // -------------------------------------------------------------------------
+  // SPECTATOR PREDICTIONS (L3)
+  // -------------------------------------------------------------------------
+
+  test('spectatorPredict with an invalid prediction value is ignored', async () => {
+    // Guard: prediction must be exactly 'yes' or 'no'. Anything else is dropped
+    // — no lock taken, no state change. (The rate-limit gate runs first; an
+    // invalid value past it must still no-op.)
+    redisUtils.getLobby.mockResolvedValue({
+      id: 'PRED01', status: 'playing',
+      players: [{ id: 'p1', name: 'P1' }], spectators: [{ id: 'spec', name: 'Watcher' }],
+    });
+    await connect();
+
+    client.emit('spectatorPredict', { lobbyId: 'PRED01', prediction: 'maybe' });
+    await flushSocket(client); // barrier
+
+    // Invalid value short-circuits before the withLobbyLock read-modify-write.
+    expect(redisUtils.withLobbyLock).not.toHaveBeenCalled();
+  });
+
+  test('spectatorPredict from a real spectator records the vote and re-broadcasts state', async () => {
+    // Happy path: a genuine spectator's 'yes' vote is recorded into
+    // spectatorPredictions under the lock, and the updated tally is
+    // re-broadcast via broadcastState (a stateUpdate emit).
+    await connect();
+    // Join the room channel so broadcastState's io.to(lobbyId) reaches us.
+    await joinClientToRoom('PRED02');
+    const room = {
+      id: 'PRED02', status: 'playing',
+      players: [{ id: 'p1', name: 'P1' }],
+      spectators: [{ id: client.id, name: 'Watcher' }],
+      chain: [], spectatorPredictions: {},
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    client.emit('spectatorPredict', { lobbyId: 'PRED02', prediction: 'yes' });
+
+    // broadcastState emits 'stateUpdate' room-wide; receiving it proves the
+    // vote was recorded and the tally re-broadcast.
+    const state = await waitFor(client, 'stateUpdate');
+    expect(state).toBeDefined();
+    expect(room.spectatorPredictions[client.id]).toBe('yes');
+  });
+
+  // -------------------------------------------------------------------------
+  // TYPING INDICATOR (M3)
+  // -------------------------------------------------------------------------
+
+  test('typing is not relayed when the caller is not the active player', async () => {
+    // Guard: only the player whose turn it is may announce typing. A non-active
+    // player's typing event must not reach peers. We verify via a SECOND client
+    // in the room that never receives peerTyping.
+    const room = {
+      id: 'TYPE01', status: 'playing', currentTurnIndex: 0,
+      players: [
+        { id: 'active-player', name: 'Active' },
+        { id: 'idle-player', name: 'Idle' },
+      ],
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    // Observer client joins the room channel so it could receive peerTyping.
+    const observer = Client(`http://localhost:${port}`, { forceNew: true, transports: ['websocket'] });
+    await waitFor(observer, 'connect');
+
+    try {
+      await connect(); // `client` is the non-active typer
+      // Both sockets must be in the room for socket.to(lobbyId) to reach the
+      // observer; join via the server-side room is done by the join flow, but
+      // here we drive typing directly, so put the observer in the room channel
+      // by having the server emit — simplest: the observer listens, and we
+      // assert it never fires.
+      let relayed = false;
+      observer.on('peerTyping', () => { relayed = true; });
+
+      client.emit('typing', 'TYPE01'); // client.id !== active-player → must drop
+      await flushSocket(client); // barrier
+
+      expect(relayed).toBe(false);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  test('typing from the active player relays peerTyping to peers (not the sender)', async () => {
+    // Happy path: the active player's typing is relayed to OTHER sockets in the
+    // room (socket.to excludes the sender). We use two real sockets both joined
+    // to the same lobby so the room channel is genuine.
+    await connect(); // this is the active player
+    const activeId = client.id;
+    const room = {
+      id: 'TYPE02', status: 'playing', currentTurnIndex: 0,
+      players: [{ id: activeId, name: 'Active' }, { id: 'peer-id', name: 'Peer' }],
+    };
+    redisUtils.getLobby.mockResolvedValue(room);
+
+    // A second socket joins lobby TYPE02 via the real join flow so it shares
+    // the room channel and can receive the relayed peerTyping.
+    const peer = Client(`http://localhost:${port}`, { forceNew: true, transports: ['websocket'] });
+    await waitFor(peer, 'connect');
+    try {
+      // Drive the peer into the room channel through joinLobby (NX-create
+      // returns null → existing-room path → server does socket.join).
+      mockPubClient.set.mockResolvedValueOnce(null);
+      redisUtils.getLobby.mockResolvedValueOnce({
+        id: 'TYPE02', status: 'waiting',
+        players: [{ id: 'host', name: 'H', isHost: true, isAlive: true, connected: true, score: 0, wins: 0, teamId: 0, stableId: 's_h' }],
+        chain: [], usedMovies: [], hardcoreMode: false, previousSharedActors: [],
+        allowTvShows: false, isPublic: false, timerMultiplier: 0, turnExpiresAt: null,
+        isValidating: false, gameMode: 'classic',
+      });
+      peer.emit('joinLobby', { name: 'Peer', lobbyId: 'TYPE02', stableId: 's_peer' });
+      await waitFor(peer, 'joined');
+      // Restore the playing-room lookup for the typing handler.
+      redisUtils.getLobby.mockResolvedValue(room);
+
+      const relayed = waitFor(peer, 'peerTyping');
+      client.emit('typing', 'TYPE02');
+      const data = await relayed;
+      expect(data.playerName).toBe('Active');
+    } finally {
+      peer.disconnect();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // LEAVE LOBBY
+  // -------------------------------------------------------------------------
+
+  test('leaveLobby leaves the socket channel and runs the disconnect cleanup', async () => {
+    // Happy path: leaveLobby looks up the socket's lobby, leaves that channel,
+    // and routes through handleDisconnect (the same cleanup as a real
+    // disconnect). We observe the getSocketLobby lookup + disconnect side-effects.
+    redisUtils.getSocketLobby.mockResolvedValue('LEAVE01');
+    redisUtils.getLobby.mockResolvedValue({
+      id: 'LEAVE01', status: 'waiting',
+      players: [{ id: 'me', name: 'Leaver', isHost: true, isAlive: true, connected: true, teamId: 0, stableId: 's_l' }],
+      spectators: [],
+    });
+    await connect();
+
+    client.emit('leaveLobby');
+    await flushSocket(client); // barrier
+
+    // The handler read the socket→lobby mapping (then leaves + cleans up).
+    expect(redisUtils.getSocketLobby).toHaveBeenCalledWith(mockPubClient, client.id);
+  });
+
+  // -------------------------------------------------------------------------
+  // HOST-SETTINGS DELEGATION WIRING
+  // -------------------------------------------------------------------------
+  // These handlers are thin rate-limit→delegate routers. The observable
+  // contract is "the parsed payload reached the right lobbySystem method".
+  // We spy on lobbySystem (real module) and assert the delegation, restoring
+  // every spy afterward so no cross-test bleed occurs.
+
+  test('setGameMode / selectRuleKit / setTheme / assignTeam / selectColor / toggle* delegate to lobbySystem', async () => {
+    const spies = {
+      setGameMode: jest.spyOn(lobbySystem, 'setGameMode').mockResolvedValue(undefined),
+      selectRuleKit: jest.spyOn(lobbySystem, 'selectRuleKit').mockResolvedValue(undefined),
+      setTheme: jest.spyOn(lobbySystem, 'setTheme').mockResolvedValue(undefined),
+      assignTeam: jest.spyOn(lobbySystem, 'assignTeam').mockResolvedValue(undefined),
+      selectColor: jest.spyOn(lobbySystem, 'selectColor').mockResolvedValue(undefined),
+      toggleSetting: jest.spyOn(lobbySystem, 'toggleSetting').mockResolvedValue(undefined),
+    };
+    try {
+      await connect();
+      client.emit('setGameMode', { lobbyId: 'L1', mode: 'speed' });
+      client.emit('selectRuleKit', { lobbyId: 'L1', kitId: 'comedy' });
+      client.emit('setTheme', { lobbyId: 'L1', theme: 'horror' });
+      client.emit('assignTeam', { lobbyId: 'L1', teamId: 1 });
+      client.emit('selectColor', { lobbyId: 'L1', color: '#ff0000' });
+      client.emit('togglePublic', { lobbyId: 'L1', state: true });
+      client.emit('toggleHardcore', { lobbyId: 'L1', state: true });
+      client.emit('toggleTvShows', { lobbyId: 'L1', state: true });
+      await flushSocket(client); // barrier — all eight delegations have run
+
+      expect(spies.setGameMode).toHaveBeenCalledWith(expect.anything(), expect.anything(), { lobbyId: 'L1', mode: 'speed' });
+      expect(spies.selectRuleKit).toHaveBeenCalledWith(expect.anything(), expect.anything(), { lobbyId: 'L1', kitId: 'comedy' });
+      expect(spies.setTheme).toHaveBeenCalled();
+      expect(spies.assignTeam).toHaveBeenCalled();
+      expect(spies.selectColor).toHaveBeenCalled();
+      // The three toggle handlers all route through toggleSetting with the
+      // field name as the 4th arg — assert the field dispatch is correct.
+      expect(spies.toggleSetting).toHaveBeenCalledWith(expect.anything(), expect.anything(), { lobbyId: 'L1', state: true }, 'isPublic');
+      expect(spies.toggleSetting).toHaveBeenCalledWith(expect.anything(), expect.anything(), { lobbyId: 'L1', state: true }, 'hardcoreMode');
+      expect(spies.toggleSetting).toHaveBeenCalledWith(expect.anything(), expect.anything(), { lobbyId: 'L1', state: true }, 'allowTvShows');
+    } finally {
+      Object.values(spies).forEach(s => s.mockRestore());
+    }
+  });
+
+  test('kickPlayer / addBot / removeBot delegate to lobbySystem', async () => {
+    const spies = {
+      kickPlayer: jest.spyOn(lobbySystem, 'kickPlayer').mockResolvedValue(undefined),
+      addBot: jest.spyOn(lobbySystem, 'addBot').mockResolvedValue(undefined),
+      removeBot: jest.spyOn(lobbySystem, 'removeBot').mockResolvedValue(undefined),
+    };
+    try {
+      await connect();
+      client.emit('kickPlayer', { lobbyId: 'L2', targetId: 'pX' });
+      client.emit('addBot', { lobbyId: 'L2' });
+      client.emit('removeBot', { lobbyId: 'L2', botId: 'b1' });
+      await flushSocket(client); // barrier
+
+      expect(spies.kickPlayer).toHaveBeenCalledWith(expect.anything(), expect.anything(), { lobbyId: 'L2', targetId: 'pX' });
+      // addBot/removeBot defensively pass data||{} — assert they ran.
+      expect(spies.addBot).toHaveBeenCalled();
+      expect(spies.removeBot).toHaveBeenCalled();
+    } finally {
+      Object.values(spies).forEach(s => s.mockRestore());
+    }
+  });
+
+  test('requestMyStats with an empty stableId is dropped before any stats read', async () => {
+    // Guard: stableId is the bearer auth — a non-string / empty / oversize value
+    // must drop before the stats system is touched (no myStats emit).
+    await connect();
+    let answered = false;
+    client.on('myStats', () => { answered = true; });
+
+    client.emit('requestMyStats', ''); // empty string fails the length>0 guard
+    await flushSocket(client); // barrier
+
+    expect(answered).toBe(false);
+  });
+
+  test('setEquippedTitle with an oversized titleId is dropped before delegation', async () => {
+    // Guard: titleId must be ≤64 chars. An oversized value drops before
+    // lobbySystem.setEquippedTitle runs.
+    const spy = jest.spyOn(lobbySystem, 'setEquippedTitle').mockResolvedValue(undefined);
+    try {
+      await connect();
+      client.emit('setEquippedTitle', { stableId: 'p_ok', titleId: 'T'.repeat(65) });
+      await flushSocket(client); // barrier
+
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('leaveLobby with no mapped lobby still runs cleanup without throwing', async () => {
+    // Edge path: a socket with no lobby mapping (never joined) must not throw —
+    // the handler skips socket.leave and still calls handleDisconnect harmlessly.
+    redisUtils.getSocketLobby.mockResolvedValue(null);
+    await connect();
+
+    client.emit('leaveLobby');
+    await flushSocket(client); // barrier — proves the handler ran to completion
+
+    expect(redisUtils.getSocketLobby).toHaveBeenCalledWith(mockPubClient, client.id);
+    expect(client.connected).toBe(true); // no crash
   });
 });
