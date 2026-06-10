@@ -520,6 +520,30 @@ async function recordPlayerWinAtomic(pubClient, stableId, name) {
 const LOBBY_MUTEX_PREFIX = 'lock:lobbymut:';
 const LOBBY_MUTEX_TTL_MS = 5000;
 
+// T8a audit fix: spin-acquire budget. The OLD budget was 25 × 20ms = 500ms —
+// an ORDER OF MAGNITUDE shorter than the 5000ms lock TTL, so a section that
+// legitimately ran long (mutators that await Redis inside the critical section,
+// e.g. joinLobby reading wins/title data under slow Redis) made a concurrent
+// caller exhaust the budget and fall through to an UNLOCKED save (the bug).
+// The new budget (≈110 × 50ms ≈ 5.5s) comfortably EXCEEDS the TTL: a live
+// holder's section is short so we normally acquire in a spin or two; a CRASHED
+// holder's lock self-frees at the PX TTL, so waiting slightly past the TTL
+// guarantees acquisition unless there is sustained back-to-back contention —
+// at which point we now DECLINE (return null) rather than save unlocked.
+// SPIN_INTERVAL_MS is env-tunable so tests can drive the full budget in
+// milliseconds (no real multi-second sleeps) without changing the prod default.
+// It is resolved PER CALL (via _spinIntervalMs) rather than frozen at require
+// time so a test can override the env after this module is already loaded.
+const LOBBY_MUTEX_SPIN_ATTEMPTS = 110;
+const LOBBY_MUTEX_SPIN_INTERVAL_MS_DEFAULT = 50;
+function _spinIntervalMs() {
+  const raw = Number(process.env.LOBBY_MUTEX_SPIN_INTERVAL_MS);
+  // Only honor a finite, non-negative override; anything else uses the default.
+  return Number.isFinite(raw) && raw >= 0 ? raw : LOBBY_MUTEX_SPIN_INTERVAL_MS_DEFAULT;
+}
+// Exported snapshot of the effective interval for the budget>TTL assertion.
+const LOBBY_MUTEX_SPIN_INTERVAL_MS = _spinIntervalMs();
+
 // opts.seedRoom: used ONLY when getLobby returns null. joinLobby just
 // NX-created the key, so in production the in-lock read finds it; the seed
 // preserves the old `isNewLobby ? initialRoom : getLobby` semantic (and
@@ -543,17 +567,33 @@ async function withLobbyLock(pubClient, id, mutator, opts = {}) {
   const token = require('crypto').randomBytes(16).toString('hex');
   const lockKey = `${LOBBY_MUTEX_PREFIX}${id}`;
 
-  // Bounded spin-acquire. Lobby critical sections are sub-millisecond, so a
-  // contended caller normally gets in within a spin or two. If we exhaust
-  // the budget (a holder is pathologically slow, or died and we're waiting
-  // on the PX TTL) we proceed UNLOCKED rather than drop the user's action
-  // entirely — same best-effort tradeoff getOrFetchCredits makes for its
-  // stampede lock. The PX TTL bounds worst-case staleness.
+  // Bounded spin-acquire. Lobby critical sections are short, so a contended
+  // caller normally gets in within a spin or two. T8a: the budget now exceeds
+  // LOBBY_MUTEX_TTL_MS (see the constants above) so genuine exhaustion is rare
+  // — a live holder finishes fast and a crashed holder's lock self-frees at the
+  // PX TTL within this window.
   let acquired = false;
-  for (let i = 0; i < 25; i++) {
+  const spinIntervalMs = _spinIntervalMs(); // resolved per call (test-overridable)
+  for (let i = 0; i < LOBBY_MUTEX_SPIN_ATTEMPTS; i++) {
     const res = await pubClient.set(lockKey, token, { NX: true, PX: LOBBY_MUTEX_TTL_MS });
     if (res === 'OK') { acquired = true; break; }
-    await new Promise(r => setTimeout(r, 20));
+    await new Promise(r => setTimeout(r, spinIntervalMs));
+  }
+
+  // T8a audit fix: on TRUE exhaustion, DECLINE the mutation instead of running
+  // it unlocked. The pre-fix code fell through here and did
+  // getLobby→mutator→saveLobby with acquired=false, so a full lobby blob was
+  // written with NO mutex held — clobbering any write a concurrent locked
+  // section committed during the spin (the exact lost-update withLobbyLock
+  // exists to prevent; unlike getOrFetchCredits' stampede lock, proceeding
+  // unlocked here CORRUPTS state, it doesn't merely waste a fetch). Returning
+  // null is the existing "lobby unavailable" signal every caller already
+  // handles, so a declined mutation becomes a clean, rare, retryable transient
+  // failure. Log via the module's lazy logger (added in T1d-ext) so we can see
+  // sustained contention in prod without instantiating pino at require time.
+  if (!acquired) {
+    _getLogger().warn({ lobbyId: id }, 'withLobbyLock spin exhausted — declining mutation (no unlocked save)');
+    return null;
   }
 
   try {
@@ -660,6 +700,12 @@ module.exports = {
   releaseSubmitLock,
   // Audit finding #4: per-lobby mutation mutex for all non-submit RMW paths.
   withLobbyLock,
+  // T8a: spin-budget + TTL constants exported so tests can assert the budget
+  // exceeds the TTL (the invariant that makes genuine exhaustion rare) without
+  // hard-coding the numbers in a second place that could drift.
+  LOBBY_MUTEX_TTL_MS,
+  LOBBY_MUTEX_SPIN_ATTEMPTS,
+  LOBBY_MUTEX_SPIN_INTERVAL_MS,
   recordPlayerWinAtomic,
   getLeaderboard,
   // Audit finding #10: full-ZSET sweep to bound unbounded leaderboard growth.
