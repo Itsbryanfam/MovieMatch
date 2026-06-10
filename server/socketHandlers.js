@@ -22,6 +22,9 @@ const redisUtils = require('./redisUtils');
 // T3a audit fix: shared rightmost-XFF client-IP derivation — same helper the
 // io.use() connection throttle uses, so HTTP and socket layers agree on IPs.
 const { deriveClientIp } = require('./clientIp');
+// T4f audit fix: the player hard-cap is server-authoritative — emit it on
+// connect so the client renders the cap dynamically instead of hardcoding '/ 8'.
+const { MAX_PLAYERS_PER_LOBBY } = require('./constants');
 const pino = require('pino');
 const logger = pino();
 
@@ -234,6 +237,14 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     } catch {
       // No kits is degenerate — the chip strip simply stays empty.
     }
+
+    // T4f audit fix: emit the server-authoritative config (currently just the
+    // player hard-cap) once per connection — same connect-time, fire-once
+    // pattern as posters/themesList/ruleKitsList. The client renders the public-
+    // lobby "N / max" count from this instead of a hardcoded '/ 8', so the cap
+    // can never drift between MAX_PLAYERS_PER_LOBBY and the UI. Tiny payload,
+    // sent once; the client falls back to 8 if this event hasn't arrived yet.
+    socket.emit('serverConfig', { maxPlayers: MAX_PLAYERS_PER_LOBBY });
 
     // Every handler below registers via safeOn instead of socket.on directly.
     // safeOn wraps the handler in a try/catch so an unhandled rejection can't

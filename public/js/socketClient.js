@@ -43,6 +43,14 @@ import {
 // self-elimination screen can take the stage without overlap.
 let selfElimActive = false;
 
+// T4f audit fix: server-authoritative player cap, delivered via the
+// 'serverConfig' connect-time event. Module-local with a fallback of 8 so the
+// public-lobby "N / max" count renders correctly even before the event arrives
+// (or if an old server never sends it). Updated in the serverConfig handler;
+// read by the publicLobbiesList renderer below. Single source of truth on the
+// client so the cap can never be hardcoded out of sync with the server.
+let serverMaxPlayers = 8;
+
 // H3: Most recent `youWereEliminated` payload, buffered so it can be picked
 // up by the alive→dead transition handler in stateUpdate. The events arrive
 // in this order: youWereEliminated → notification → stateUpdate, so by the
@@ -151,7 +159,9 @@ export function initSocket() {
       stats.className = 'public-lobby-stats';
 
       const countSpan = document.createElement('span');
-      countSpan.textContent = '👥 ' + lobby.playerCount + ' / 8';
+      // T4f: render the cap from the server-delivered serverMaxPlayers (falls
+      // back to 8 pre-event) instead of a hardcoded '/ 8' literal.
+      countSpan.textContent = '👥 ' + lobby.playerCount + ' / ' + serverMaxPlayers;
       stats.appendChild(countSpan);
 
       // M4: Last-game chain-length stat. Only shown when the lobby has
@@ -239,6 +249,16 @@ export function initSocket() {
     renderRuleKitChips(kits, container, (kitId) => {
       socket.emit('selectRuleKit', { lobbyId: getCurrentLobbyId(), kitId });
     });
+  });
+
+  // T4f audit fix: server-authoritative config. Currently just the player
+  // hard-cap, used by the publicLobbiesList renderer's "N / max" count. Guard
+  // the value so a malformed/old payload can't blank the cap — only a positive
+  // integer replaces the fallback of 8.
+  socket.on('serverConfig', (cfg) => {
+    if (cfg && Number.isInteger(cfg.maxPlayers) && cfg.maxPlayers > 0) {
+      serverMaxPlayers = cfg.maxPlayers;
+    }
   });
 
   // -----------------------------------------------------------------------
