@@ -650,6 +650,19 @@ async function startDailyChallenge(ctx, socket, { name, stableId }) {
   gameLogic.resetTimer(room);
 
   await redisUtils.saveLobby(pubClient, lobbyId, room);
+  // T4a audit fix: register the daily lobby in the activeLobbies set and arm
+  // its first-turn watchdog — joinLobby does both for regular lobbies, but
+  // this bespoke daily-bootstrap path skipped them entirely. WHY it matters:
+  // boot-recovery (recoverActiveTurns) and the 30s sweep (sweepMissingTurnWatchdogs)
+  // BOTH iterate the activeLobbies set, so an unregistered daily run is invisible
+  // to them — a deploy mid-run strands the attempt 'in_progress' with no server
+  // watchdog, locking the player out of today's puzzle until the next UTC day.
+  // addToActiveLobbies makes the lobby recoverable; armTurnTimeout gives the
+  // opening (post-seed) turn the same server backstop every other game gets.
+  // deleteLobby already sRem's the id from activeLobbies on cleanup, so this
+  // adds no leak. Both are post-save, matching joinLobby/startGame ordering.
+  await redisUtils.addToActiveLobbies(pubClient, lobbyId);
+  gameLogic.armTurnTimeout(io, pubClient, lobbyId, room);
   await redisUtils.setSocketLobby(pubClient, socket.id, lobbyId);
   socket.join(lobbyId);
 
