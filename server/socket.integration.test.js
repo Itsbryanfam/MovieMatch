@@ -496,11 +496,24 @@ describe('Socket.io Integration', () => {
   // the limiter reporting "exceeded", these handlers must bail BEFORE doing
   // any Redis work. The shared mock returns count=1 by default, so for these
   // tests we force the limiter over its threshold.
+  // T6b: call-counting force so the FIRST rate-limit check (the handler under
+  // test) sees an over-limit count and bails, while LATER checks see a normal
+  // count. This lets the flushSocket() sentinel — itself a rate-limited event —
+  // pass the limiter so its reply can serve as the deterministic barrier. Per
+  // Socket.IO per-socket ordering, the suspect handler's exec() runs before the
+  // sentinel's, so the suspect always gets the over-limit count.
   function forceRateLimitExceeded() {
+    let firstExec = true;
     mockPubClient.multi.mockReturnValue({
       incr: jest.fn().mockReturnThis(),
       expire: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue([999, 1]), // count=999 ≫ any limit
+      exec: jest.fn().mockImplementation(() => {
+        // First exec after the force = the suspect event → over the limit.
+        // Subsequent execs (the sentinel) = a normal count so it goes through.
+        const count = firstExec ? 999 : 1;
+        firstExec = false;
+        return Promise.resolve([count, 1]);
+      }),
     });
   }
 
@@ -509,7 +522,10 @@ describe('Socket.io Integration', () => {
     forceRateLimitExceeded();
 
     client.emit('requestPublicLobbies');
-    await new Promise(resolve => setTimeout(resolve, 250));
+    // T6b: deterministic barrier instead of a 250ms sleep — the sentinel reply
+    // can only arrive after the requestPublicLobbies handler already ran (and
+    // bailed at the limiter), so the negative assertion below is race-free.
+    await flushSocket(client);
 
     // The expensive getAllLobbies fan-out must not run when over the limit.
     expect(redisUtils.getAllLobbies).not.toHaveBeenCalled();
@@ -524,7 +540,7 @@ describe('Socket.io Integration', () => {
     client.on('rejoinFailed', () => { responded = true; });
 
     client.emit('rejoinLobby', { lobbyId: 'ANY01', playerId: 'x', stableId: 's_x' });
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await flushSocket(client); // T6b: sentinel barrier replaces the sleep
 
     // Handler must return at the limiter, before any room lookup or reply —
     // otherwise the leak/takeover surface (finding #1) is trivially loopable.
@@ -554,8 +570,11 @@ describe('Socket.io Integration', () => {
     // The connected client's socket.id won't match 'host-id', so it's not the host
     client.emit('setGameMode', { lobbyId: 'MODE01', mode: 'speed' });
 
-    // Wait a beat — if it were accepted, saveLobby would be called
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // T6b: sentinel barrier instead of a sleep — once the sentinel replies we
+    // know setGameMode was already processed, so the negative saveLobby
+    // assertion is deterministic. (setGameMode is not rate-limit-forced here,
+    // so the dailyLeaderboard sentinel passes the limiter normally.)
+    await flushSocket(client);
 
     // setGameMode saves the lobby if accepted. Since we're not the host, it should NOT have saved.
     // saveLobby might have been called 0 times, or if the error boundary swallows it, also 0 times.
@@ -583,7 +602,10 @@ describe('Socket.io Integration', () => {
     redisUtils.getLobby.mockResolvedValue(room);
 
     client.emit('startLobby', 'RESET1');
-    await new Promise(resolve => setTimeout(resolve, 250));
+    // T6b: sentinel barrier replaces the sleep — startLobby on an already-
+    // playing lobby is a no-op, so once the sentinel replies (processed after
+    // startLobby was invoked) the negative assertions below are race-free.
+    await flushSocket(client);
 
     // startGame (if wrongly invoked) clears chain/usedMovies and revives
     // players. None of that may happen on an already-playing lobby.
@@ -623,14 +645,19 @@ describe('Socket.io Integration', () => {
 
   test('quitGame on your own turn eliminates you and saves the lobby', async () => {
     await connect();
+    // T6b: join the room channel so the elimination's terminal stateUpdate
+    // broadcast (io.to(lobbyId)) actually reaches us — that broadcast is the
+    // LAST thing the eliminate path does, so waiting on it is a true completion
+    // barrier (replaces the 250ms sleep, which only hoped the async chain was
+    // done). buildPlayingRoom uses 'QUIT01', so we join that channel.
+    await joinClientToRoom('QUIT01');
     const room = buildPlayingRoom(client.id, 0);
     redisUtils.getLobby.mockResolvedValue(room);
+    redisUtils.saveLobby.mockClear(); // ignore the join flow's own saves
 
+    const settled = waitFor(client, 'stateUpdate'); // terminal broadcast
     client.emit('quitGame', 'QUIT01');
-
-    // Wait for the elimination to land — the handler is async so we can't
-    // await the emit directly. 250ms is plenty for the local in-memory path.
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await settled;
 
     // The quitter must be marked dead — that's the whole point of the
     // feature. Without this assertion a regression that no-ops the handler
@@ -643,12 +670,16 @@ describe('Socket.io Integration', () => {
 
   test('quitGame on someone else’s turn marks you dead without disturbing the active player', async () => {
     await connect();
+    // T6b: same room-channel barrier — the else-branch ends with a broadcastState
+    // (stateUpdate) after recording the quit, so we wait on that instead of sleeping.
+    await joinClientToRoom('QUIT01');
     // currentTurnIndex=1 → the OTHER player has the turn; client is index 0.
     const room = buildPlayingRoom(client.id, 1);
     redisUtils.getLobby.mockResolvedValue(room);
 
+    const settled = waitFor(client, 'stateUpdate'); // terminal broadcast
     client.emit('quitGame', 'QUIT01');
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await settled;
 
     // Only the quitter is marked dead — the active player is untouched.
     expect(room.players[0].isAlive).toBe(false);
@@ -666,7 +697,11 @@ describe('Socket.io Integration', () => {
     redisUtils.getLobby.mockResolvedValue(room);
 
     client.emit('quitGame', 'QUIT01');
-    await new Promise(resolve => setTimeout(resolve, 250));
+    // T6b: sentinel barrier replaces the sleep. The not-playing branch early-
+    // returns and NEVER mutates isAlive on any timing, so once the sentinel
+    // (which is processed strictly after quitGame is invoked) replies, the
+    // negative assertion is race-free.
+    await flushSocket(client);
 
     // The player should NOT be marked dead — they're in the lobby, not a game.
     // (Use leaveLobby for that flow.) Regression-guards a path that'd cause a
@@ -693,18 +728,29 @@ describe('Socket.io Integration', () => {
 
       let answered = false;
       client.on('heroActorResults', () => { answered = true; });
+      // Snapshot the limiter-pipeline call count BEFORE the suspect emit. The
+      // flushSocket() sentinel below is itself a rate-limited event, so it adds
+      // exactly ONE multi() call — we assert the suspect query contributed ZERO
+      // by checking the delta is exactly the sentinel's single call. (A plain
+      // "not.toHaveBeenCalled()" would be polluted by the sentinel; this is the
+      // deterministic-barrier equivalent that still proves the guard killed the
+      // query before the limiter ran.)
+      const multiCallsBefore = mockPubClient.multi.mock.calls.length;
       // ' a ' trims to a single char — the guard is min-2 AFTER trim, so
       // whitespace padding can't smuggle a junk query through.
       client.emit('heroActorSearch', { query: ' a ' });
-      await new Promise(resolve => setTimeout(resolve, 250));
+      // T6b: sentinel barrier replaces the 250ms sleep. Per per-socket ordering,
+      // the heroActorSearch handler ran (and synchronously early-returned at the
+      // sub-2-char guard) before this sentinel reply arrives.
+      await flushSocket(client);
 
       expect(answered).toBe(false);
       // Zero TMDB spend…
       expect(global.fetch).not.toHaveBeenCalled();
       // …and zero limiter spend: the rate-limit pipeline runs through
-      // pubClient.multi(), which must never have been started for a query
-      // the guard should kill first.
-      expect(mockPubClient.multi).not.toHaveBeenCalled();
+      // pubClient.multi(). The only multi() since the snapshot is the sentinel's
+      // own one call — the guarded query spent none.
+      expect(mockPubClient.multi.mock.calls.length).toBe(multiCallsBefore + 1);
     } finally {
       global.fetch = realFetch;
     }
@@ -723,8 +769,12 @@ describe('Socket.io Integration', () => {
     // This will trigger the error inside the handler
     client.emit('sendChat', { lobbyId: 'ANY01', msg: 'hello' });
 
-    // Wait a beat for the error to be caught
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // T6b: sentinel barrier replaces the 300ms sleep. The sentinel
+    // (requestDailyLeaderboard) does NOT touch getLobby — which is mocked to
+    // reject here — so it still replies, and its reply proves the erroring
+    // sendChat was processed (and swallowed by the error boundary) without
+    // tearing down the connection.
+    await flushSocket(client);
 
     // The socket should still be connected (error boundary caught the throw)
     expect(client.connected).toBe(true);
