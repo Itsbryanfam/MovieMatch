@@ -76,6 +76,48 @@ test('throws on non-ok TMDB response (after draining body)', async () => {
 // turn over a transient blip unrelated to the fetch. Pinned contract: once
 // TMDB has answered, a Redis-only write-back failure must never change the
 // return value (log and continue with the credits already in hand).
+// T7d audit fix (2026-06-09): read-path symmetry. T4i isolated only the
+// WRITE-back. The initial cache `get`, its `JSON.parse`, the stampede-lock
+// `set`, and the retry `get` were still bare — the same asymmetry T1d fixed
+// for getOrFetchCredits (commit 09cf70f). Blast radius is benign (only
+// botSystem calls this; a flap → the bot whiffs its turn, never a human
+// elimination) but a corrupt cached entry used to throw SyntaxError and the
+// bad entry persisted to its TTL. Pinned contract: any cache read/parse error
+// degrades to a MISS and proceeds to the TMDB fetch — never throws.
+test('T7d: initial cache GET rejects → fetch still attempted, real credits returned', async () => {
+  const pub = mockPubClient();
+  // The first read (cache lookup) flaps; the lock-set + any retry succeed.
+  pub.get.mockRejectedValueOnce(new Error('Socket closed unexpectedly'));
+  global.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ cast: [{ id: 1, title: 'Alpha', release_date: '1999-05-01', popularity: 42.5 }] }),
+  });
+
+  // Pre-fix this REJECTED with the Redis error instead of degrading to a miss.
+  await expect(redisUtils.getOrFetchPersonCredits(pub, 555, HEADERS))
+    .resolves.toEqual({ movies: [{ id: 1, title: 'Alpha', year: '1999', popularity: 42.5 }] });
+  // The fetch was reached despite the read flap (the whole point of degrade-to-miss).
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+});
+
+test('T7d: corrupt cached JSON is a MISS — no throw, fetch self-heals the entry', async () => {
+  const pub = mockPubClient();
+  // Torn write / manual poke: a non-JSON blob sits in the cache.
+  pub._store.set('personcredits:v1:555', '{ not valid json');
+  global.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ cast: [{ id: 1, title: 'Alpha', release_date: '1999-05-01', popularity: 42.5 }] }),
+  });
+
+  // Pre-fix the JSON.parse threw SyntaxError out of the function.
+  await expect(redisUtils.getOrFetchPersonCredits(pub, 555, HEADERS))
+    .resolves.toEqual({ movies: [{ id: 1, title: 'Alpha', year: '1999', popularity: 42.5 }] });
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  // The fresh write-back replaced the corrupt blob (self-heal).
+  expect(JSON.parse(pub._store.get('personcredits:v1:555')))
+    .toEqual({ movies: [{ id: 1, title: 'Alpha', year: '1999', popularity: 42.5 }] });
+});
+
 test('T4i: write-back SET rejects after successful fetch → real credits still returned, no throw', async () => {
   const pub = mockPubClient();
   pub.set.mockImplementation(async (k, v, opts) => {

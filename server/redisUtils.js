@@ -332,16 +332,51 @@ async function getOrFetchPersonCredits(pubClient, personId, headers) {
   // fetch — same invariant as getOrFetchCredits.
   const lockKey = `${cacheKey}:fetching`;
 
-  const cached = await pubClient.get(cacheKey);
-  if (cached) return JSON.parse(cached);
+  // T7d audit fix: read-path symmetry with getOrFetchCredits' T1d discipline.
+  // node-redis v4 rejects in-flight commands on a socket flap, so a bare
+  // `get` + `JSON.parse` here used to propagate (a flap rejected the lookup;
+  // a corrupt cached blob threw SyntaxError and persisted to TTL). Degrade to
+  // cache-MISS: any read/parse error → fall through to the TMDB fetch (the
+  // actual source of truth), which self-heals the entry on its write-back.
+  // eslint-disable-next-line no-useless-assignment -- the `= null` init is intentional defensive scaffolding paired with the catch below (cache-miss-on-Redis-flap semantics — see the multi-line WHY above). Mirrors the identical disable in getOrFetchCredits.
+  let cached = null;
+  try {
+    cached = await pubClient.get(cacheKey);
+  } catch {
+    cached = null; // flap = miss; TMDB below is the actual source of truth
+  }
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {
+      // Corrupt entry (torn write / manual poke) → miss; the write-back below
+      // overwrites the bad blob with fresh credits.
+    }
+  }
 
   // NX claim: only one worker fetches an uncached person; the rest wait+retry
   // the cache. Without it, a busy bot turn could fan out duplicate TMDB calls.
-  const gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
-  if (!gotLock) {
+  // T7d: a REJECTED lock-set (Redis flap) forfeits stampede protection for
+  // this call rather than throwing — a duplicate TMDB fetch is the acceptable
+  // price (same tradeoff getOrFetchCredits makes), and lockSubsystemUp gates
+  // the wait-and-retry so we don't burn 250ms retrying a flapping Redis.
+  let gotLock = null;
+  let lockSubsystemUp = true;
+  try {
+    gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
+  } catch {
+    lockSubsystemUp = false;
+  }
+  if (!gotLock && lockSubsystemUp) {
     await new Promise(r => setTimeout(r, 250));
-    const retry = await pubClient.get(cacheKey);
-    if (retry) return JSON.parse(retry);
+    // T7d: the retry read degrades identically — a flap or corrupt JSON here
+    // means we fetch ourselves rather than reject out to the bot generator.
+    try {
+      const retry = await pubClient.get(cacheKey);
+      if (retry) return JSON.parse(retry);
+    } catch {
+      // fall through and fetch ourselves
+    }
     // Fall through and fetch ourselves rather than hang the bot's turn.
   }
 
