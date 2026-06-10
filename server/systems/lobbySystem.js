@@ -882,7 +882,22 @@ async function quitGame(ctx, socket, lobbyId) {
       // 'info' kind = no shake/sound effects — quitting isn't a strategic
       // failure to celebrate or mourn, just a player departing.
       io.to(lobbyId).emit('notification', { msg: `${quitter.name} quit the game.`, kind: 'info' });
-      await gameLogic.checkWinCondition(io, pubClient, lobbyId, updated);
+      // T4j audit fix (from the T2 review concern #1): checkWinCondition can
+      // saveLobby (the finish transition), and it used to run HERE, AFTER the
+      // withLobbyLock section above released — an unlocked RMW one
+      // recordPlayerWinAtomic round-trip wide, so a concurrent submit/quit
+      // landing in that window could be clobbered by the finish save. Run it
+      // INSIDE a second withLobbyLock section on a FRESH in-lock re-read.
+      // checkWinCondition owns its own persistence/broadcast/scheduleGameReset
+      // (it saves only when a win actually triggers), so the mutator returns
+      // false to DECLINE withLobbyLock's trailing save — the isAlive=false above
+      // is already persisted, and a no-win check has nothing to save. Verified
+      // checkWinCondition takes NEITHER the submit lock NOR lobbymut, so calling
+      // it inside this mutator creates no re-entrancy / lock-order inversion.
+      await redisUtils.withLobbyLock(pubClient, lobbyId, async (fresh) => {
+        await gameLogic.checkWinCondition(io, pubClient, lobbyId, fresh);
+        return false; // checkWinCondition persisted any finish itself
+      });
       const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
       if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
     }
@@ -1092,7 +1107,17 @@ async function handleDisconnect(ctx, socketId) {
               changed = true;
             });
             if (changed && updated) {
-              await gameLogic.checkWinCondition(io, pubClient, lobbyId, updated);
+              // T4j audit fix: same post-lock unlocked win-check as quitGame's
+              // else branch — run checkWinCondition INSIDE a second
+              // withLobbyLock section on a FRESH re-read so its finish save
+              // can't clobber a concurrent write. checkWinCondition owns its
+              // own persistence; the mutator returns false to decline the
+              // trailing save (the isAlive=false above is already persisted).
+              // No re-entrancy: checkWinCondition takes neither lock class.
+              await redisUtils.withLobbyLock(pubClient, lobbyId, async (fresh) => {
+                await gameLogic.checkWinCondition(io, pubClient, lobbyId, fresh);
+                return false;
+              });
               const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
               if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
             }
