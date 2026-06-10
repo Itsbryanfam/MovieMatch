@@ -174,7 +174,10 @@ export async function loadLeaderboard() {
       row.appendChild(wins);
       leaderboardList.appendChild(row);
     });
-  } catch (err) {
+  } catch {
+    // T7e: optional catch binding — the error object is never read (we render a
+    // fixed user-facing message regardless of cause), so drop the unused `err`
+    // param to match the codebase idiom (see the other bare `catch {}` sites).
     leaderboardList.innerHTML = '';
     const errorDiv = document.createElement('div');
     errorDiv.className = 'empty-hint empty-hint--lg';
