@@ -100,3 +100,72 @@ describe('audit #4 — withLobbyLock serializes lobby read-modify-write', () => 
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================================
+// T7c audit fix — isValidLobbyId chokepoint guard on getLobby / withLobbyLock
+// ============================================================================
+// WHY: T1f's `/^[A-Z0-9_-]{1,32}$/` guard only protected the joinLobby handler.
+// Every OTHER lobbyId-taking handler (setGameMode, selectRuleKit, kickPlayer,
+// quitGame, sendChat, …) forwarded the RAW client lobbyId straight into
+// withLobbyLock — which does `SET lock:lobbymut:<id> NX PX` BEFORE any
+// existence check — and/or getLobby (a large-key GET). An attacker could mint
+// arbitrary multi-KB lock/GET keys per call. The fix validates at the single
+// chokepoint so a malformed id no-ops WITHOUT touching Redis at all: no lock
+// SET, no GET. These tests pin (1) the charset, (2) the zero-Redis-call no-op
+// on both functions, (3) that the underscore-bearing DAILY id still passes
+// (the regex was widened from the T1f form to admit it — see source comment).
+
+describe('T7c — isValidLobbyId chokepoint (defense-in-depth)', () => {
+  test('isValidLobbyId is exported and judges the lobby-id charset', () => {
+    expect(typeof redisUtils.isValidLobbyId).toBe('function');
+    // Legit shapes: generated 6-char code (uppercase alnum, no hyphen) and the
+    // DAILY id whose stableId segment carries the client `p_` underscore.
+    expect(redisUtils.isValidLobbyId('ABC234')).toBe(true);
+    expect(redisUtils.isValidLobbyId('DAILY-P_AB12CD34EF-20260609')).toBe(true);
+    // Rejected: empty, over-32, non-string, and conforming-charset violations.
+    expect(redisUtils.isValidLobbyId('')).toBe(false);
+    expect(redisUtils.isValidLobbyId('A'.repeat(33))).toBe(false);
+    expect(redisUtils.isValidLobbyId('has space')).toBe(false);
+    expect(redisUtils.isValidLobbyId('lower!case')).toBe(false);
+    expect(redisUtils.isValidLobbyId(12345)).toBe(false);
+    expect(redisUtils.isValidLobbyId(null)).toBe(false);
+    expect(redisUtils.isValidLobbyId(undefined)).toBe(false);
+  });
+
+  test('withLobbyLock no-ops on a malformed id — NO lock key SET, mutator never runs', async () => {
+    const pub = makeFakeRedis();
+    jest.spyOn(pub, 'set');
+    jest.spyOn(pub, 'get');
+    const fn = jest.fn();
+    // 40-KB junk id: the exact free-Redis-key-inflation case the guard closes.
+    const result = await redisUtils.withLobbyLock(pub, 'x'.repeat(40000), fn);
+    expect(result).toBeNull();
+    expect(fn).not.toHaveBeenCalled();
+    // The whole point: no lock SET and no GET — Redis was never touched, so no
+    // attacker-controlled lock:lobbymut:<huge> key was ever created.
+    expect(pub.set).not.toHaveBeenCalled();
+    expect(pub.get).not.toHaveBeenCalled();
+    expect(pub.store.size).toBe(0);
+  });
+
+  test('getLobby no-ops on a malformed id — NO GET issued', async () => {
+    const pub = makeFakeRedis();
+    jest.spyOn(pub, 'get');
+    const result = await redisUtils.getLobby(pub, 'bad id with spaces');
+    expect(result).toBeNull();
+    expect(pub.get).not.toHaveBeenCalled();
+  });
+
+  test('a valid DAILY id (underscore in the stableId segment) still works end-to-end', async () => {
+    // Regression lock for the regex WIDENING: the real daily lobby id is
+    // `DAILY-<P_…>-<yyyymmdd>` (client stableId is `p_`+base36, uppercased),
+    // so the chokepoint MUST admit `_`. If a future tightening drops it, this
+    // breaks instead of silently bricking every daily run's lock+read.
+    const pub = makeFakeRedis();
+    const dailyId = 'DAILY-P_AB12CD34EF-20260609';
+    await redisUtils.saveLobby(pub, dailyId, { id: dailyId, n: 0 });
+    const room = await redisUtils.withLobbyLock(pub, dailyId, (r) => { r.n = 7; });
+    expect(room.n).toBe(7);
+    expect((await redisUtils.getLobby(pub, dailyId)).n).toBe(7);
+  });
+});

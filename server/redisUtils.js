@@ -5,7 +5,31 @@ const fallbackMovies = require('./systems/fallbackMovies');
 // leaf module — no require cycle.
 const { TMDB_FETCH_TIMEOUT_MS } = require('./constants');
 
+// T7c audit fix: single source of truth for "is this a structurally valid
+// lobby id?". WHY this charset: every legitimate id conforms to it BY
+// CONSTRUCTION — generated codes are 6 chars from a fixed uppercase-alnum
+// alphabet (generateLobbyId), and the daily id is
+// `DAILY-<stableId.slice(0,12)>-<yyyymmdd>` uppercased and capped at 32. The
+// daily stableId segment carries the client's `p_` prefix (getStableId mints
+// `'p_'+base36`), so after uppercasing it contains an UNDERSCORE — which is
+// why this regex is the T1f form WIDENED to add `_` (the bare `/^[A-Z0-9-]/`
+// would have wrongly rejected every real daily lock/read). 32 is the hard cap
+// the daily `.slice(0,32)` already enforces and the largest a generated code
+// or daily id can be. Anything else is a client-forged value we must not let
+// become a Redis key.
+const VALID_LOBBY_ID = /^[A-Z0-9_-]{1,32}$/;
+function isValidLobbyId(id) {
+  return typeof id === 'string' && VALID_LOBBY_ID.test(id);
+}
+
 async function getLobby(pubClient, id) {
+  // T7c: defense-in-depth chokepoint. Only joinLobby validated lobbyId before
+  // T7c; every other handler forwarded the raw client value into this GET. A
+  // malformed id can never name a real lobby, so no-op WITHOUT issuing the
+  // (potentially huge-key) GET rather than letting attacker-controlled bytes
+  // hit Redis. Returns null — identical to a normal cache miss, so callers
+  // already handle it as "lobby not found".
+  if (!isValidLobbyId(id)) return null;
   const data = await pubClient.get(`lobby:${id}`);
   if (!data) return null;
   try {
@@ -473,6 +497,14 @@ const LOBBY_MUTEX_TTL_MS = 5000;
 // mutator must NEVER acquire the submit lock (or call into any code path
 // that does). Inversion deadlocks both pipelines until a TTL expires.
 async function withLobbyLock(pubClient, id, mutator, opts = {}) {
+  // T7c: defense-in-depth chokepoint, the CRITICAL half — this function does
+  // `SET lock:lobbymut:<id> NX PX` BEFORE the in-lock existence check, so a
+  // raw client lobbyId used to mint an attacker-controlled lock key for free.
+  // Bail on a malformed id BEFORE the lock SET (and before the mutator runs):
+  // no lock key is ever created, return null so callers treat it as "lobby
+  // gone" exactly as they would for a missing room. Every legitimate id
+  // conforms (see isValidLobbyId), so no real mutator path is affected.
+  if (!isValidLobbyId(id)) return null;
   const token = require('crypto').randomBytes(16).toString('hex');
   const lockKey = `${LOBBY_MUTEX_PREFIX}${id}`;
 
@@ -570,6 +602,9 @@ async function pruneLeaderboard(pubClient) {
 
 module.exports = {
   getLobby,
+  // T7c: exported so handler-side guards/tests can reuse the SAME lobby-id
+  // charset rule instead of re-implementing (and drifting from) it.
+  isValidLobbyId,
   saveLobby,
   deleteLobby,
   addToActiveLobbies,
