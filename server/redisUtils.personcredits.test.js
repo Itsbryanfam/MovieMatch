@@ -67,3 +67,34 @@ test('throws on non-ok TMDB response (after draining body)', async () => {
   await expect(redisUtils.getOrFetchPersonCredits(pub, 8, HEADERS)).rejects.toThrow(/TMDB person credits failed: 503/);
   expect(arrayBuffer).toHaveBeenCalled();
 });
+
+// T4i audit fix (2026-06-09): mirrors the getOrFetchCredits T1d-ext fix
+// (commit 7ebeaa5). The post-success 7-day cache write-back sat in a try with
+// NO isolating catch, so a Redis flap on that single SET rejected the bot's
+// filmography lookup despite a SUCCESSFUL TMDB fetch — the bot would whiff its
+// turn over a transient blip unrelated to the fetch. Pinned contract: once
+// TMDB has answered, a Redis-only write-back failure must never change the
+// return value (log and continue with the credits already in hand).
+test('T4i: write-back SET rejects after successful fetch → real credits still returned, no throw', async () => {
+  const pub = mockPubClient();
+  pub.set.mockImplementation(async (k, v, opts) => {
+    // Only the credits-PAYLOAD write flaps — identified by its EX:604800 cache
+    // TTL (the NX stampede lock uses EX:10, so this isolates the write-back
+    // failure mode from the lock-acquire path).
+    if (opts && opts.EX === 604800) throw new Error('Socket closed unexpectedly');
+    pub._store.set(k, v);
+    return 'OK';
+  });
+  global.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ cast: [{ id: 1, title: 'Alpha', release_date: '1999-05-01', popularity: 42.5 }] }),
+  });
+
+  // Pre-fix this REJECTED with the Redis error despite TMDB having succeeded.
+  await expect(redisUtils.getOrFetchPersonCredits(pub, 555, HEADERS))
+    .resolves.toEqual({ movies: [{ id: 1, title: 'Alpha', year: '1999', popularity: 42.5 }] });
+  // Lock-release invariant survives the flap: finally still dels the :fetching
+  // lock so a concurrent bot turn isn't stalled for the 10s lock TTL.
+  expect(pub.del).toHaveBeenCalledTimes(1);
+  expect(pub.del.mock.calls[0][0]).toMatch(/:fetching$/);
+});

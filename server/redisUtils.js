@@ -344,7 +344,21 @@ async function getOrFetchPersonCredits(pubClient, personId, headers) {
           popularity: typeof m.popularity === 'number' ? m.popularity : 0,
         })),
     };
-    await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    // T4i audit fix: same exposure fixed for getOrFetchCredits in 7ebeaa5
+    // (T1d-ext). The 7-day cache write-back is Redis-only bookkeeping that runs
+    // AFTER TMDB already answered — at this point `stripped` is a real
+    // filmography we hold. It used to share this function's try with no
+    // isolating catch, so a socket flap on this single SET propagated out of
+    // getOrFetchPersonCredits and rejected the bot's filmography lookup despite
+    // a SUCCESSFUL fetch (the bot would whiff its turn over a transient blip
+    // unrelated to the fetch). Isolate: log and continue — worst case of a lost
+    // write-back is one duplicate TMDB fetch on the next miss, never a failed
+    // bot move. (The lock-release del in finally already swallows via .catch.)
+    try {
+      await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    } catch (cacheErr) {
+      _getLogger().warn(cacheErr, 'person-credits cache write-back failed — returning fetched credits uncached');
+    }
     return stripped;
   } finally {
     if (gotLock) await pubClient.del(lockKey).catch(() => {});
