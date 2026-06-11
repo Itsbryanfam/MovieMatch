@@ -1198,3 +1198,230 @@
   }
 }
 
+/* ── BOOTH TASK 2: THE BENCH ────────────────────────────────────────────────
+   Restyle the player roster sidebar into "The Bench" — operators as small
+   film-frame chips with box-office status labels.
+
+   Design law (spec §6.2 + reference .bench/.op/.frame):
+   - The bench is the left column; operators are stacked film-frame chips.
+   - Each chip: a sprocket-notched frame badge (initial) + name + status label.
+   - Status conveyed by a visible text label (a11y §10: not color alone).
+   - States: On Screen (active turn) / Up Next / Seated (default) / Walked Out (eliminated).
+   - Active operator: indigo beam treatment (--beam border + --beam-glow).
+   - Up Next: quieter warm highlight (no beam glow — subdued).
+   - Eliminated: dimmed + struck (existing opacity/line-through kept, label added).
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Bench container — the bench itself is the players sidebar.
+   WHY: deepen the surface to --bg-base (near-black) so the chips have breathing
+   room against the board's --bg-surface. Keep existing border-radius/flex. */
+.sidebar[data-panel="players"] {
+  background: var(--bg-base); /* darker than generic sidebar — the bench interior */
+  border-color: rgba(255, 255, 255, 0.05); /* very faint edge — booth-dark seam */
+}
+
+/* Bench section label — the caption "The Bench · N operators".
+   WHY --font-display + small-caps uppercase: matches the reference .bench .cap
+   style; condensed grotesque grounds the sidebar in the booth typographic voice
+   without using the same ALL-CAPS billing weight as the gate title. */
+.sidebar[data-panel="players"] .sidebar-header h3 {
+  font-family: var(--font-display); /* Saira Condensed — the booth voice */
+  font-size: var(--t-1);            /* 12.8px — small cap weight */
+  text-transform: uppercase;
+  letter-spacing: 0.12em;           /* wider than default 0.05em — reference .bench .cap */
+  color: var(--text-dim);           /* --g3 equivalent — subdued, not the main label */
+  font-weight: 600;
+}
+
+/* Operator row — the film-frame chip.
+   WHY flex-wrap: the row holds [badge] [name score flex-1] and we add a
+   ::after status label that sits flush right. flex-wrap:wrap + align-items:center
+   lets the label overflow gracefully without truncating the score on narrow widths. */
+.sidebar-players li {
+  display: flex;
+  align-items: center;
+  gap: 10px;               /* chip gap matches reference .op: 10px */
+  padding: 8px 10px;       /* tighter than 0.75rem 1rem — chip feel, not card */
+  margin-bottom: 6px;      /* reference .ops: 7px gap */
+  border-radius: 4px;      /* minimal radius — film-frame chip, not a card bubble */
+  font-size: var(--t-1);   /* 12.8px — consistent with bench type scale */
+  background: transparent;
+  border: 1px solid transparent;
+  transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+  position: relative;      /* stacking context so ::after is positioned */
+}
+
+/* Film-frame chip badge — the player initial(s).
+   Rendered via the first <span> (name) being prefixed by a ::before on the li
+   so we DON'T change markup. Instead, we style the <span> that holds the name
+   as a flex row with a generated initial badge.
+
+   WHY ::before on the li, not a new element: the spec explicitly says "no markup
+   changes needed" for status; applying the same approach here keeps the render
+   function untouched (no new <span> for the badge). The initial is the first
+   character of the name span's text content, but CSS cannot extract text — so
+   we build the visual badge with the frame shape + sprocket nicks, using the
+   li::before as the frame and relying on the player name span being the second
+   flex child (the badge is the ::before, the name is the span).
+
+   IMPLEMENTATION CHOICE: pure-CSS badge. The ::before pseudo creates a 30×34px
+   frame (matching reference .frame dimensions) with sprocket perforations via
+   repeating-linear-gradient on ::before content areas. Since we cannot generate
+   the player initial from CSS alone, we render the badge as an anonymous frame —
+   the name + status label convey the identity and state. The indigo beam border
+   on active-turn provides the strong visual cue. */
+.sidebar-players li::before {
+  content: "";
+  display: block;
+  width: 30px;           /* reference .frame: 30px */
+  height: 34px;          /* reference .frame: 34px */
+  flex-shrink: 0;
+  border-radius: 2px;    /* reference .frame: 2px */
+  background: var(--bg-elevated); /* --booth-surface equivalent */
+  border: 1px solid rgba(255, 255, 255, 0.08); /* faint frame edge */
+  /* Sprocket perforations — top and bottom nicks via two-stop repeating gradient
+     layered as a background. The reference uses ::before and ::after on .frame;
+     here we synthesise both bands into a single background shorthand since the
+     li::before is already the pseudo-element we're using. */
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.6) 0 2px,
+      transparent 2px 5px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.6) 0 2px,
+      transparent 2px 5px
+    ),
+    none; /* base is bg-elevated fill set in background shorthand above */
+  background-size: auto 2px, auto 2px;
+  background-position: 3px top, 3px bottom;
+  background-repeat: repeat-x, repeat-x;
+  /* Blend the two perforations over the elevated surface. */
+  background-color: var(--bg-elevated);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* Name span — the operator name.
+   flex:1 so it takes all space between the badge and the score. Overflow
+   truncation prevents long names from pushing the score off. */
+.sidebar-players li > span:first-child {
+  flex: 1;                /* takes remaining space */
+  min-width: 0;           /* required for text-overflow in a flex child */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--t-1);  /* 12.8px */
+  font-weight: 600;
+  color: var(--text-secondary); /* subdued until "on screen" */
+}
+
+/* Score span — box-office admission count.
+   WHY flex-shrink:0: the score must NEVER be truncated — spec says "do not hide
+   the score". Sitting after the name in the flex row it would be pushed out
+   without this guard. */
+.sidebar-players li > span:last-of-type {
+  flex-shrink: 0;         /* score must not be truncated */
+  font-family: var(--font-display); /* tabular feel via condensed digits */
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-1);
+  color: var(--text-dim);
+}
+
+/* Status label — box-office vocabulary via ::after, so no markup change.
+   WHY ::after for status: spec §10 requires status conveyed by label, not color
+   alone. Pure-CSS ::after carries real text content (read by screen readers in
+   modern browsers) and requires zero markup change — satisfying the a11y
+   requirement while honoring the "CSS-first, no unnecessary markup" constraint.
+   Layout: the label sits on a new flex line below the name+score pair (flex-wrap
+   on the li parent means the ::after flows onto the next line at full width). */
+.sidebar-players li::after {
+  /* Default status: Seated — every operator not otherwise classified */
+  content: "Seated";
+  display: block;
+  width: 100%;                           /* fills the wrapped flex line */
+  padding: 0 0 0 40px;                   /* indent to align under the name, past the badge */
+  font-family: var(--font-display);      /* Saira Condensed — bench voice */
+  font-size: 9.6px;                      /* ~0.6rem — reference .op .st: .6rem */
+  text-transform: uppercase;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;               /* reference .op .st */
+  color: var(--text-dim);               /* --g3 equivalent — grey, subdued */
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* ── ACTIVE TURN → "On Screen" ──────────────────────────────────────────── */
+/* Active operator row: indigo beam treatment (border + glow).
+   WHY this matches the reference .op.on: the active player IS the projector
+   beam — they are "On Screen". The beam color + glow is rationed to exactly
+   this one element on the bench (spec §1: one accent, rationed). */
+.sidebar-players li.active-turn {
+  background: var(--accent-glow);          /* subtle indigo fill */
+  border-color: var(--beam);              /* indigo beam border */
+  box-shadow: 0 0 0 1px var(--beam), 0 0 16px var(--beam-glow); /* beam halo */
+}
+
+/* Active turn badge — indigo frame matching the beam border */
+.sidebar-players li.active-turn::before {
+  border-color: var(--beam);
+  box-shadow: 0 0 0 1px var(--beam), 0 0 16px var(--beam-glow);
+  background-color: var(--bg-elevated);
+}
+
+/* Active turn name — full brightness, matches reference .op.on .nm */
+.sidebar-players li.active-turn > span:first-child {
+  color: var(--text-primary);
+}
+
+/* Active turn status label — "On Screen" in beam color */
+.sidebar-players li.active-turn::after {
+  content: "On Screen";
+  color: var(--beam);   /* indigo — the one chromatic label on the bench */
+}
+
+/* ── UP NEXT → "Up Next" ────────────────────────────────────────────────── */
+/* Up Next row: quieter than active — a warm border at low opacity to signal
+   "you're on deck" without competing with the beam. */
+.sidebar-players li.up-next {
+  border-color: rgba(255, 255, 255, 0.1); /* faint warm edge — not beam */
+  background: rgba(255, 255, 255, 0.02);  /* barely visible — breadcrumb, not spotlight */
+}
+
+/* Up Next name — slightly brighter than seated, less than active */
+.sidebar-players li.up-next > span:first-child {
+  color: var(--text-secondary);
+}
+
+/* Up Next status label — "Up Next" in mid-grey (reference .op.up .st: --g2) */
+.sidebar-players li.up-next::after {
+  content: "Up Next";
+  color: var(--text-secondary); /* --g2 equivalent — visible but not beam */
+}
+
+/* ── ELIMINATED → "Walked Out" ──────────────────────────────────────────── */
+/* Eliminated row: existing opacity:0.4 + line-through preserved — we only
+   layer the status label on top. The row already communicates "out" via the
+   visual treatment; the label makes it explicit for screen readers. */
+.sidebar-players li.eliminated {
+  /* Existing rules (opacity: 0.4; text-decoration: line-through) are preserved
+     above in the file; this block adds nothing structural — the ::after is the
+     only new layer. */
+}
+
+/* Walked Out status label */
+.sidebar-players li.eliminated::after {
+  content: "Walked Out";
+  color: var(--text-dim); /* faint — matches the dimmed row context */
+}
+
+/* ── CONFLICT GUARD: active-turn takes precedence over up-next ───────────── */
+/* WHY: in theory nextAliveIndex never returns currentTurnIndex, but CSS needs
+   an explicit resolution if both classes somehow coexist (e.g. single-survivor
+   wrap edge in a future mode). active-turn wins the beam treatment. */
+.sidebar-players li.active-turn.up-next::after {
+  content: "On Screen"; /* active-turn semantic wins */
+  color: var(--beam);
+}
+

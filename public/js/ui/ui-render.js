@@ -164,6 +164,25 @@ const SEAT_CHAIR_SVG = `<svg class="seat-svg" viewBox="0 0 150 120" aria-hidden=
   <rect x="24" y="84" width="102" height="3" fill="rgba(0,0,0,0.45)"/>
 </svg>`;
 
+// Booth Task 2: "Up Next" pure helper — exported so unit tests can verify the
+// marker logic independently of the DOM render (TDD contract).
+// WHY pure: the Up Next index depends only on the players array + the current
+// turn index; no DOM reads or side-effects make it trivially testable and safe
+// to call on every render without risk.
+// Algorithm: walk forward from currentIndex (wrapping), skipping eliminated
+// players. Return -1 when there is nobody else alive (last survivor or empty
+// array) so callers can branch cleanly without a sentinel class mismatch.
+export function nextAliveIndex(players, currentIndex) {
+  // Guard: need at least 2 players to have a "next" someone.
+  if (!Array.isArray(players) || players.length < 2) return -1;
+  for (let step = 1; step < players.length; step++) {
+    const i = (currentIndex + step) % players.length;
+    if (players[i] && players[i].isAlive) return i;
+  }
+  // Every other slot is eliminated — current player is the only one alive.
+  return -1;
+}
+
 export function renderLobby(gameState, myPlayerId) {
   const amIHost = !!gameState.players.find(p => p.id === myPlayerId && p.isHost);
   const mode = gameState.gameMode || 'classic';
@@ -643,6 +662,12 @@ function renderPlayerSidebar(gameState, mode) {
   } else if (mode === 'solo') {
     gamePlayersList.innerHTML = '<li class="solo-run-label">Solo Run</li>';
   } else {
+    // Booth Task 2: compute the Up Next index ONCE before the loop so the
+    // class assignment is O(1) per row rather than re-running the scan inside
+    // each iteration. nextAliveIndex skips eliminated players and wraps, so
+    // the bench always marks the next real turn — not just index+1.
+    const upNext = nextAliveIndex(gameState.players, gameState.currentTurnIndex);
+
     gameState.players.forEach((p, index) => {
       const li = document.createElement('li');
       // Audit finding #9: structural DOM (createElement + textContent),
@@ -654,6 +679,10 @@ function renderPlayerSidebar(gameState, mode) {
       li.append(nameSpan, document.createTextNode(' '), scoreSpan);
       if (!p.isAlive) li.classList.add('eliminated');
       if (index === gameState.currentTurnIndex && p.isAlive) li.classList.add('active-turn');
+      // Booth Task 2: mark the next-alive player "up-next" so the bench
+      // shows the "Up Next" box-office status label (CSS ::after). Only
+      // assigned when the player is alive and is not already the active turn.
+      if (index === upNext) li.classList.add('up-next');
       // Phase 5a: when it's a BOT's turn, show a derived "thinking…" cue so
       // other players see deliberate AI pacing instead of a silent timer.
       // Pure state-derived (active player isBot + their turn) — NO new socket
