@@ -1026,7 +1026,7 @@
   color: var(--beam);
   text-align: center;
   white-space: nowrap;
-  margin-bottom: 4px;
+  margin-bottom: 4px; /* gap between the "IN THE GATE" label and the gate poster */
 }
 
 /* ── SPLICE SEAM CREDIT ──────────────────────────────────────────────────────
@@ -1079,7 +1079,7 @@
   padding-top: 4px; /* small vertical gap between reel and billing block */
 }
 .now-cast-head {
-  margin-bottom: 6px;
+  margin-bottom: 6px; /* small gap separating the "linked via" credit from the title below */
 }
 /* The "linked via ActorName" / "chain starts here" line — styled as the
    one-sheet LEAD credit: display font, small caps, beam colour. */
@@ -1184,6 +1184,9 @@
    stays legible at --t-1 (no change needed). */
 @media (max-width: 767px) {
   .now-cast-title {
+    /* supersedes the Phase 7.7 mobile block's ad-hoc `font-size: 1rem` (same
+       @media, earlier in file → this wins); that stale value can be dropped in
+       a later DS-cleanup pass — here we put the mobile title on the Booth scale. */
     font-size: var(--t3); /* 33px — scaled down from 46px for narrow viewports */
   }
   /* WHY: the gate poster enlargement (118px) is fine on tablet widths but on
