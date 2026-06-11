@@ -1240,6 +1240,13 @@
 .sidebar-players li {
   display: flex;
   align-items: center;
+  /* WHY justify-content: space-between: badge (fixed width) + name (flex:1)
+     + score (flex-shrink:0) must lay out left→right with the score pinned
+     to the right edge. The base .sidebar-players rule had this; re-declaring
+     it here because the Booth Task 2 block adds display:flex + align-items
+     explicitly and the browser resets justify-content to 'normal' in the new
+     declaration context — without it the score drifts left next to the name. */
+  justify-content: space-between;
   flex-wrap: wrap;          /* Bug 2b fix: without this the ::after status label sits
                                inline to the right of the score instead of wrapping onto
                                its own line below the name+score pair as intended. The
@@ -1252,6 +1259,10 @@
   font-size: var(--t-1);   /* 12.8px — consistent with bench type scale */
   background: transparent;
   border: 1px solid transparent;
+  /* WHY specific props instead of 'all': only animate paint/composite properties
+     (border-color, box-shadow, opacity) — not layout props. Animating 'all'
+     forces layout recalculations on every frame and can cause jank on low-end
+     devices; targeted props stay on the compositor thread. */
   transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
   position: relative;      /* stacking context so ::after is positioned */
 }
@@ -1285,12 +1296,20 @@
   height: 34px;          /* reference .frame: 34px */
   flex-shrink: 0;
   border-radius: 2px;    /* reference .frame: 2px */
-  background: var(--bg-elevated); /* --booth-surface equivalent */
+  /* WHY background-color not background shorthand: using the shorthand here
+     would reset background-image to 'none', requiring a re-declaration below.
+     Using background-color directly keeps the base fill and the image layers
+     in separate, non-competing declarations — one of each, no redundancy. */
+  background-color: var(--bg-elevated); /* --booth-surface equivalent */
   border: 1px solid rgba(255, 255, 255, 0.08); /* faint frame edge */
   /* Sprocket perforations — top and bottom nicks via two-stop repeating gradient
-     layered as a background. The reference uses ::before and ::after on .frame;
-     here we synthesise both bands into a single background shorthand since the
-     li::before is already the pseudo-element we're using. */
+     layered over the --bg-elevated base. The reference uses ::before and ::after
+     on .frame; here we synthesise both bands into a single background-image since
+     the li::before is already the pseudo-element we're using.
+     WHY 2 layers not 3: the original had a redundant 'none' third layer that
+     caused a layer-count mismatch with background-size/background-position
+     (2 values each vs 3 layers), so the browser silently discarded the extra.
+     Dropped to keep counts consistent: 2 gradients / 2 sizes / 2 positions. */
   background-image:
     repeating-linear-gradient(
       90deg,
@@ -1301,13 +1320,10 @@
       90deg,
       rgba(0, 0, 0, 0.6) 0 2px,
       transparent 2px 5px
-    ),
-    none; /* base is bg-elevated fill set in background shorthand above */
+    );
   background-size: auto 2px, auto 2px;
   background-position: 3px top, 3px bottom;
   background-repeat: repeat-x, repeat-x;
-  /* Blend the two perforations over the elevated surface. */
-  background-color: var(--bg-elevated);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -1322,7 +1338,7 @@
   text-overflow: ellipsis;
   font-size: var(--t-1);  /* 12.8px */
   font-weight: 600;
-  color: var(--text-secondary); /* subdued until "on screen" */
+  color: var(--text-muted); /* subdued until "on screen"; --text-muted = #a8b2c4 */
 }
 
 /* Score span — box-office admission count.
@@ -1356,7 +1372,7 @@
   width: 100%;                           /* fills the wrapped flex line */
   padding: 0 0 0 40px;                   /* indent to align under the name, past the badge */
   font-family: var(--font-display);      /* Saira Condensed — bench voice */
-  font-size: 9.6px;                      /* ~0.6rem — reference .op .st: .6rem */
+  font-size: var(--t-micro);             /* 9.6px — on-scale sub-caption step; reference .op .st: .6rem */
   text-transform: uppercase;
   font-variant: small-caps;
   letter-spacing: 0.08em;               /* reference .op .st */
@@ -1385,7 +1401,10 @@
 
 /* Active turn name — full brightness, matches reference .op.on .nm */
 .sidebar-players li.active-turn > span:first-child {
-  color: var(--text-primary);
+  /* WHY --text-main: the active operator is "On Screen" — full brightness.
+     --text-main (#f8fafc) is the primary text token; --text-primary was
+     undefined and fell back to inherited color, rendering incorrectly. */
+  color: var(--text-main);
 }
 
 /* Active turn status label — "On Screen" in beam color */
@@ -1404,13 +1423,16 @@
 
 /* Up Next name — slightly brighter than seated, less than active */
 .sidebar-players li.up-next > span:first-child {
-  color: var(--text-secondary);
+  /* WHY --text-muted: mid-tier brightness — brighter than dim (seated) but
+     below main (active). --text-secondary was undefined; --text-muted
+     (#a8b2c4) is the correct secondary text token in this design system. */
+  color: var(--text-muted);
 }
 
 /* Up Next status label — "Up Next" in mid-grey (reference .op.up .st: --g2) */
 .sidebar-players li.up-next::after {
   content: "Up Next";
-  color: var(--text-secondary); /* --g2 equivalent — visible but not beam */
+  color: var(--text-muted); /* --g2 equivalent — visible but not beam; --text-secondary was undefined */
 }
 
 /* ── ELIMINATED → "Walked Out" ──────────────────────────────────────────── */

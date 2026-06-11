@@ -203,13 +203,17 @@ body {
      so the UI degrades gracefully while the font loads. */
   --font-display: 'Saira Condensed', 'Plus Jakarta Sans', sans-serif;
 
-  /* TYPE SCALE — a curated 6-step scale, NOT a strict modular run.
+  /* TYPE SCALE — a curated 7-step scale, NOT a strict modular run.
      t0–t2 follow a ~1.2 ratio off the 16px base (16 / 19.2 / 23); --t-1 is a
      tighter caption step (16/1.25) and --t3 / --t-display are deliberately
      larger display jumps (primary headings / billing-block movie title), sized
-     to the approved mockup rather than to a formula. Every Booth font-size must
-     reference one of these steps; the ~19 ad-hoc px sizes scattered through the
-     file are intentionally killed over the Booth task arc in favour of it. */
+     to the approved mockup rather than to a formula. --t-micro sits below
+     the scale as a sub-caption tier for status labels and film-frame micro
+     text — it was added in Booth Task 2 to replace the raw 9.6px literal in
+     the bench ::after rule. Every Booth font-size must reference one of these
+     steps; the ~19 ad-hoc px sizes scattered through the file are intentionally
+     killed over the Booth task arc in favour of it. */
+  --t-micro: 9.6px;  /* sub-caption: status labels, film-frame micro text */
   --t-1: 12.8px;    /* small labels, captions            */
   --t0:  16px;      /* body / base                       */
   --t1:  19.2px;    /* secondary headings, large labels  */
@@ -230,6 +234,16 @@ body {
      Slightly lighter than --bg-surface so the panel edges read without
      needing a fully opaque border-highlight. */
   --booth-edge: #1f1f26;
+
+  /* TEXT HIERARCHY (3-step) — used in The Bench and other booth surfaces.
+     --text-main (#f8fafc) already exists in the base block above.
+     --text-muted (#a8b2c4) already exists in the base block above.
+     --text-dim is the third tier: de-emphasised status captions (e.g.
+     the default "Seated" label on bench rows). #6b7280 is a cool grey
+     one step below --text-muted — it achieves ~5:1 contrast on
+     --bg-base (#09090b), satisfying WCAG AA for the small --t-micro
+     status labels. The 3-step ramp is: main → muted → dim. */
+  --text-dim: #6b7280;
 }
 
 /* .btn — shared base for the button variants (Phase 4). ADDITIVE ONLY:
