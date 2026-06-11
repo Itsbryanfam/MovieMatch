@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>v4 — The Projection Booth (on-brand)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* MovieMatch's real tokens — cool near-black surfaces + indigo accent */
+    --booth-base:#09090b; --booth-surface:#121214; --booth-edge:#1f1f26;
+    --beam:#818cf8; --beam-hover:#6366f1; --beam-glow:rgba(129,140,248,.55);
+    --cue-rest:rgba(129,140,248,.5); --cue-hot:#f59e0b;     /* amber = --status-warning */
+    --txt:#f8fafc; --g1:#a8b2c4; --g2:#7c8598; --g3:#565e6e;
+    --ok:#10b981; --bad:#ef4444;
+    --disp:'Saira Condensed',sans-serif; --body:'Plus Jakarta Sans',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#060608;color:var(--txt);font-family:var(--body);
+    padding:26px 30px 70px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .h{max-width:1080px;margin:0 auto}
+  h1{font-family:var(--disp);font-weight:800;font-size:2rem;letter-spacing:.01em;text-transform:uppercase}
+  h1 b{color:var(--beam);font-weight:800}
+  .thesis{color:var(--g1);font-size:.92rem;margin:8px 0 4px;max-width:840px}
+  .thesis b{color:var(--txt)}
+  .killbar{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 6px;max-width:920px}
+  .killbar span{font-size:.7rem;color:#aab1e6;background:rgba(129,140,248,.07);
+    border:1px solid rgba(129,140,248,.2);border-radius:5px;padding:4px 9px}
+  .killbar span s{color:#6a6f8a}
+  .killbar span.keep{color:#cdb389;background:rgba(245,158,11,.08);border-color:rgba(245,158,11,.22)}
+
+  .moment-label{font-family:var(--disp);text-transform:uppercase;letter-spacing:.14em;
+    font-size:.82rem;color:var(--g2);margin:30px auto 9px;max-width:1080px;display:flex;align-items:center;gap:10px}
+  .moment-label .n{color:var(--beam);font-weight:700}
+  .moment-label .hr{flex:1;height:1px;background:rgba(255,255,255,.07)}
+
+  /* ===== THE BOOTH ===== */
+  .booth{position:relative;max-width:1080px;margin:0 auto;border-radius:12px;overflow:hidden;
+    background:radial-gradient(120% 80% at 50% 16%, #15151f 0%, var(--booth-base) 56%, #060608 100%);
+    border:1px solid var(--booth-edge);min-height:300px;
+    display:grid;grid-template-columns:206px 1fr}
+  /* film grain + vignette (neutral craft, not warmth) */
+  .booth::before{content:"";position:absolute;inset:0;z-index:6;pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity:.05;mix-blend-mode:overlay;animation:grain 1.1s steps(3) infinite}
+  .booth::after{content:"";position:absolute;inset:0;z-index:5;pointer-events:none;
+    background:radial-gradient(125% 95% at 50% 28%, transparent 55%, rgba(0,0,0,.55) 100%)}
+  @keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-3px,2px)}66%{transform:translate(2px,-2px)}100%{transform:translate(0,0)}}
+
+  /* CUE EDGE — the one countdown, top-right */
+  .cue{position:absolute;top:14px;right:16px;z-index:8;display:flex;align-items:center;gap:8px}
+  .cue .t{font-family:var(--body);font-variant-numeric:tabular-nums;font-size:.82rem;color:var(--g2);letter-spacing:.02em}
+  .cuedot{width:13px;height:13px;border-radius:50%;border:2px solid var(--beam);opacity:.5}
+  .cue.hot .t{color:var(--cue-hot);font-weight:700}
+  .cue.hot .cuedot{border-color:var(--cue-hot);background:var(--cue-hot);opacity:1;
+    box-shadow:0 0 10px var(--cue-hot);animation:burn .9s ease-in-out infinite}
+  @keyframes burn{0%,100%{transform:scale(1)}50%{transform:scale(1.28)}}
+
+  /* BENCH (operators + splice console) */
+  .bench{position:relative;z-index:7;border-right:1px solid rgba(255,255,255,.05);
+    padding:15px 14px;display:flex;flex-direction:column;gap:11px}
+  .bench .cap{font-family:var(--disp);text-transform:uppercase;letter-spacing:.12em;
+    font-size:.66rem;color:var(--g3);font-weight:600}
+  .ops{display:flex;flex-direction:column;gap:7px}
+  .op{display:flex;align-items:center;gap:10px}
+  .frame{width:30px;height:34px;border-radius:2px;flex-shrink:0;position:relative;
+    background:var(--booth-surface);border:1px solid rgba(255,255,255,.08);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--disp);font-weight:700;font-size:.86rem;color:var(--g1)}
+  .frame::before,.frame::after{content:"";position:absolute;left:3px;right:3px;height:2px;
+    background:repeating-linear-gradient(90deg,rgba(0,0,0,.6) 0 2px,transparent 2px 5px)}
+  .frame::before{top:2px} .frame::after{bottom:2px}
+  .op .who{flex:1;min-width:0}
+  .op .nm{font-size:.86rem;font-weight:600;color:var(--g1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .op .st{font-family:var(--disp);text-transform:uppercase;letter-spacing:.08em;font-size:.6rem;color:var(--g3)}
+  .op.on .frame{border-color:var(--beam);color:var(--txt);
+    box-shadow:0 0 0 1px var(--beam),0 0 16px var(--beam-glow)}
+  .op.on .nm{color:var(--txt)}
+  .op.on .st{color:var(--beam)}
+  .op.up .st{color:var(--g2)}
+  .op.out{opacity:.4}
+  .op.out .nm{text-decoration:line-through}
+
+  .console{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:12px;
+    border-top:1px solid rgba(255,255,255,.06)}
+  .slot{background:#0d0d10;border:1px solid var(--booth-edge);border-radius:6px;
+    padding:9px 11px;font-size:.8rem;color:var(--g2)}
+  .roll{font-family:var(--disp);text-transform:uppercase;letter-spacing:.06em;font-weight:700;
+    font-size:.86rem;color:#fff;background:linear-gradient(135deg,var(--beam-hover),var(--beam));
+    border-radius:6px;padding:9px;text-align:center}
+  .roll.dim{background:var(--booth-edge);color:var(--g3)}
+
+  /* BEAM (the film through the gate) */
+  .beam{position:relative;z-index:7;display:flex;flex-direction:column;justify-content:center;
+    padding:0;min-width:0}
+  .matte{height:20px;background:#000;display:flex;align-items:center;padding:0 16px;flex-shrink:0}
+  .matte .slug{font-family:var(--disp);text-transform:uppercase;letter-spacing:.18em;
+    font-size:.6rem;color:#6c7081;font-weight:600}
+  .matte .slug b{color:var(--beam);font-weight:700}
+  .beam-mid{flex:1;display:flex;flex-direction:column;justify-content:center;padding:16px 22px;gap:14px}
+
+  /* the running strip */
+  .strip{display:flex;align-items:stretch;gap:0;min-width:0}
+  .reelpart{display:flex;align-items:flex-end;gap:0;flex-shrink:0}
+  .perfwrap{position:relative;padding:7px 0}
+  .perfwrap::before,.perfwrap::after{content:"";position:absolute;left:0;right:0;height:5px;z-index:2;
+    background:repeating-linear-gradient(90deg,transparent 0 5px,rgba(0,0,0,.55) 5px 9px)}
+  .perfwrap::before{top:0} .perfwrap::after{bottom:0}
+  .cell{position:relative;background:#000;padding:7px 5px}
+  .cell img{display:block;width:52px;aspect-ratio:2/3;object-fit:cover;border-radius:1px;opacity:.62}
+  .cell.faded img{opacity:.32}
+  .gate{position:relative;padding:9px 7px;background:#000}
+  .gate img{display:block;width:118px;aspect-ratio:2/3;object-fit:cover;border-radius:1px;
+    border:2px solid var(--beam);
+    box-shadow:0 0 0 1px rgba(0,0,0,.8), 0 0 38px var(--beam-glow), 0 16px 40px rgba(0,0,0,.7)}
+  .gate .nowtag{position:absolute;top:-2px;left:50%;transform:translate(-50%,-100%);
+    font-family:var(--disp);text-transform:uppercase;letter-spacing:.16em;font-size:.58rem;
+    color:var(--beam);font-weight:700;white-space:nowrap}
+
+  /* the SEAM — connecting actor typeset on the splice */
+  .seam{align-self:center;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:0 12px;position:relative}
+  .seam .splice{font-family:var(--disp);text-transform:uppercase;font-weight:700;letter-spacing:.04em;
+    color:var(--txt);font-size:1rem;writing-mode:vertical-rl;transform:rotate(180deg);line-height:1}
+  .seam .tape{position:absolute;top:8px;bottom:8px;width:1px;background:repeating-linear-gradient(var(--g3) 0 4px,transparent 4px 8px)}
+  .seam .lbl{font-family:var(--disp);font-size:.52rem;letter-spacing:.14em;color:var(--g3);text-transform:uppercase;margin-top:4px;writing-mode:vertical-rl;transform:rotate(180deg)}
+
+  /* the now-showing billing block (one-sheet bottom) */
+  .billing{padding-left:2px}
+  .billing .title{font-family:var(--disp);text-transform:uppercase;font-weight:800;
+    font-size:2rem;letter-spacing:.005em;line-height:.98;color:var(--txt)}
+  .billing .title .yr{color:var(--g2);font-weight:500;font-size:1.2rem}
+  .billing .cast{font-family:var(--disp);text-transform:uppercase;font-weight:500;
+    font-size:.74rem;letter-spacing:.05em;color:var(--g2);line-height:1.45;margin-top:7px;max-width:560px}
+  .billing .cast .lead{color:var(--txt);font-weight:700}
+
+  /* reactions — die-cut ticket stubs, not emoji */
+  .stubs{display:flex;gap:8px;margin-top:4px}
+  .stub{position:relative;font-family:var(--disp);text-transform:uppercase;letter-spacing:.08em;
+    font-size:.58rem;font-weight:700;color:var(--g1);background:var(--booth-surface);
+    border:1px solid var(--booth-edge);border-radius:6px;padding:5px 9px 5px 14px}
+  .stub::before{content:"";position:absolute;left:6px;top:3px;bottom:3px;width:1px;
+    background:repeating-linear-gradient(var(--g3) 0 2px,transparent 2px 4px)}
+
+  /* empty gate */
+  .empty-gate{display:flex;align-items:center;gap:18px;padding:6px 0}
+  .empty-aperture{width:118px;height:177px;flex-shrink:0;border:1.5px dashed rgba(129,140,248,.32);
+    border-radius:2px;display:flex;align-items:center;justify-content:center;color:rgba(129,140,248,.5);
+    font-family:var(--disp);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;text-align:center;padding:10px}
+  .empty-call .big{font-family:var(--disp);text-transform:uppercase;font-weight:800;font-size:1.7rem;color:var(--txt);line-height:1}
+  .empty-call .small{color:var(--g2);font-size:.86rem;margin-top:8px}
+
+  /* broken splice */
+  .gate.broken img{border-color:var(--bad);filter:grayscale(.8) brightness(.6);
+    box-shadow:0 0 30px rgba(239,68,68,.3);transform:translateX(6px)}
+  .gate.broken .x{position:absolute;top:42%;left:52%;transform:translate(-50%,-50%);
+    font-family:var(--disp);font-weight:800;font-size:3rem;color:var(--bad);text-shadow:0 0 12px rgba(0,0,0,.9)}
+  .seam.torn .splice{color:var(--bad)}
+  .seam.torn .tape{background:repeating-linear-gradient(var(--bad) 0 3px,transparent 3px 7px)}
+  .billing.fail .title{color:var(--bad)}
+  .billing.fail .cast{color:#d7a39c}
+
+  .foot{max-width:1080px;margin:30px auto 0;color:var(--g2);font-size:.86rem}
+  .foot b{color:var(--txt)}
+</style>
+</head>
+<body>
+  <div class="h">
+    <h1>The Projection <b>Booth</b> · on-brand</h1>
+    <div class="thesis">Same committed world — a <b>projection booth at the reel-change</b> — now wearing MovieMatch's actual palette. The beam is your <b>indigo #818cf8</b> (a xenon lamp throws cool blue-white light, so the concept holds), with the same indigo halo your chain board's now-playing poster already uses. The only warm note left is the <b>amber cue dot</b> at &lt;5s — and amber is already your warning color.</div>
+    <div class="killbar">
+      <span class="keep">indigo kept — now the projector beam, rationed to 2 things</span>
+      <span><s>warm charcoal</s> → your #09090b / #121214</span>
+      <span><s>blurred-poster wallpaper</s> → sharp in the gate</span>
+      <span><s>Playfair</s> → condensed billing block</span>
+      <span><s>mono clock</s> → reel-change cue dot</span>
+      <span><s>emoji</s> → die-cut ticket stubs</span>
+    </div>
+  </div>
+
+  <!-- LIVE -->
+  <div class="moment-label"><span class="n">01</span> LIVE — mid-chain, 5 operators, full cast billing<span class="hr"></span></div>
+  <div class="booth">
+    <div class="cue"><span class="t">0:53</span><span class="cuedot"></span></div>
+    <div class="bench">
+      <div class="cap">The Booth · 5 operators</div>
+      <div class="ops">
+        <div class="op on"><div class="frame">B</div><div class="who"><div class="nm">Bryan</div><div class="st">On Screen</div></div></div>
+        <div class="op up"><div class="frame">M</div><div class="who"><div class="nm">Mara</div><div class="st">Up Next</div></div></div>
+        <div class="op"><div class="frame">D</div><div class="who"><div class="nm">Devin</div><div class="st">Seated</div></div></div>
+        <div class="op"><div class="frame">P</div><div class="who"><div class="nm">Priya Raghunathan</div><div class="st">Seated</div></div></div>
+        <div class="op out"><div class="frame">BB</div><div class="who"><div class="nm">Bot Bogart</div><div class="st">Walked Out</div></div></div>
+      </div>
+      <div class="console">
+        <div class="cap">Splice console</div>
+        <div class="slot">Name the next feature…</div>
+        <div class="roll">▸ Roll It</div>
+        <div class="stubs"><span class="stub">Bravo</span><span class="stub">Brutal</span><span class="stub">Cut!</span></div>
+      </div>
+    </div>
+    <div class="beam">
+      <div class="matte"><span class="slug">Reel 07 &nbsp;·&nbsp; <b>Now Showing</b></span></div>
+      <div class="beam-mid">
+        <div class="strip">
+          <div class="reelpart"><div class="perfwrap">
+            <div class="cell faded"><img src="https://image.tmdb.org/t/p/w342/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg" alt=""></div>
+            <div class="cell"><img src="https://image.tmdb.org/t/p/w342/saHP97rTPS5eLmrLQEcANmKrsFl.jpg" alt=""></div>
+          </div></div>
+          <div class="seam"><span class="tape"></span><span class="splice">Tom Hanks</span><span class="lbl">spliced via</span></div>
+          <div class="reelpart"><div class="perfwrap">
+            <div class="gate"><span class="nowtag">In the gate</span><img src="https://image.tmdb.org/t/p/w342/zNCu05nQpJOJEKZX1WUcoG4xx0E.jpg" alt=""></div>
+          </div></div>
+        </div>
+        <div class="billing">
+          <div class="title">Cast Away <span class="yr">2000</span></div>
+          <div class="cast"><span class="lead">Tom Hanks</span> · Helen Hunt · Nick Searcy · Chris Noth · Lari White · Geoffrey Blake · Jenifer Lewis · Paul Sanchez · David Allen Brooks</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EMPTY GATE -->
+  <div class="moment-label"><span class="n">02</span> EMPTY — pre-game, the first reel un-threaded<span class="hr"></span></div>
+  <div class="booth" style="min-height:240px">
+    <div class="cue"><span class="t">1:00</span><span class="cuedot"></span></div>
+    <div class="bench">
+      <div class="cap">The Booth · 2 operators</div>
+      <div class="ops">
+        <div class="op on"><div class="frame">B</div><div class="who"><div class="nm">Bryan</div><div class="st">On Screen</div></div></div>
+        <div class="op"><div class="frame">BB</div><div class="who"><div class="nm">Bot Bogart</div><div class="st">Seated</div></div></div>
+      </div>
+      <div class="console">
+        <div class="cap">Splice console</div>
+        <div class="slot">Name any film to open…</div>
+        <div class="roll">▸ Roll It</div>
+      </div>
+    </div>
+    <div class="beam">
+      <div class="matte"><span class="slug">Reel 01 &nbsp;·&nbsp; <b>Feature Presentation</b></span></div>
+      <div class="beam-mid">
+        <div class="empty-gate">
+          <div class="empty-aperture">Empty aperture</div>
+          <div class="empty-call">
+            <div class="big">Thread the first reel</div>
+            <div class="small">Name any film — the rest of the booth connects to it.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BROKEN SPLICE -->
+  <div class="moment-label"><span class="n">03</span> BROKEN — the splice won't hold<span class="hr"></span></div>
+  <div class="booth" style="min-height:260px">
+    <div class="cue hot"><span class="t">0:04</span><span class="cuedot"></span></div>
+    <div class="bench">
+      <div class="cap">The Booth · 5 operators</div>
+      <div class="ops">
+        <div class="op on"><div class="frame">B</div><div class="who"><div class="nm">Bryan</div><div class="st">On Screen</div></div></div>
+        <div class="op up"><div class="frame">M</div><div class="who"><div class="nm">Mara</div><div class="st">Up Next</div></div></div>
+        <div class="op"><div class="frame">D</div><div class="who"><div class="nm">Devin</div><div class="st">Seated</div></div></div>
+      </div>
+      <div class="console">
+        <div class="cap">Splice console</div>
+        <div class="slot" style="border-color:rgba(239,68,68,.4);color:#d98">The Matrix — won't connect</div>
+        <div class="roll dim">▸ Roll It</div>
+      </div>
+    </div>
+    <div class="beam">
+      <div class="matte"><span class="slug" style="color:#b5524a">Reel 07 &nbsp;·&nbsp; <b style="color:var(--bad)">Splice Failed</b></span></div>
+      <div class="beam-mid">
+        <div class="strip">
+          <div class="reelpart"><div class="perfwrap">
+            <div class="cell"><img src="https://image.tmdb.org/t/p/w342/zNCu05nQpJOJEKZX1WUcoG4xx0E.jpg" alt=""></div>
+          </div></div>
+          <div class="seam torn"><span class="tape"></span><span class="splice">No shared cast</span></div>
+          <div class="reelpart"><div class="perfwrap">
+            <div class="gate broken"><span class="x">✕</span><img src="https://image.tmdb.org/t/p/w342/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg" alt=""></div>
+          </div></div>
+        </div>
+        <div class="billing fail">
+          <div class="title">The Matrix <span class="yr" style="color:#b5524a">1999</span></div>
+          <div class="cast">Keanu Reeves · Laurence Fishburne · Carrie-Anne Moss — none appear in <b style="color:#e8b4ad">Cast Away</b>. The strip recoils; pick another.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>Same authored concept, your palette.</b> Indigo does the focusing work it already does on your chain board; the cool charcoal surfaces match the rest of the app; the one warm accent (amber cue dot) is your existing warning color. — Does this sit right with the MovieMatch brand now? If yes, I'll write it up as the spec and map it to the live element IDs + motion timings.
+  </div>
+</body>
+</html>
