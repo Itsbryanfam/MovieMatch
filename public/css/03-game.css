@@ -967,7 +967,10 @@
 }
 /* WHY: a pure-black cell background behind each poster (mirroring reference
    .cell { background:#000 }) so the slight poster transparency bleeds to
-   black rather than to the booth surface. */
+   black rather than to the booth surface. This INTENTIONALLY also covers ghost
+   (failed-attempt) cells — they are still film cells in the strip — whereas the
+   0.62 dim above excludes ghosts because they carry their own grayscale
+   treatment and shouldn't be double-dimmed. */
 .reel-node:not(.now-playing) {
   background: #000;
   padding: 7px 5px;
@@ -995,13 +998,17 @@
    flex-end alignment so it sits at the bottom of the strip row. */
 .reel-node.now-playing .reel-poster {
   width: 118px; /* enlarged gate — overrides the 104px base rule */
-  /* indigo border + glow from the 7.7 base rule are intentionally preserved:
-     border: 2px solid var(--accent-primary)
-     box-shadow: 0 0 24px rgba(129,140,248,0.55)
-     Both remain — we add the deeper outer glow on top. */
+  /* indigo identity preserved + enhanced. The border (2px solid
+     var(--accent-primary)) is NOT touched here, so the 7.7 base rule's border
+     stands. This box-shadow REPLACES the base rule's single 0 0 24px ring
+     (same specificity, later in file), so we RE-DECLARE that exact indigo ring
+     AND layer a wider 38px halo on top — the gate glows more than a regular
+     now-playing node because the projector is actively beaming this frame.
+     (--beam-glow === rgba(129,140,248,.55), same hue, wider radius.) */
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.8),      /* thin black inset to separate poster from matte */
-    0 0 38px var(--beam-glow),           /* wider soft beam halo */
+    0 0 0 1px rgba(0, 0, 0, 0.8),       /* thin black inset to separate poster from matte */
+    0 0 24px rgba(129, 140, 248, 0.55), /* original 7.7 indigo ring — re-declared so the cascade keeps it */
+    0 0 38px var(--beam-glow),          /* wider soft beam halo layered on top */
     0 16px 40px rgba(0, 0, 0, 0.7);     /* depth shadow below the gate */
 }
 /* "IN THE GATE" label above the now-playing poster — CSS-only, no JS needed.
