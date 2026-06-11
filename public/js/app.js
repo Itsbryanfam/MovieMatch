@@ -50,6 +50,32 @@ import { makeJoinUrl } from './url-helpers.js';
 export { makeJoinUrl };
 
 // ============================================================================
+// BOOTH TASK 4 — REACTION PAYLOAD (exported for unit test)
+// ============================================================================
+// WHY (booth reactions): decouple the wire payload from the button's visible
+// label so ticket-stub text ("Bravo") can replace the emoji glyph without
+// changing what peers receive. Reads data-reaction first; falls back to
+// textContent so old-style emoji buttons still work.
+export function reactionPayload(btn) {
+  return (btn && btn.dataset && btn.dataset.reaction) || (btn && btn.textContent) || '';
+}
+
+// ============================================================================
+// BOOTH TASK 4 — CHAT DRAWER STATE (exported for unit test)
+// ============================================================================
+// WHY (booth lobby drawer): unread count is closed-only state; reset on open.
+// A tiny class keeps the rule testable and the DOM wiring thin. The drawer
+// instance is created inside DOMContentLoaded below so the badge element
+// is available; the class itself is stateless w.r.t. the DOM so it can be
+// tested without a document.
+export class ChatDrawerState {
+  constructor() { this.isOpen = false; this.unread = 0; }
+  open()  { this.isOpen = true;  this.unread = 0; }
+  close() { this.isOpen = false; }
+  onMessage() { if (!this.isOpen) this.unread += 1; }
+}
+
+// ============================================================================
 // LOBBY SETTINGS CHANGE HANDLERS — exported for unit testing
 // ============================================================================
 
@@ -685,10 +711,87 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       const lobbyId = getCurrentLobbyId();
       if (!lobbyId) return;
-      socket.emit('sendReaction', { lobbyId, emoji: btn.innerText });
+      // WHY (booth reactions): use reactionPayload() so ticket-stub text
+      // labels ("Bravo") don't silently change the wire payload — the data-
+      // reaction attribute carries the canonical emoji, innerText is just UI.
+      socket.emit('sendReaction', { lobbyId, emoji: reactionPayload(btn) });
       btn.style.transform = 'scale(0.8)';
       setTimeout(() => btn.style.transform = '', 100);
     });
+  });
+
+  // =========================================================================
+  // BOOTH TASK 4 — LOBBY DRAWER WIRING
+  // =========================================================================
+  // WHY: Chat lives in a collapsible drawer toggled by #lobby-toggle on the
+  // bench. The ChatDrawerState class (tested in booth-chat-drawer.test.js)
+  // tracks open/close and increments unread only while closed. The badge
+  // element (#chat-badge) is updated on every state change so the counter is
+  // always in sync. On desktop the drawer is the primary chat surface; on
+  // mobile the existing mobile-tabs flow continues to function alongside it.
+
+  const drawerState = new ChatDrawerState();
+  const lobbyDrawer = document.querySelector('.lobby-drawer');
+  const lobbyToggle = document.getElementById('lobby-toggle');
+
+  function renderDrawerBadge() {
+    // WHY: #chat-badge lives inside the desktop lobby-toggle (hidden on mobile).
+    // .mobile-chat-badge lives inside the mobile chat-tab button. Both must be
+    // updated in sync so unread counts appear in the right context on each
+    // viewport. Without the mobile badge, tapping away to the board tab gives
+    // no visual cue that new messages have arrived.
+    const badge = document.getElementById('chat-badge');
+    const mobileBadge = document.querySelector('.mobile-chat-badge');
+    const count = drawerState.unread;
+    const label = count > 99 ? '99+' : String(count);
+    if (count > 0) {
+      if (badge) {
+        badge.textContent = label;
+        badge.classList.remove('hidden');
+        badge.style.display = '';
+      }
+      if (mobileBadge) {
+        mobileBadge.textContent = label;
+        mobileBadge.classList.remove('hidden');
+        mobileBadge.style.display = '';
+      }
+    } else {
+      if (badge) {
+        badge.textContent = '';
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+      }
+      if (mobileBadge) {
+        mobileBadge.textContent = '';
+        mobileBadge.classList.add('hidden');
+        mobileBadge.style.display = 'none';
+      }
+    }
+  }
+
+  if (lobbyToggle && lobbyDrawer) {
+    lobbyToggle.addEventListener('click', () => {
+      if (drawerState.isOpen) {
+        // Close the drawer
+        drawerState.close();
+        lobbyDrawer.classList.remove('open');
+        lobbyToggle.setAttribute('aria-expanded', 'false');
+      } else {
+        // Open the drawer — resets unread
+        drawerState.open();
+        lobbyDrawer.classList.add('open');
+        lobbyToggle.setAttribute('aria-expanded', 'true');
+      }
+      renderDrawerBadge();
+    });
+  }
+
+  // Listen for new chat messages dispatched by socketClient (no circular import)
+  // WHY: mm:chat is dispatched by socketClient.js receiveChat handler so that
+  // the drawer unread counter increments without requiring a direct import.
+  document.addEventListener('mm:chat', () => {
+    drawerState.onMessage();
+    renderDrawerBadge();
   });
 
   // =========================================================================
@@ -849,14 +952,31 @@ document.addEventListener('DOMContentLoaded', () => {
       if (playersPanel) playersPanel.classList.remove('mobile-visible');
       if (chatPanel) chatPanel.classList.remove('mobile-visible');
 
-      if (tab === 'players') {
-        if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
-        if (playersPanel) playersPanel.classList.add('mobile-visible');
-      } else if (tab === 'chat') {
-        const badge = document.getElementById('chat-badge');
-        if (badge) badge.style.display = 'none';
+      if (tab === 'chat') {
+        // WHY: opening the chat tab reads all messages — clear both badge
+        // elements (desktop pill inside lobby-toggle + mobile tab badge) and
+        // reset the drawer unread counter so renderDrawerBadge stays in sync.
+        drawerState.open();
+        renderDrawerBadge();
         if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
         if (chatPanel) chatPanel.classList.add('mobile-visible');
+      } else {
+        // WHY (Finding 1): leaving the chat tab (board OR players) hides the
+        // chat panel but previously never flipped drawerState back to closed,
+        // so ChatDrawerState.onMessage()'s `if (!this.isOpen)` guard stayed
+        // false forever and unread never incremented again after the first
+        // chat open — the .mobile-chat-badge was frozen at 0 for the session.
+        // close() only sets isOpen=false (it does NOT touch unread, so any
+        // count accumulated while closed persists), re-arming unread counting.
+        // This is mobile-only: .mobile-tab buttons are display:none on desktop,
+        // and the desktop drawer is toggled independently via #lobby-toggle, so
+        // this does not affect desktop open/close behaviour.
+        drawerState.close();
+        renderDrawerBadge();
+        if (tab === 'players') {
+          if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
+          if (playersPanel) playersPanel.classList.add('mobile-visible');
+        }
       }
     });
   }

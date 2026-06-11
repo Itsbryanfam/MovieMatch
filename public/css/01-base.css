@@ -188,6 +188,70 @@ body {
   display: flex;
 }
 
+/* Booth Task 0: Second :root block adds the Projection Booth design system
+   on top of the existing brand tokens — appended, never merged, so the
+   cascade order is preserved and a later revert can remove this block
+   cleanly without touching existing declarations.
+
+   WHY a second :root block rather than editing the first:
+   - Cascade is load-bearing in this codebase (spec §11).
+   - Keeps the original tokens exactly as shipped across Phases 1–7.
+   - A clean diff boundary for each Booth task. */
+:root {
+  /* DISPLAY FONT — Saira Condensed is the billing-block voice (real
+     film one-sheet condensed grotesque). Falls back to Plus Jakarta Sans
+     so the UI degrades gracefully while the font loads. */
+  --font-display: 'Saira Condensed', 'Plus Jakarta Sans', sans-serif;
+
+  /* TYPE SCALE — a curated 7-step scale, NOT a strict modular run.
+     t0–t2 follow a ~1.2 ratio off the 16px base (16 / 19.2 / 23); --t-1 is a
+     tighter caption step (16/1.25) and --t3 / --t-display are deliberately
+     larger display jumps (primary headings / billing-block movie title), sized
+     to the approved mockup rather than to a formula. --t-micro sits below
+     the scale as a sub-caption tier for status labels and film-frame micro
+     text — it was added in Booth Task 2 to replace the raw 9.6px literal in
+     the bench ::after rule. Every Booth font-size must reference one of these
+     steps; the ~19 ad-hoc px sizes scattered through the file are intentionally
+     killed over the Booth task arc in favour of it. */
+  --t-micro: 9.6px;  /* sub-caption: status labels, film-frame micro text */
+  --t-1: 12.8px;    /* small labels, captions            */
+  --t0:  16px;      /* body / base                       */
+  --t1:  19.2px;    /* secondary headings, large labels  */
+  --t2:  23px;      /* tertiary headings                 */
+  --t3:  33px;      /* primary headings                  */
+  --t-display: 46px; /* billing-block movie title        */
+
+  /* SEMANTIC ALIASES — point at existing brand values, no new colours.
+     --beam    = the projector light (indigo, already the brand accent).
+     --beam-glow = soft halo around the gate poster and active marker.
+     --cue-hot  = the amber threshold pulse (already --status-warning).
+     Kept as aliases so a single upstream change propagates everywhere. */
+  --beam:      var(--accent-primary);           /* #818cf8               */
+  --beam-glow: rgba(129, 140, 248, .55);        /* wider, softer halo    */
+  --cue-hot:   var(--status-warning);           /* #f59e0b               */
+
+  /* BOOTH EDGE — the border/separator tone for the dark booth surfaces.
+     Slightly lighter than --bg-surface so the panel edges read without
+     needing a fully opaque border-highlight. */
+  --booth-edge: #1f1f26;
+
+  /* TEXT HIERARCHY (3-step) — used in The Bench and other booth surfaces.
+     --text-main (#f8fafc) already exists in the base block above.
+     --text-muted (#a8b2c4) already exists in the base block above.
+     --text-dim is the third tier: de-emphasised status captions (e.g.
+     the default "Seated" label on bench rows). #6b7280 is a cool grey
+     one step below --text-muted — it achieves ~5:1 contrast on
+     --bg-base (#09090b), satisfying WCAG AA for the small --t-micro
+     status labels. The 3-step ramp is: main → muted → dim. */
+  --text-dim: #6b7280;
+
+  /* WHY: --text-on-accent is pure white for text rendered on the indigo
+     accent chip (e.g. .chat-badge-pill, .mobile-chat-badge). --text-inverse
+     is #0f172a (dark navy), so it cannot serve this role. No brand override
+     is needed — the indigo pill is always dark enough for #fff to pass WCAG AA. */
+  --text-on-accent: #fff;
+}
+
 /* .btn — shared base for the button variants (Phase 4). ADDITIVE ONLY:
    `cursor: pointer` is the single declaration all 9 variants
    (.btn-primary/.btn-secondary/.btn-icon/.nav-link-btn/.btn-join-team/

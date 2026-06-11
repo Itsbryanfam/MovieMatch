@@ -444,6 +444,15 @@ export function initSocket() {
             // Phase 7.4: panic is a strict subset of critical — clear it
             // wherever critical is cleared so it can never outlive critical.
             if (timerBar) timerBar.classList.remove('timer-panic');
+            // WHY (booth cue dot): clear the amber dot when the timer stops
+            // (game ended, turn changed, etc.) so it always reflects live state.
+            const cueDotCleanup = document.getElementById('cue-dot');
+            if (cueDotCleanup) cueDotCleanup.classList.remove('cue-hot');
+            // Booth T5 fix: cue-panic is the accelerating-pulse override
+            // (0.45 s vs 0.9 s) declared in 06-states-anim.css. Clear it
+            // in the same cleanup block as cue-hot so it can never outlive
+            // the timer interval (game over, turn change, etc.).
+            if (cueDotCleanup) cueDotCleanup.classList.remove('cue-panic');
             return;
           }
 
@@ -461,6 +470,14 @@ export function initSocket() {
           if (timerBar) {
             timerBar.style.width = percentage + '%';
 
+            // Booth Task 3 — CUE DOT: resolved once per tick inside the
+            // timerBar guard so it shares the exact same thresholds the bar
+            // uses. A single const keeps the lookup outside the
+            // critical/non-critical branches so BOTH branches can toggle it —
+            // there is ONE source of truth and zero chance of the dot going
+            // stale while the bar is updated correctly.
+            const cueDot = document.getElementById('cue-dot');
+
             if (tr <= 10) {
               timerBar.style.backgroundColor = 'var(--timer-red)';
               timerBar.classList.add('timer-critical');
@@ -468,6 +485,19 @@ export function initSocket() {
               // seam so 6–10s correctly CLEARS panic while still inside the
               // critical band — panic ⊂ critical, decided in one place.
               timerBar.classList.toggle('timer-panic', timerSeverity(tr) === 'panic');
+              // WHY (booth cue dot threshold): spec §2 + §7 both say amber at
+              // <5s (the panic band), not the full 10s critical band — the dot
+              // is the reel-change cigarette burn, not a general warning light.
+              // Mirroring timerSeverity 'panic' keeps ONE source of truth and
+              // matches the design intent: silent until the final 5s, then fire.
+              if (cueDot) cueDot.classList.toggle('cue-hot', timerSeverity(tr) === 'panic');
+              // Booth T5 fix: toggle cue-panic alongside cue-hot so the
+              // faster 0.45 s animation-duration override in 06-states-anim.css
+              // activates in the final 5 s. WHY toggle (not add): the timer
+              // tick runs every second; toggle mirrors the same guard as
+              // cue-hot so both classes track timerSeverity in lockstep with
+              // a single source of truth.
+              if (cueDot) cueDot.classList.toggle('cue-panic', timerSeverity(tr) === 'panic');
               if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
                 playTick();
                 setLastTickSound(Math.floor(Date.now() / 1000));
@@ -476,6 +506,13 @@ export function initSocket() {
               timerBar.classList.remove('timer-critical');
               // Phase 7.4: tr>10 → neither critical nor panic.
               timerBar.classList.remove('timer-panic');
+              // WHY (booth cue dot): mirror the bar's "all-clear" — remove
+              // cue-hot so the dot returns to the faint indigo ring at-rest
+              // state when a new turn starts or the timer is reset.
+              if (cueDot) cueDot.classList.remove('cue-hot');
+              // Booth T5 fix: also clear cue-panic in the all-clear branch —
+              // it is a strict subset of cue-hot so both must clear together.
+              if (cueDot) cueDot.classList.remove('cue-panic');
               if (tr <= 30) {
                 timerBar.style.backgroundColor = 'var(--timer-yellow)';
               } else {
@@ -837,14 +874,18 @@ export function initSocket() {
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    const chatPanel = document.querySelector('[data-panel="chat"]');
-    const isMobileVisible = chatPanel && chatPanel.classList.contains('mobile-visible');
-    const isDesktop = window.innerWidth > 767;
+    // WHY (booth drawer): Badge update delegated to app.js via mm:chat event.
+    // The old inline-style block that set #chat-badge.style.display='block' was
+    // removed: #chat-badge now lives inside the desktop lobby-toggle button (a
+    // hidden panel on mobile), so the old guard branch was writing a dead style.
+    // renderDrawerBadge() in app.js owns all badge state via the mm:chat event.
 
-    if (!isDesktop && !isMobileVisible) {
-      const badgeEl = document.getElementById('chat-badge');
-      if (badgeEl) badgeEl.style.display = 'block';
-    }
+    // WHY (booth drawer): notify app.js that a chat message arrived so the
+    // lobby-drawer unread counter can increment. A custom DOM event avoids a
+    // circular import (socketClient ↛ app.js). app.js listens and calls
+    // drawerState.onMessage(). This event fires on every message; the drawer
+    // state itself decides whether to count (only while closed).
+    document.dispatchEvent(new CustomEvent('mm:chat'));
   });
 
   socket.on('receiveReaction', ({ emoji }) => {

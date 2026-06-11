@@ -173,3 +173,95 @@ describe('isClutchSave ↔ rendered .clutch motion class (DOM)', () => {
     expect(heroNode().classList.contains('settled')).toBe(true);
   });
 });
+
+// Booth review-fix [animation-cleanup]: on a WINNING turn the now-playing hero
+// is also the newly-spliced node, so it carries BOTH .booth-splice-enter and
+// .booth-match-win. Regression guarded here: with no compound CSS rule the
+// splice selector (0,5,0) outranked the win-beam selector (0,4,0) and
+// boothWinBeam never fired, so onWinEnd never saw its keyframe end →
+// .booth-match-win was never stripped and the animationend listener leaked
+// every win turn. This test pins the JS contract the CSS fix enables:
+// onWinEnd ignores the splice keyframe and strips the class ONLY when a
+// win-beam-family keyframe ends. (CSS specificity itself is enforced by the
+// rule's existence; jsdom does not compute cascade winners, so we assert the
+// cleanup logic against the keyframe names the corrected CSS guarantees fire.)
+describe('win-turn animation cleanup (booth-match-win)', () => {
+  beforeEach(() => { loadIndexHtml(); initUIElements(); });
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  const display = () => document.getElementById('chain-display');
+  const heroNode = () => display().querySelector('.reel-node.now-playing');
+
+  function chainOf(n) {
+    return Array.from({ length: n }, (_, i) => ({
+      movie: { title: `M${i}`, year: 2000 + i, cast: ['A'], poster: '' },
+      playerName: 'Host',
+      matchedActors: i === 0 ? [] : ['A'],
+    }));
+  }
+
+  // Dispatch an animationend that bubbles from the hero's .reel-poster (where
+  // the keyframes run) up to the heroNode listener — the real event path.
+  function fireAnimEnd(name) {
+    const poster = heroNode().querySelector('.reel-poster');
+    const ev = new Event('animationend', { bubbles: true });
+    // jsdom has no AnimationEvent ctor; set the name the handler reads.
+    ev.animationName = name;
+    poster.dispatchEvent(ev);
+  }
+
+  test('strips .booth-match-win ONLY after boothWinBeam, not after the splice keyframe', () => {
+    // Fresh render of a grown winning chain: prevCount=0 ⇒ grew=true, so the
+    // hero gets .booth-splice-enter AND (via gameState.winner) .booth-match-win.
+    renderGame(
+      makePlayingState({
+        chain: chainOf(3),
+        status: 'finished',
+        winner: { name: 'Host', score: 10 },
+      }),
+      'host_id',
+      false
+    );
+
+    const hero = heroNode();
+    // Both classes coexist on the winning entering hero.
+    expect(hero.classList.contains('booth-match-win')).toBe(true);
+    expect(hero.classList.contains('booth-splice-enter')).toBe(true);
+
+    // The splice keyframe ending first must NOT strip the win class — the old
+    // code only listened for boothWinBeam, which the splice rule suppressed.
+    fireAnimEnd('boothSpliceAdvance');
+    expect(hero.classList.contains('booth-match-win')).toBe(true);
+
+    // The win-beam keyframe ending strips the class (and detaches the listener).
+    fireAnimEnd('boothWinBeam');
+    expect(hero.classList.contains('booth-match-win')).toBe(false);
+
+    // Idempotent: a later stray animationend must not throw or re-toggle.
+    fireAnimEnd('boothWinBeam');
+    expect(hero.classList.contains('booth-match-win')).toBe(false);
+  });
+
+  test('reduced-motion win keyframe (boothWinBeamReduced) also strips the class', () => {
+    // Under prefers-reduced-motion the CSS substitutes boothWinBeamReduced for
+    // boothWinBeam; onWinEnd must accept that family member too or it leaks.
+    renderGame(
+      makePlayingState({
+        chain: chainOf(2),
+        status: 'finished',
+        winner: { name: 'Host', score: 7 },
+      }),
+      'host_id',
+      false
+    );
+
+    const hero = heroNode();
+    expect(hero.classList.contains('booth-match-win')).toBe(true);
+    // Splice (reduced) keyframe alone does not strip…
+    fireAnimEnd('boothSpliceAppear');
+    expect(hero.classList.contains('booth-match-win')).toBe(true);
+    // …the reduced win-beam keyframe does.
+    fireAnimEnd('boothWinBeamReduced');
+    expect(hero.classList.contains('booth-match-win')).toBe(false);
+  });
+});

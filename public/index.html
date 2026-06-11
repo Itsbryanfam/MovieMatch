@@ -65,7 +65,13 @@
   <!-- Phase 7.5.2 (Theater Lobby): JetBrains Mono added for the theater's
        mono section labels / seat numbers / step indicators. Appended to the
        EXISTING Plus Jakarta Sans request — same single <link> tag. -->
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <!-- Booth Task 0: Saira Condensed is the billing-block display voice for
+       the Projection Booth redesign — the condensed grotesque used on real
+       film one-sheets for titles, credits, and the splice-seam type. It is
+       distinct from Plus Jakarta Sans (body) so the two register as separate
+       voices without reading as a mismatch. Appended to the same <link> tag
+       to stay a single HTTP request. -->
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&family=Saira+Condensed:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- style.css was split into ordered partials (Phase 3). Order is the
        original cascade order and is load-bearing — do not reorder. -->
   <link rel="stylesheet" href="css/01-base.css?v=1.4">
@@ -481,10 +487,23 @@
     <!-- GAME SCREEN -->
     <div id="game-screen" class="screen">
       <!-- MOBILE TAB BAR -->
+      <!-- Booth Task 6: relabel tab TEXT to booth voice (Gate / Booth / Lobby)
+           per spec §9 ("relabel Board/Players/Chat → e.g. Gate / Booth / Lobby").
+           IMPORTANT: data-tab VALUES are kept unchanged (board / players / chat)
+           because app.js queries them directly via btn.dataset.tab — changing
+           the values would break the tab-switching logic without any CSS/HTML
+           benefit. Only the visible button text (and emoji) changes here. -->
       <nav class="mobile-tabs" id="mobile-tabs">
-        <button class="mobile-tab active" data-tab="board">🎬 Board</button>
-        <button class="mobile-tab" data-tab="players">👥 Players</button>
-        <button class="mobile-tab" data-tab="chat">💬 Chat <span id="chat-badge" class="hidden"></span></button>
+        <button class="mobile-tab active" data-tab="board">🎞 Gate</button>
+        <button class="mobile-tab" data-tab="players">🎬 Booth</button>
+        <!-- Booth Task 4 fix: mobile chat tab needs its own badge element because
+             #chat-badge lives inside the desktop right-panel aside (hidden on mobile).
+             .mobile-chat-badge is updated in parallel by renderDrawerBadge() in app.js
+             so mobile users see the unread count on the tab bar while the board tab
+             is active. data-tab routing in app.js clears both badges on open. -->
+        <button class="mobile-tab" data-tab="chat">🎟 Lobby
+          <span class="mobile-chat-badge hidden" aria-live="polite" aria-atomic="true"></span>
+        </button>
       </nav>
       <div class="layout-grid">
         <!-- Sidebar -->
@@ -518,6 +537,13 @@
               <span id="turn-indicator" class="status-indicator">Waiting for game to start...</span>
               <div class="input-header-right">
                 <span id="time-text" class="time-text">60s</span>
+                <!-- Booth cue dot: the reel-change "cigarette burn" marker at the
+                     cue edge. Mirrors the timer severity that socketClient.js
+                     already computes (timer-critical / timer-panic classes on
+                     #timer-bar); #time-text stays as the numeric, screen-reader-
+                     safe cue — color alone is NOT the only signal. aria-hidden
+                     keeps this purely visual decoration out of the a11y tree. -->
+                <span id="cue-dot" class="cue-dot" aria-hidden="true"></span>
                 <!-- aria-label gives an accessible name; aria-pressed surfaces the on/off state.
                      title is just a tooltip and is unreliable for screen readers (especially mobile). -->
                 <!-- Phase 4: .btn additive base (cursor:pointer already on btn-icon); zero visual change. -->
@@ -543,8 +569,19 @@
                    announce it as just "button" with no purpose. aria-hidden on the SVG hides
                    the decorative path data so assistive tech reads only the button's accessible name. -->
               <!-- Phase 4: .btn additive base (cursor:pointer already on btn-icon); zero visual change. -->
-              <button id="submit-btn" class="btn btn-icon" aria-label="Submit movie" title="Submit movie" disabled>
+              <!-- Booth Task 3 (Roll It): text label span added beside the
+                   existing SVG so the button reads visually as "▸ Roll It".
+                   The SVG keeps aria-hidden="true" (set above); the span is
+                   aria-hidden so screen readers hear the button label, not the
+                   decorative label text. CSS widens #submit-btn to fit. -->
+              <!-- WCAG 2.5.3 (Label in Name) fix: the visible label is "Roll It"
+                   but the accessible name was "Submit movie", so voice-control
+                   users saying "click Roll It" could not activate it. aria-label
+                   now CONTAINS the visible "Roll It" text while preserving the
+                   submit intent. title unchanged. -->
+              <button id="submit-btn" class="btn btn-icon" aria-label="Roll It — submit movie" title="Submit movie" disabled>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                <span class="roll-label" aria-hidden="true">Roll It</span>
               </button>
             </div>
             <p id="hint-text" class="hint-text">Waiting...</p>
@@ -579,10 +616,22 @@
                   (or nothing) to screen readers. aria-label + title give
                   each reaction a real name; the emoji stays as the visual. -->
              <!-- Phase 4: .btn additive base (cursor:pointer already on reaction-btn); zero visual change. -->
-             <button class="btn reaction-btn" aria-label="React with fire" title="Fire">🔥</button>
-             <button class="btn reaction-btn" aria-label="React with laughter" title="Laugh">😂</button>
-             <button class="btn reaction-btn" aria-label="React with skull" title="Skull">💀</button>
-             <button class="btn reaction-btn" aria-label="React with eyes" title="Eyes">👀</button>
+             <!-- Booth Task 4: data-reaction carries the canonical wire payload so
+                  visible ticket-stub labels can differ from the emoji without
+                  changing what peers receive. reactionPayload(btn) reads this.
+                  WHY: spec §6.5 replaces raw OS emoji with booth-native labels
+                  ("Bravo", "Brutal", "Cut!", "Eyes") so the button text fits
+                  the ticket-stub aesthetic; aria-label + title keep the screen-
+                  reader meaning tied to the original emoji intent. -->
+             <!-- WCAG 2.5.3 (Label in Name) fix: the accessible name must
+                  CONTAIN the visible label so voice-control users saying
+                  "click Bravo" can activate the control. aria-label now leads
+                  with the visible text ("Bravo") and keeps the emoji intent in
+                  parentheses. data-reaction (wire payload) and title unchanged. -->
+             <button class="btn reaction-btn" data-reaction="🔥" aria-label="Bravo (fire reaction)" title="Fire">Bravo</button>
+             <button class="btn reaction-btn" data-reaction="😂" aria-label="Brutal (laugh reaction)" title="Laugh">Brutal</button>
+             <button class="btn reaction-btn" data-reaction="💀" aria-label="Cut! (skull reaction)" title="Skull">Cut!</button>
+             <button class="btn reaction-btn" data-reaction="👀" aria-label="Eyes (eyes reaction)" title="Eyes">Eyes</button>
           </div>
         </main>
         
@@ -597,9 +646,30 @@
             </div>
           </div>
           
-          <div class="sidebar-half chat-half">
+          <!-- Booth Task 4: the chat half is wrapped in a .lobby-drawer so it can
+               slide off-canvas on desktop and be toggled by #lobby-toggle. The
+               #chat-messages/#chat-input/#chat-send-btn ids are preserved (DOM
+               contract §8). The drawer starts CLOSED (no .open class = max-height
+               clipped to header row; app.js adds .open to expand).
+               aria-expanded on #lobby-toggle mirrors this state. -->
+          <div class="sidebar-half chat-half lobby-drawer" id="lobby-drawer">
             <div class="sidebar-header">
+              <!-- Booth Task 4: #lobby-toggle opens/closes the drawer and displays
+                   the unread badge. aria-expanded is managed by app.js wiring. -->
               <h3>Lobby Chat</h3>
+              <!-- WHY: drawer starts closed (aria-expanded="false") so chat
+                   doesn't crowd the right panel on first load. app.js manages
+                   the aria-expanded state and the .open class on the drawer. -->
+              <!-- WHY: explicit type="button" prevents the HTML-spec default of
+                   type="submit" on buttonless forms; also satisfies a11y linters. -->
+              <button id="lobby-toggle" class="btn btn-icon lobby-toggle-btn"
+                      type="button"
+                      aria-label="Toggle lobby chat" title="Toggle lobby chat"
+                      aria-expanded="false" aria-controls="lobby-drawer">
+                <!-- Chevron icon: rotates when drawer closes -->
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                <span id="chat-badge" class="chat-badge-pill hidden" aria-live="polite" aria-atomic="true"></span>
+              </button>
             </div>
             <div id="chat-messages" class="chat-messages">
                 <div class="empty-hint">Start chatting...</div>

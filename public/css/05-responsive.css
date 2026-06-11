@@ -566,19 +566,43 @@
   position: relative;
 }
 
-/* Chat tab badge */
-.mobile-tab[data-tab="chat"] {
-  position: relative;
-}
+/* Chat tab badge — scoped to mobile only so the .chat-badge-pill rules in
+   03-game.css (which shape the numbered pill on the desktop lobby-toggle)
+   are not outranked by this ID selector on wider viewports. Without this
+   @media guard the ID specificity (0-1-0-0) overrides the class (0-0-1-0)
+   at every width, collapsing the pill to a tiny 8px red dot and hiding the
+   unread count text entirely. */
+@media (max-width: 767px) {
+  .mobile-tab[data-tab="chat"] {
+    position: relative;
+  }
 
-#chat-badge {
-  position: absolute;
-  top: 4px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
-  background: var(--status-danger);
-  border-radius: 50%;
+  /* WHY: .mobile-chat-badge is the numbered unread pill for the mobile chat
+     tab button. It mirrors the desktop .chat-badge-pill shape/tokens but is
+     positioned relative to the tab button rather than the lobby-toggle. The
+     separate element ensures mobile users see unread counts even though
+     #chat-badge lives inside the hidden right-panel aside on mobile. */
+  .mobile-chat-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    border-radius: var(--radius-md);
+    background: var(--accent-primary);
+    /* WHY: --text-on-accent (#fff) token from 01-base.css; mirrors the
+       desktop .chat-badge-pill token usage — no raw hex literals. */
+    color: var(--text-on-accent);
+    pointer-events: none;
+  }
+  .mobile-chat-badge.hidden {
+    display: none;
+  }
 }
 
 /* Chat send button */
@@ -616,4 +640,98 @@
 .empty-board-icon  { font-size: 2rem; }
 .empty-board-title { font-size: 1.1rem; font-weight: 600; }
 .empty-board-sub   { font-size: 0.9rem; opacity: 0.8; }
+
+/* =============================================
+   BOOTH TASK 6 — Mobile stack + splice-seam fallback
+   WHY: the booth layout places the beam (chain board) dominant on desktop;
+   on mobile it must stack with beam on top, followed by the bench
+   (players panel) and lobby (chat), both reachable via the existing
+   .mobile-tabs. These rules reuse the existing 767px breakpoint so the
+   cascade is consistent and no new breakpoints are introduced.
+   Spec §9: "Booth stacks: Beam on top; bench + chat behind the existing
+   .mobile-tabs". Selector specificity intentionally matches the mobile
+   block above (same breakpoint, appended later in the file = wins).
+   ============================================= */
+@media (max-width: 767px) {
+
+  /* BOOTH STACK — beam (game-board / feed-container) on top.
+     WHY: beam-first stacking is enforced by the .mobile-tabs default state
+     in app.js (lines ~951-965): the board tab is active on load, so
+     .game-board carries .mobile-visible and both panel elements carry
+     .mobile-hidden. Since only one element occupies the single-column grid
+     at any time, CSS `order` has no layout effect and was removed to
+     prevent misleading future readers. If the DOM tab-init logic ever
+     changes, this comment is the reminder: board-tab must remain the
+     default active tab to satisfy spec §9 "beam on top". */
+
+  /* FEED-CONTAINER — shrink to fit available vertical space.
+     WHY: without a min-height cap the opaque graded-charcoal board
+     (Task 0) stretches full-height and pushes the input area out of
+     reach on short screens. Allowing it to shrink with the existing
+     min-height:0 lets the input-area anchor at the bottom. */
+  .feed-container {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* BENCH PLAYERS panel — full height when active.
+     WHY: the sidebar-players list should fill the visible column so all
+     operator rows are reachable via scroll. Mirrors the chat-half pattern
+     already used in the existing @media block. */
+  [data-panel="players"].mobile-visible .sidebar-players {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  /* SPLICE SEAM horizontal fallback at ≤767px.
+     WHY: spec §9 / §6.1 — the .reel-bridge (connecting-actor splice seam)
+     uses vertical writing-mode on the reference's desktop layout but must
+     fall back to a horizontal credit at narrow widths so the text stays
+     legible and doesn't overflow the single-column strip.
+     The existing Task 1 .reel-bridge rule in 03-game.css already uses
+     horizontal layout (writing-mode not set) — this block makes that
+     explicit and ensures any vertical-mode override from a future Task 1
+     iteration is reliably reset at mobile. It also reduces padding so the
+     seam text doesn't crowd the poster thumbnails at 375px widths, and
+     ensures white-space:normal allows wrapping for long actor names. */
+  .reel-bridge {
+    writing-mode: horizontal-tb !important; /* override if vertical is ever set */
+    transform: none !important;             /* undo any rotate(180deg) for vertical */
+    padding: 0 4px;                          /* 4px — smallest 8px-grid step; tighter than base to avoid crowding posters */
+    font-size: var(--t-1);                  /* 12.8px — minimum legible size for actor names; horizontal scroll handles overflow */
+    white-space: normal;                    /* allow wrap for long names */
+    max-width: 60px;                        /* cap width so it doesn't push posters apart */
+    text-align: center;
+    word-break: break-word;                 /* prevent overflow on hyphen-free names */
+  }
+
+  /* REEL-BRIDGE-BROKEN — same horizontal fallback.
+     WHY: the torn-seam state (.reel-bridge-broken) inherits from the above
+     rule; restate max-width so the broken credit also stays inside the
+     strip's column without overflowing into poster art. */
+  .reel-bridge-broken {
+    writing-mode: horizontal-tb !important;
+    transform: none !important;
+    max-width: 60px;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  /* BENCH OPERATOR ROWS — tighter vertical rhythm on mobile.
+     WHY: the film-frame operator chips (.up-next, .active-turn, etc.)
+     use the box-office status ::after labels which can be wide on small
+     screens. Reduce row padding and clamp the status label to avoid
+     overflow beyond the narrow sidebar. */
+  .sidebar-players li {
+    padding: 4px 8px;   /* 4px vertical, 8px horizontal — nearest 8px-grid steps; tighter than 12px desktop spec to reduce row height on narrow screens */
+  }
+
+  /* CUE DOT — ensure it stays in the header right area, not displaced.
+     WHY: on very narrow screens the input-header-right can wrap; pin the
+     cue dot to avoid layout shift when the keyboard opens. */
+  .cue-dot {
+    flex-shrink: 0;
+  }
+}
 

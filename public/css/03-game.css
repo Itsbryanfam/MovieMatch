@@ -77,13 +77,30 @@
   min-height: 0;
 }
 
+/* Booth Task 0: The board surface moves from glassmorphism (frosted, translucent)
+   to an opaque graded charcoal radial — the "booth-dark" interior.
+   WHY remove backdrop-filter: spec §5.3 explicitly calls out frost as a
+   legibility hazard on a timed competitive screen; the opaque surface also
+   removes any dependency on what is behind the element, making it consistent
+   across devices that handle backdrop-filter at varying quality or not at all.
+   The radial gradient creates a subtle center-brighter / edge-darker lighting
+   that reads as the projector beam illuminating the inside of the booth.
+   All other layout properties (min-height, overflow-y, border-radius, padding,
+   position:relative) are kept unchanged — they are load-bearing for the chain
+   scroll and ::before/::after stacking below. */
 .feed-container {
   flex: 1;
-  min-height: 60vh; /* Forces the glass board to stay expanded when empty */
-  background: rgba(15, 23, 42, 0.65); /* Translucent dark wash */
-  backdrop-filter: blur(var(--blur-xl));
-  -webkit-backdrop-filter: blur(var(--blur-xl)); /* Safari support */
-  border: 1px solid rgba(255, 255, 255, 0.1); /* Glass edge highlight */
+  min-height: 60vh; /* Forces the board to stay expanded when empty */
+  /* Opaque graded charcoal — replaces the translucent frost wash.
+     Center-top is slightly blue-shifted (#15151f) so the projector beam
+     feel is present without adding a chromatic colour; edges fall to near-
+     black (#060608) to form a natural vignette anchor. */
+  background: radial-gradient(120% 80% at 50% 16%, #15151f 0%, var(--bg-base) 56%, #060608 100%);
+  /* Explicitly clear any inherited or future frost declarations — belt-and-
+     suspenders guarantee the frost is gone even if specificity shifts. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid var(--booth-edge); /* Booth-edge tone instead of white-glass */
   border-radius: var(--radius-xl);
   padding: 1.5rem 1.5rem 1.5rem 3.5rem; /* Expanded left padding for timeline */
   overscroll-behavior: contain; /* Don't chain scroll back to body */
@@ -92,8 +109,90 @@
   flex-direction: column;
   gap: 1.25rem; /* Increased gap for visual breathing room */
   scroll-behavior: smooth;
-  position: relative;
-  box-shadow: var(--shadow-lg); /* Deep drop shadow for floating effect */
+  position: relative; /* Stacking context for ::before/::after overlays below */
+  box-shadow: var(--shadow-lg);
+}
+
+/* Booth Task 0 — FILM-GRAIN OVERLAY
+   WHY: neutral analogue texture at very low opacity (5%) anchors the
+   booth-dark surface in physical space without adding warmth or colour.
+   SVG feTurbulence generates the noise inline so there is no extra HTTP
+   request; the steps(3) animation shifts the grain tile slightly on each
+   frame to read as real grain motion without being distracting.
+   mix-blend-mode:overlay lets the grain react to the surface lightness —
+   brighter regions of the radial pick up slightly more texture.
+   pointer-events:none + z-index:0 keep it invisible to clicks and BELOW
+   all real children (real children are lifted to z-index:1 via the rule
+   below). The previous commit used z-index:2 and compensated with a
+   z-index:3 guard on .chain-item — but .chain-item is the LEGACY/DEAD
+   class; renderChainItems no longer emits it. The live chain content is
+   .filmstrip / .reel-node / .now-cast / .empty-board-hint. Setting the
+   overlays to z-index:0 and lifting all direct children with
+   .feed-container > * { z-index:1 } is the robust fix that covers every
+   real child without relying on any specific class name. */
+.feed-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0; /* below all real children — lifted by .feed-container > * rule below */
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: .05; /* ≤6% cap from spec — subtle, not visible as texture at a glance */
+  mix-blend-mode: overlay;
+  animation: boothGrain 1.1s steps(3) infinite;
+  /* will-change matches #poster-carousel's convention (01-base.css): pre-promote
+     the layer so the first animation tick doesn't stutter on Safari. */
+  will-change: transform;
+  /* border-radius matches parent so the grain doesn't bleed past the card edge */
+  border-radius: var(--radius-xl);
+}
+
+/* Booth Task 0 — VIGNETTE OVERLAY
+   WHY: a radial dark vignette around the edges of the board focuses
+   attention on the center (where the chain content lives) and reinforces
+   the projector-lens framing of the booth metaphor.
+   Ported verbatim from .booth::after in the approved reference mockup.
+   z-index:0 keeps it below all real children — same stacking strategy as
+   ::before above. */
+.feed-container::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0; /* below all real children — lifted by .feed-container > * rule below */
+  pointer-events: none;
+  background: radial-gradient(125% 95% at 50% 28%, transparent 55%, rgba(0, 0, 0, .55) 100%);
+  border-radius: var(--radius-xl);
+}
+
+/* Booth Task 0 — GRAIN KEYFRAMES
+   Three-step jitter (translate only, no scale/opacity) keeps the
+   grain alive without triggering repaints on the composite layer.
+   Ported from the reference mockup; named boothGrain (not the reference's
+   generic `grain`) to match this file's verb-noun keyframe convention
+   (dropInNode/revealElement/ghostNodeEnter) and avoid a global name clash. */
+@keyframes boothGrain {
+  0%   { transform: translate(0,    0);   }
+  33%  { transform: translate(-3px, 2px); }
+  66%  { transform: translate(2px, -2px); }
+  100% { transform: translate(0,    0);   }
+}
+
+/* Booth Task 0 (fix) — LIFT LIVE CHAIN CONTENT ABOVE OVERLAYS
+   WHY: The previous guard used .chain-item { z-index:3 }, but .chain-item
+   is the DEAD legacy class — renderChainItems no longer emits it. The live
+   chain renders as .filmstrip → .reel / .reel-node / .reel-bridge / .now-cast,
+   and the empty-board state uses .empty-board-hint. None of those have an
+   explicit z-index, so they were falling UNDER the ::before grain overlay.
+   The robust fix: drop the overlay pseudo-elements to z-index:0, then lift
+   every direct child of .feed-container to z-index:1 with position:relative.
+   This covers .filmstrip, .empty-board-hint, .game-over-banner, and any
+   future sibling without relying on a specific class name. The grain and
+   vignette remain visible in the dark negative space between/around content
+   because mix-blend-mode:overlay only activates where there is underlying
+   colour — the boardgrounds still show texture; posters are opaque on top. */
+.feed-container > * {
+  position: relative; /* Establishes stacking context so z-index takes effect */
+  z-index: 1; /* Above ::before (grain, z-index:0) and ::after (vignette, z-index:0) */
 }
 
 
@@ -571,7 +670,12 @@
   text-align: center;
   position: relative;
   opacity: 0.82;
-  transition: opacity 0.3s ease;
+  /* WHY no transition here: the opacity + transform transition is set on
+     .reel-node in the Booth Task 5 block below (uses --dur-sm / --ease-snap
+     tokens and covers both opacity and transform). The old "transition:
+     opacity 0.3s ease" that lived here was a raw-literal duplicate that the
+     later rule superseded; removing it here avoids the dead declaration and
+     keeps the 0.3s inconsistency with the token system from reappearing. */
 }
 .reel-node.now-playing { opacity: 1; }
 .reel-poster {
@@ -801,5 +905,939 @@
   font-size: 0.9rem;
   flex-shrink: 0;
   margin-left: 0.5rem;
+}
+
+/* ============================================================================
+   BOOTH TASK 1 — Gate frame, sprocket strip, splice seam, billing block
+   WHY: evolves the Phase 7.7 Constellation filmstrip into "film running
+   through a projector gate." All selectors map to the LIVE DOM produced by
+   renderChainItems in ui-render.js — no class names are renamed or removed.
+   Selector mapping (reference → live):
+     .strip        → .filmstrip .reel
+     .perfwrap     → .filmstrip .reel (::before/::after sprocket bands)
+     .cell img     → .reel-poster (non-now-playing)
+     .gate img     → .reel-node.now-playing .reel-poster  (KEEPS existing
+                     indigo border + glow — spec §2 / §6.1)
+     .seam/.splice → .reel-bridge (splice-seam credit in display font)
+     .billing      → .now-cast
+     .billing .title → .now-cast-title
+     .billing .cast  → .now-cast-list
+     .billing .lead  → .now-cast-link (the "linked via" credit line —
+                       it contains the connecting actor's name and is the
+                       closest live equivalent to the one-sheet "lead" credit)
+     .gate.broken  → .reel-node.burned / .reel-node-ghost  (evolved, not removed)
+     .seam.torn    → .reel-bridge-broken  (evolved, not removed)
+   ============================================================================ */
+
+/* ── SPROCKET STRIP ─────────────────────────────────────────────────────────
+   WHY: The .reel flex container is the physical filmstrip. We add top and
+   bottom pseudo-element bands that render repeating sprocket perforations —
+   small rectangular "holes" punched every 9px — so the strip reads as 35mm
+   film running through a gate. The ::before/::after are absolutely positioned
+   outside the flex flow so they don't disturb the existing flex-end alignment
+   of reel-nodes. overflow-y:clip + overflow-clip-margin (already on .reel)
+   keeps them visible above/below without triggering a y-scroll container.
+   Height 6px matches the reference .perfwrap band height; the dark 55%-opaque
+   holes mimic the light-blocking frame holes on film stock. */
+.filmstrip .reel {
+  position: relative; /* establishes stacking context for the perf bands */
+}
+.filmstrip .reel::before,
+.filmstrip .reel::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 6px;
+  /* repeating sprocket holes: 5px transparent gap → 4px dark hole, every 9px */
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 5px,
+    rgba(0, 0, 0, 0.55) 5px 9px
+  );
+  pointer-events: none;
+  z-index: 1; /* sits above the reel background, below the poster nodes */
+}
+.filmstrip .reel::before { top: 0; }
+.filmstrip .reel::after  { bottom: 0; }
+
+/* ── NON-NOW-PLAYING POSTER (film cell) ────────────────────────────────────
+   WHY: Past entries read as smaller, slightly dimmed film cells — the
+   physical analogy of frames that have already passed through the gate.
+   Opacity .62 matches the reference .cell img. The existing 64px width and
+   radius token are kept; we only add the dim and a black-cell background on
+   the parent node to reinforce the celluloid-on-black-strip read. */
+.reel-node:not(.now-playing):not(.reel-node-ghost) .reel-poster {
+  opacity: 0.62;
+}
+/* WHY: a pure-black cell background behind each poster (mirroring reference
+   .cell { background:#000 }) so the slight poster transparency bleeds to
+   black rather than to the booth surface. This INTENTIONALLY also covers ghost
+   (failed-attempt) cells — they are still film cells in the strip — whereas the
+   0.62 dim above excludes ghosts because they carry their own grayscale
+   treatment and shouldn't be double-dimmed. */
+.reel-node:not(.now-playing) {
+  background: #000;
+  padding: 7px 5px;
+}
+
+/* ── GATE FRAME (now-playing poster) ────────────────────────────────────────
+   WHY: The now-playing node is the gate — the film frame actually in the
+   projector aperture. It is enlarged (118px from 104px in the base rule),
+   given a slightly taller black cell padding that reads as the film matte,
+   and allowed to bleed slightly past the reel's safe area for visual weight.
+   CRITICAL: The existing indigo border (2px solid var(--accent-primary)) and
+   glow (0 0 24px rgba(129,140,248,0.55)) on .reel-node.now-playing .reel-poster
+   are KEPT VERBATIM — the spec explicitly requires continuity with the chain
+   board's indigo language (spec §2). We only ADD the enlarged gate treatment
+   on top via the .now-playing node wrapper.
+   The .nowtag equivalent ("IN THE GATE") is a pure-CSS ::before on the node
+   so no JS/DOM change is needed. */
+.reel-node.now-playing {
+  background: #000; /* black film-cell matte behind the gate poster */
+  padding: 9px 7px; /* slightly deeper matte than a regular cell */
+}
+/* Enlarge the gate poster to 118px (up from the shipped 104px base rule).
+   WHY: The gate frame must read as larger / more prominent than the strip —
+   the projector is actively beaming THIS frame. Stays within the reel's
+   flex-end alignment so it sits at the bottom of the strip row. */
+.reel-node.now-playing .reel-poster {
+  width: 118px; /* enlarged gate — overrides the 104px base rule */
+  /* indigo identity preserved + enhanced. The border (2px solid
+     var(--accent-primary)) is NOT touched here, so the 7.7 base rule's border
+     stands. This box-shadow REPLACES the base rule's single 0 0 24px ring
+     (same specificity, later in file), so we RE-DECLARE that exact indigo ring
+     AND layer a wider 38px halo on top — the gate glows more than a regular
+     now-playing node because the projector is actively beaming this frame.
+     (--beam-glow === rgba(129,140,248,.55), same hue, wider radius.) */
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.8),       /* thin black inset to separate poster from matte */
+    0 0 24px rgba(129, 140, 248, 0.55), /* original 7.7 indigo ring — re-declared so the cascade keeps it */
+    0 0 38px var(--beam-glow),          /* wider soft beam halo layered on top */
+    0 16px 40px rgba(0, 0, 0, 0.7);     /* depth shadow below the gate */
+}
+/* "IN THE GATE" label above the now-playing poster — CSS-only, no JS needed.
+   WHY: mirrors the reference .gate .nowtag — a tiny caps label sitting above
+   the poster, typeset in the display font at the smallest scale step. Uses
+   the beam colour so it reads as projector-light copy, not UI chrome. */
+.reel-node.now-playing::before {
+  content: "IN THE GATE";
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--t-1);   /* 12.8px — smallest scale step */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--beam);
+  text-align: center;
+  white-space: nowrap;
+  margin-bottom: 4px; /* gap between the "IN THE GATE" label and the gate poster */
+}
+
+/* ── SPLICE SEAM CREDIT ──────────────────────────────────────────────────────
+   WHY: .reel-bridge is the connecting-actor label between poster nodes.
+   In the booth world it is the SPLICE — the physical join point between the
+   outgoing and incoming reel. The reference .seam .splice is vertical-mode
+   Saira Condensed ALL-CAPS; per spec §6.1 and §9, vertical treatment is
+   desktop-only and a horizontal fallback is formally fine and handled in
+   Task 6. We apply the display font + caps + beam colour here; keep it
+   legible horizontally since the writing-mode vertical adds complexity
+   (and would need a min-height budget that this task doesn't own).
+   The existing ↔ character in the textContent is already part of the
+   live DOM text ("↔ ActorName") — we override the font so the actor name
+   reads as a billing credit, and keep the arrow as a lightweight splice cue.
+   The .tape dashed line is emulated as the border-left of the bridge element. */
+.reel-bridge {
+  font-family: var(--font-display); /* display font — billing voice */
+  font-size: var(--t-1);            /* 12.8px — compact between-poster slot */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-main);   /* full white — the actor name is the splice point */
+  padding: 0 12px;
+  align-self: center;
+  /* WHY: a faint dashed left border mimics the reference .seam .tape dashed
+     vertical line — a visual cue that this is the physical splice joint. */
+  border-left: 1px dashed rgba(255, 255, 255, 0.2);
+  white-space: nowrap;
+}
+
+/* ── BILLING BLOCK ───────────────────────────────────────────────────────────
+   WHY: .now-cast is the one-sheet billing block beneath the gate. The spec
+   (§6.1 / §5.2) calls for:
+     - Title in --font-display, --t-display (≈46px), ALL-CAPS, tight leading
+     - Cast as a credit stack in display font, smaller caps
+     - The connecting actor ("linked via") as the lead credit
+   .now-cast-title  → reference .billing .title
+   .now-cast-list   → reference .billing .cast
+   .now-cast-link   → reference .billing .lead  (the "linked via" line)
+   The 26-char movie title is handled via word-break:break-word so a very
+   long single word folds rather than overflows. A 9-name cast wraps
+   naturally in the inline flow (the dots between names are text nodes, not
+   flex children) — no clamp needed; leading 1.45 gives the stack room.
+   WHY we override the previous font-size rules with scale tokens: the
+   existing 1.1rem/.92rem/.78rem values are the ad-hoc sizes the spec
+   calls out to kill; replacing them with scale tokens is the bounded work
+   scoped to the billing block by Task 1. */
+.now-cast {
+  width: 100%;
+  padding-top: 4px; /* small vertical gap between reel and billing block */
+}
+.now-cast-head {
+  margin-bottom: 6px; /* small gap separating the "linked via" credit from the title below */
+}
+/* The "linked via ActorName" / "chain starts here" line — styled as the
+   one-sheet LEAD credit: display font, small caps, beam colour. */
+.now-cast-link {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--t-1);        /* 12.8px — caption-scale credit line */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--beam);           /* indigo — the connecting actor is "in the beam" */
+  margin-bottom: 4px;
+}
+/* The movie title — typeset as a one-sheet display credit.
+   WHY --t-display (46px): the billing block's prime real estate; the title
+   SHOULD be large and authoritative. word-break:break-word ensures a 26-char
+   title without spaces (worst case) folds across two lines rather than
+   bleeding out of the panel. line-height:.98 matches the reference. */
+.now-cast-title {
+  font-family: var(--font-display);
+  font-size: var(--t-display);   /* 46px billing-block title */
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+  line-height: 0.98;
+  color: var(--text-main);
+  word-break: break-word;        /* handles 26-char titles without overflow */
+  overflow-wrap: break-word;
+}
+/* Cast credit stack — reference .billing .cast.
+   WHY display font + small caps: the one-sheet billing voice; distinguishes
+   the cast listing from body-copy paragraphs. max-width:560px prevents a
+   very wide screen from stretching the cast line into a single hard-to-scan
+   stripe. 9-name cast wraps naturally at the separator dots. */
+.now-cast-list {
+  font-family: var(--font-display);
+  font-size: var(--t-1);          /* 12.8px — billing block caption tier */
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  line-height: 1.6;               /* generous for wrapped 9-name cast */
+  margin-top: 8px;
+  max-width: 560px;               /* prevents ultra-wide stretch */
+}
+/* All cast members share .cast-name — we style the first one as the "lead"
+   (the connecting actor is always listed first by the server). WHY :first-child
+   pseudo: the JS does not add a "lead" class, so CSS structural selection is
+   the only lever available without a DOM change. The spec doesn't mandate a
+   separate class for Task 1; first-of-type emphasis is a faithful translation
+   of the reference .billing .cast .lead pattern. */
+.now-cast-list .cast-name {
+  color: var(--text-muted); /* non-lead cast members: muted */
+}
+.now-cast-list .cast-name:first-child {
+  color: var(--text-main);  /* lead (first listed) gets full brightness */
+  font-weight: 700;
+}
+
+/* ── FAILURE STATES (evolved, not removed) ──────────────────────────────────
+   WHY: The spec (§6.8) says "evolve into the booth language: a failed splice =
+   the incoming strip jumps the sprockets + the seam tears red." The existing
+   .reel-node.burned / .reel-node-ghost / .reel-bridge-broken rules from Phase
+   7.7/7.8 are KEPT — we add booth-flavoured augmentation on top.
+
+   .reel-bridge-broken (live class on broken ghost bridge):
+     Already ships with color:var(--status-danger) and a ghostBridgeEnter anim.
+     Add the torn-seam tape treatment: red dashed left-border (matching the
+     healthy .reel-bridge treatment but in danger red) so the break point is
+     visually clear. Override the font to match the splice-seam voice. */
+.reel-bridge-broken {
+  font-family: var(--font-display);  /* same display voice as the healthy seam */
+  font-size: var(--t-1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-left: 1px dashed var(--status-danger); /* torn red seam */
+  /* existing color:var(--status-danger) and animation are inherited from the
+     Phase 7.8 .reel-bridge-broken rule above — not removed or overridden. */
+}
+
+/* .reel-node-ghost: already ships with grayscale + dashed-red border + ✗ stamp.
+   The booth "strip jumps the sprockets" treatment: a subtle horizontal translate
+   to suggest the frame has mis-seated in the gate. No new transform animation —
+   the existing ghostNodeEnter handles entry. Just a small settled-state offset.
+   WHY only 4px: enough to read as "misaligned" without looking broken-by-CSS. */
+.reel-node-ghost {
+  transform: translateX(4px); /* mis-seated frame — augments Phase 7.8 rules */
+}
+
+/* .reel-node.burned: already ships with opacity:.6, grayscale/brightness filter,
+   and warm amber border. Add the film-cell matte background so burned nodes
+   still read as physical film, not floating poster fragments. */
+.reel-node.burned {
+  background: #000;   /* same black cell matte as live nodes */
+  padding: 7px 5px;   /* same cell padding */
+}
+
+/* ── MOBILE OVERRIDES ────────────────────────────────────────────────────────
+   WHY: at 767px and below, the billing title at --t-display (46px) would
+   dominate the narrow viewport. Scale it to --t3 (33px) — still clearly a
+   display title, but comfortable in the mobile column. The splice-seam bridge
+   stays legible at --t-1 (no change needed). */
+@media (max-width: 767px) {
+  .now-cast-title {
+    /* supersedes the Phase 7.7 mobile block's ad-hoc `font-size: 1rem` (same
+       @media, earlier in file → this wins); that stale value can be dropped in
+       a later DS-cleanup pass — here we put the mobile title on the Booth scale. */
+    font-size: var(--t3); /* 33px — scaled down from 46px for narrow viewports */
+  }
+  /* WHY: the gate poster enlargement (118px) is fine on tablet widths but on
+     very narrow phones it can crowd the reel. The existing 76px mobile override
+     in the Phase 7.7 media block handles .reel-node.now-playing .reel-poster;
+     we need to also reset the cell padding on the now-playing node itself. */
+  .reel-node.now-playing {
+    padding: 7px 5px; /* match regular cell padding on mobile */
+  }
+}
+
+/* ── BOOTH TASK 2: THE BENCH ────────────────────────────────────────────────
+   Restyle the player roster sidebar into "The Bench" — operators as small
+   film-frame chips with box-office status labels.
+
+   Design law (spec §6.2 + reference .bench/.op/.frame):
+   - The bench is the left column; operators are stacked film-frame chips.
+   - Each chip: a sprocket-notched frame badge (initial) + name + status label.
+   - Status conveyed by a visible text label (a11y §10: not color alone).
+   - States: On Screen (active turn) / Up Next / Seated (default) / Walked Out (eliminated).
+   - Active operator: indigo beam treatment (--beam border + --beam-glow).
+   - Up Next: quieter warm highlight (no beam glow — subdued).
+   - Eliminated: dimmed + struck (existing opacity/line-through kept, label added).
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Bench container — the bench itself is the players sidebar.
+   WHY: deepen the surface to --bg-base (near-black) so the chips have breathing
+   room against the board's --bg-surface. Keep existing border-radius/flex. */
+.sidebar[data-panel="players"] {
+  background: var(--bg-base); /* darker than generic sidebar — the bench interior */
+  border-color: rgba(255, 255, 255, 0.05); /* very faint edge — booth-dark seam */
+}
+
+/* Bench section label — the caption "The Bench · N operators".
+   WHY --font-display + small-caps uppercase: matches the reference .bench .cap
+   style; condensed grotesque grounds the sidebar in the booth typographic voice
+   without using the same ALL-CAPS billing weight as the gate title. */
+.sidebar[data-panel="players"] .sidebar-header h3 {
+  font-family: var(--font-display); /* Saira Condensed — the booth voice */
+  font-size: var(--t-1);            /* 12.8px — small cap weight */
+  text-transform: uppercase;
+  letter-spacing: 0.12em;           /* wider than default 0.05em — reference .bench .cap */
+  color: var(--text-dim);           /* --g3 equivalent — subdued, not the main label */
+  font-weight: 600;
+}
+
+/* Operator row — the film-frame chip.
+   WHY flex-wrap: the row holds [badge] [name score flex-1] and we add a
+   ::after status label that sits flush right. flex-wrap:wrap + align-items:center
+   lets the label overflow gracefully without truncating the score on narrow widths. */
+.sidebar-players li {
+  display: flex;
+  align-items: center;
+  /* WHY justify-content: space-between: badge (fixed width) + name (flex:1)
+     + score (flex-shrink:0) must lay out left→right with the score pinned
+     to the right edge. The base .sidebar-players rule had this; re-declaring
+     it here because the Booth Task 2 block adds display:flex + align-items
+     explicitly and the browser resets justify-content to 'normal' in the new
+     declaration context — without it the score drifts left next to the name. */
+  justify-content: space-between;
+  flex-wrap: wrap;          /* Bug 2b fix: without this the ::after status label sits
+                               inline to the right of the score instead of wrapping onto
+                               its own line below the name+score pair as intended. The
+                               ::after has width:100% so it forces itself to line 2 while
+                               name (flex:1) and score (flex-shrink:0) stay on line 1. */
+  gap: 10px;               /* chip gap matches reference .op: 10px */
+  padding: 8px 10px;       /* tighter than 0.75rem 1rem — chip feel, not card */
+  margin-bottom: 6px;      /* reference .ops: 7px gap */
+  border-radius: 4px;      /* minimal radius — film-frame chip, not a card bubble */
+  font-size: var(--t-1);   /* 12.8px — consistent with bench type scale */
+  background: transparent;
+  border: 1px solid transparent;
+  /* WHY specific props instead of 'all': only animate paint/composite properties
+     (border-color, box-shadow, opacity) — not layout props. Animating 'all'
+     forces layout recalculations on every frame and can cause jank on low-end
+     devices; targeted props stay on the compositor thread. */
+  transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+  position: relative;      /* stacking context so ::after is positioned */
+}
+
+/* Film-frame chip badge — the player initial(s).
+   Rendered via the first <span> (name) being prefixed by a ::before on the li
+   so we DON'T change markup. Instead, we style the <span> that holds the name
+   as a flex row with a generated initial badge.
+
+   WHY ::before on the li, not a new element: the spec explicitly says "no markup
+   changes needed" for status; applying the same approach here keeps the render
+   function untouched (no new <span> for the badge). The initial is the first
+   character of the name span's text content, but CSS cannot extract text — so
+   we build the visual badge with the frame shape + sprocket nicks, using the
+   li::before as the frame and relying on the player name span being the second
+   flex child (the badge is the ::before, the name is the span).
+
+   IMPLEMENTATION CHOICE: pure-CSS badge. The ::before pseudo creates a 30×34px
+   frame (matching reference .frame dimensions) with sprocket perforations via
+   repeating-linear-gradient on ::before content areas. Since we cannot generate
+   the player initial from CSS alone, we render the badge as an anonymous frame —
+   the name + status label convey the identity and state. The indigo beam border
+   on active-turn provides the strong visual cue. */
+/* Bug 1 fix: scope the film-frame badge ONLY to real player rows.
+   .game-team-header, .solo-run-label, and .spectator-count are non-player rows
+   emitted by renderPlayerSidebar; they must not receive the badge pseudo-element. */
+.sidebar-players li:not(.game-team-header):not(.solo-run-label):not(.spectator-count)::before {
+  content: "";
+  display: block;
+  width: 30px;           /* reference .frame: 30px */
+  height: 34px;          /* reference .frame: 34px */
+  flex-shrink: 0;
+  border-radius: 2px;    /* reference .frame: 2px */
+  /* WHY background-color not background shorthand: using the shorthand here
+     would reset background-image to 'none', requiring a re-declaration below.
+     Using background-color directly keeps the base fill and the image layers
+     in separate, non-competing declarations — one of each, no redundancy. */
+  background-color: var(--bg-elevated); /* --booth-surface equivalent */
+  border: 1px solid rgba(255, 255, 255, 0.08); /* faint frame edge */
+  /* Sprocket perforations — top and bottom nicks via two-stop repeating gradient
+     layered over the --bg-elevated base. The reference uses ::before and ::after
+     on .frame; here we synthesise both bands into a single background-image since
+     the li::before is already the pseudo-element we're using.
+     WHY 2 layers not 3: the original had a redundant 'none' third layer that
+     caused a layer-count mismatch with background-size/background-position
+     (2 values each vs 3 layers), so the browser silently discarded the extra.
+     Dropped to keep counts consistent: 2 gradients / 2 sizes / 2 positions. */
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.6) 0 2px,
+      transparent 2px 5px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.6) 0 2px,
+      transparent 2px 5px
+    );
+  background-size: auto 2px, auto 2px;
+  background-position: 3px top, 3px bottom;
+  background-repeat: repeat-x, repeat-x;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* Name span — the operator name.
+   flex:1 so it takes all space between the badge and the score. Overflow
+   truncation prevents long names from pushing the score off. */
+.sidebar-players li > span:first-child {
+  flex: 1;                /* takes remaining space */
+  min-width: 0;           /* required for text-overflow in a flex child */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--t-1);  /* 12.8px */
+  font-weight: 600;
+  color: var(--text-muted); /* subdued until "on screen"; --text-muted = #a8b2c4 */
+}
+
+/* Score span — box-office admission count.
+   WHY flex-shrink:0: the score must NEVER be truncated — spec says "do not hide
+   the score". Sitting after the name in the flex row it would be pushed out
+   without this guard. */
+.sidebar-players li > span:last-of-type {
+  flex-shrink: 0;         /* score must not be truncated */
+  font-family: var(--font-display); /* tabular feel via condensed digits */
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-1);
+  color: var(--text-dim);
+}
+
+/* Status label — box-office vocabulary via ::after, so no markup change.
+   WHY ::after for status: spec §10 requires status conveyed by label, not color
+   alone. Pure-CSS ::after carries real text content (read by screen readers in
+   modern browsers) and requires zero markup change — satisfying the a11y
+   requirement while honoring the "CSS-first, no unnecessary markup" constraint.
+   Layout: the label sits on a new flex line below the name+score pair (flex-wrap
+   on the li parent means the ::after flows onto the next line at full width).
+
+   Bug 1 fix: the default "Seated" label is scoped to real player rows via :not().
+   Without this exclusion .game-team-header, .solo-run-label, and .spectator-count
+   (all <li> elements emitted by renderPlayerSidebar for non-player purposes) would
+   also receive the "Seated" label. */
+.sidebar-players li:not(.game-team-header):not(.solo-run-label):not(.spectator-count)::after {
+  /* Default status: Seated — every operator not otherwise classified */
+  content: "Seated";
+  display: block;
+  width: 100%;                           /* fills the wrapped flex line */
+  padding: 0 0 0 40px;                   /* indent to align under the name, past the badge */
+  font-family: var(--font-display);      /* Saira Condensed — bench voice */
+  font-size: var(--t-micro);             /* 9.6px — on-scale sub-caption step; reference .op .st: .6rem */
+  text-transform: uppercase;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;               /* reference .op .st */
+  color: var(--text-dim);               /* --g3 equivalent — grey, subdued */
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* ── ACTIVE TURN → "On Screen" ──────────────────────────────────────────── */
+/* Active operator row: indigo beam treatment (border + glow).
+   WHY this matches the reference .op.on: the active player IS the projector
+   beam — they are "On Screen". The beam color + glow is rationed to exactly
+   this one element on the bench (spec §1: one accent, rationed). */
+.sidebar-players li.active-turn {
+  background: var(--accent-glow);          /* subtle indigo fill */
+  border-color: var(--beam);              /* indigo beam border */
+  box-shadow: 0 0 0 1px var(--beam), 0 0 16px var(--beam-glow); /* beam halo */
+}
+
+/* Active turn badge — indigo frame matching the beam border */
+.sidebar-players li.active-turn::before {
+  border-color: var(--beam);
+  box-shadow: 0 0 0 1px var(--beam), 0 0 16px var(--beam-glow);
+  background-color: var(--bg-elevated);
+}
+
+/* Active turn name — full brightness, matches reference .op.on .nm */
+.sidebar-players li.active-turn > span:first-child {
+  /* WHY --text-main: the active operator is "On Screen" — full brightness.
+     --text-main (#f8fafc) is the primary text token; --text-primary was
+     undefined and fell back to inherited color, rendering incorrectly. */
+  color: var(--text-main);
+}
+
+/* Active turn status label — "On Screen" in beam color */
+.sidebar-players li.active-turn::after {
+  content: "On Screen";
+  color: var(--beam);   /* indigo — the one chromatic label on the bench */
+}
+
+/* ── UP NEXT → "Up Next" ────────────────────────────────────────────────── */
+/* Up Next row: quieter than active — a warm border at low opacity to signal
+   "you're on deck" without competing with the beam. */
+.sidebar-players li.up-next {
+  border-color: rgba(255, 255, 255, 0.1); /* faint warm edge — not beam */
+  background: rgba(255, 255, 255, 0.02);  /* barely visible — breadcrumb, not spotlight */
+}
+
+/* Up Next name — slightly brighter than seated, less than active */
+.sidebar-players li.up-next > span:first-child {
+  /* WHY --text-muted: mid-tier brightness — brighter than dim (seated) but
+     below main (active). --text-secondary was undefined; --text-muted
+     (#a8b2c4) is the correct secondary text token in this design system. */
+  color: var(--text-muted);
+}
+
+/* Up Next status label — "Up Next" in mid-grey (reference .op.up .st: --g2) */
+.sidebar-players li.up-next::after {
+  content: "Up Next";
+  color: var(--text-muted); /* --g2 equivalent — visible but not beam; --text-secondary was undefined */
+}
+
+/* ── ELIMINATED → "Walked Out" ──────────────────────────────────────────── */
+/* Eliminated row: existing opacity:0.4 + line-through preserved — we only
+   layer the status label on top. The row already communicates "out" via the
+   visual treatment; the label makes it explicit for screen readers. */
+.sidebar-players li.eliminated {
+  /* Existing rules (opacity: 0.4; text-decoration: line-through) are preserved
+     above in the file; this block adds nothing structural — the ::after is the
+     only new layer. */
+}
+
+/* Walked Out status label */
+.sidebar-players li.eliminated::after {
+  content: "Walked Out";
+  color: var(--text-dim);       /* faint — matches the dimmed row context */
+  text-decoration: none;        /* Bug 2a fix: .eliminated sets text-decoration:line-through
+                                   which inherits into this pseudo-element. The player NAME
+                                   should remain struck through (communicates elimination),
+                                   but the status label should read cleanly for screen readers
+                                   and visual clarity. Reset here to override the inherited value. */
+}
+
+/* ── CONFLICT GUARD: active-turn takes precedence over up-next ───────────── */
+/* WHY: in theory nextAliveIndex never returns currentTurnIndex, but CSS needs
+   an explicit resolution if both classes somehow coexist (e.g. single-survivor
+   wrap edge in a future mode). active-turn wins the beam treatment. */
+.sidebar-players li.active-turn.up-next::after {
+  content: "On Screen"; /* active-turn semantic wins */
+  color: var(--beam);
+}
+
+/* ============================================================================
+   BOOTH TASK 3 — SPLICE CONSOLE, CUE DOT, FLOATING SUGGESTIONS
+   ============================================================================ */
+
+/* ── CUE DOT ─────────────────────────────────────────────────────────────── */
+/* WHY (cue dot at rest): the "cigarette burn" marker is a projector-room
+   concept — a subtle ring of projector-beam indigo at the cue edge of the
+   input header. It carries no urgency at rest; the faint opacity reads as a
+   passive indicator only. It sits next to #time-text so both signals
+   (numeric text + visual dot) live in the same eye zone and reinforce
+   each other for all users. Sized at 12px to be touch-visible but not
+   dominant alongside the time number. */
+.cue-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  /* Faint indigo ring at rest — projector light, not alert */
+  border: 2px solid var(--beam);
+  opacity: 0.45;
+  flex-shrink: 0;
+  vertical-align: middle;
+  /* Smooth transition into the hot state so the change is noticeable
+     without being harsh — 200ms is below the "feels slow" threshold for
+     urgency signals. */
+  transition: background-color 0.2s ease, border-color 0.2s ease,
+              opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* WHY (cue-hot): at ≤10s (critical band) the dot turns amber — --cue-hot is
+   the exact same token as --status-warning (#f59e0b), already used for the
+   yellow timer bar. The pulse animation (burn) mirrors the reference .cue.hot
+   rule: scale 1→1.28→1 at 0.9s infinite, using ease-in-out so the expand is
+   fast and the contract is gentle — reads as a heartbeat, not a flash.
+   box-shadow adds an amber halo so the indicator is legible against both
+   dark and mid-grey backgrounds (the input area varies). */
+.cue-dot.cue-hot {
+  background: var(--cue-hot);       /* amber fill */
+  border-color: var(--cue-hot);     /* border matches fill — solid dot */
+  opacity: 1;
+  box-shadow: 0 0 10px var(--cue-hot);   /* amber halo */
+  animation: cueDotBurn 0.9s ease-in-out infinite;
+}
+
+/* WHY (cueDotBurn keyframe): named with the booth-verb-noun convention
+   (same as boothGrain above) to avoid colliding with any future generic
+   `burn` keyframe. Scale 1→1.28→1 ported from reference .cue.hot @keyframes
+   burn — the 28% scale-up is large enough to read at 12px but won't push
+   adjacent text around (the dot is inline-block with fixed size). */
+@keyframes cueDotBurn {
+  0%,  100% { transform: scale(1);    }
+  50%       { transform: scale(1.28); }
+}
+
+/* ── SPLICE CONSOLE (#input-area → console) ──────────────────────────────── */
+/* WHY (splice console): the input area is the "splice console" — the physical
+   control surface from which the operator rolls the next reel. Porting the
+   reference .console border-top treatment and a slightly darker background
+   to make it read as a distinct panel below the board. We keep all padding,
+   border-radius, and overflow:visible from the existing rule (they're load-
+   bearing for the timer-wrapper absolute positioning and the floating
+   dropdown anchor). Only the surface treatment is evolved. */
+.input-area {
+  /* Booth-dark console surface — slightly deeper than the board sidebar
+     so the console reads as a physical panel rather than a sibling card.
+     Using --bg-elevated (one step darker than --bg-surface) to stay within
+     the defined token set. */
+  background: var(--bg-elevated);
+  /* Booth-edge border tone — matches the gate/perf matte separators in T1 */
+  border-color: var(--booth-edge);
+  /* Top accent seam — a 1px indigo line at the very top of the console
+     (inside the border) to echo the splice-tape motif. Layered via
+     background (not border) so it doesn't interfere with the timer-wrapper
+     that sits at top:0 absolutely. */
+  border-top: 1px solid rgba(129, 140, 248, 0.18); /* 0.18 = beam at ~18% alpha — no token exists at this step; update if --beam-subtle is added to 01-base.css */
+}
+
+/* ── ROLL IT BUTTON (#submit-btn) ────────────────────────────────────────── */
+/* WHY (Roll It key): the submit button is the "Roll It" operator key — the
+   one decisive action on the console. The reference .roll styling (display
+   font, uppercase, gradient fill) is adapted here while keeping the EXISTING
+   id, aria-label, SVG icon, and .btn/.btn-icon base classes intact. A text
+   label span is added in index.html beside the SVG so the visual reads as
+   "▸ Roll It"; the SVG stays for screen readers (aria-hidden already set on
+   it). Width is widened to fit both the icon and label. */
+#submit-btn {
+  /* Wider key — needs room for icon + "Roll It" text */
+  width: auto;
+  min-width: 90px;
+  padding: 0 1rem;
+  gap: 0.4rem;
+  /* Display font in uppercase — billing-block voice, same as bench labels */
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--t-1);   /* 12.8px — compact key label */
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  /* Gradient from reference .roll: beam-hover → beam (left-to-right) */
+  background: linear-gradient(135deg, var(--accent-primary-hover), var(--accent-primary));
+  /* Keep the inherited color:#fff, border:none, border-radius, cursor,
+     transition from .btn-icon — only surface and typography are overridden */
+}
+
+/* WHY (roll-label): the text inside the Roll It key is a visual-only
+   decoration alongside the SVG icon. It inherits the button's font-family
+   (--font-display via #submit-btn) and color (#fff) automatically. This rule
+   just ensures the span never wraps or adds unexpected block layout. */
+.roll-label {
+  display: inline;
+  white-space: nowrap;
+  /* Inherits font-family, text-transform, letter-spacing, font-weight, color
+     from #submit-btn — no need to repeat them here. */
+}
+
+/* Disabled Roll It state — muted console key, matches reference .roll.dim */
+#submit-btn:disabled {
+  background: var(--booth-edge);
+  color: var(--text-dim);
+  /* Remove box-shadow from .btn-icon:disabled so the dim state is flat */
+  box-shadow: none;
+}
+
+/* ── FLOATING SUGGESTIONS DROPDOWN (desktop + mobile) ───────────────────── */
+/* WHY (un-hide on desktop): the floating dropdown is the primary suggestions
+   surface post-Task-3. It's anchored inside #input-area (position:relative)
+   so it floats directly above the console — exactly where the player's eye
+   is. The right-rail autocomplete-container stays as a harmless fallback but
+   is no longer the primary affordance.
+   The base .mobile-ac-dropdown { display:none } at ~L339 stays as the closed
+   state. The .open rule below uses higher specificity (two-class selector)
+   to show the panel, overriding the L339 base regardless of source order.
+   No mobile-only breakpoint guard existed in JS — the CSS was the sole gate. */
+
+/* WHY (open state): when autocomplete populates the dropdown, JS adds .open.
+   We make it visually float above the console, anchored to the bottom edge
+   of #input-area. z-index:10 clears the grain/vignette overlays (z-index:0)
+   and the sidebar (z-index:auto) without conflicting with modals (z-index:50+).
+   max-height + overflow-y let a long result list scroll without pushing the
+   rest of the layout. The translucent dark background echoes the board surface
+   and matches the existing autocomplete-item hover treatment. */
+.mobile-ac-dropdown.open {
+  display: block;
+  position: absolute;
+  /* Anchor to bottom of #input-area (which is position:relative).
+     A negative bottom offset pulls the dropdown UP so it sits just above
+     the input row, not below (the console is near the viewport bottom). */
+  bottom: calc(100% + 4px); /* 4px gap above the #input-area top edge —
+     bottom is measured from the containing block (#input-area,
+     position:relative) bottom edge, so calc(100%+4px) places the
+     dropdown just above #input-area */
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: var(--bg-elevated);
+  border: 1px solid var(--booth-edge);
+  border-radius: var(--radius-md);
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.55);
+}
+
+/* WHY (overflow anchor): the floating dropdown overlaps content above it.
+   The scrollable .feed-container does not need to know about it because the
+   dropdown is absolutely positioned out of flow. Ensure it doesn't clip
+   against the input-area overflow:visible rule (already set). */
+
+/* ── BOOTH TASK 4: LOBBY DRAWER ─────────────────────────────────────────── */
+/* WHY: chat lives in a collapsible drawer so it doesn't crowd the suggestions
+   half on desktop. The drawer slides off-canvas to the right when closed
+   (transform + overflow:hidden on the parent), showing only the header/toggle.
+   The .open class restores full height. On mobile the existing mobile-tabs
+   flow handles visibility, so the drawer transition is desktop-only (≥768px). */
+
+/* Drawer toggle button in the sidebar header — sits beside the "Lobby Chat"
+   heading. The badge pill overlays the chevron icon. */
+.lobby-toggle-btn {
+  /* WHY: sit beside the "Lobby Chat" h3 without pushing it; auto left-margin
+     keeps it right-aligned inside the flex header. */
+  margin-left: auto;
+  position: relative;
+  padding: 0.35rem 0.5rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+.lobby-toggle-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+
+/* WHY: flex the header so the h3 and toggle sit side-by-side. The .sidebar-header
+   rule already uses padding; we only add flex here (additive). */
+.sidebar-half.chat-half .sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Chevron rotates 180° when the drawer is open so it points up (close) vs
+   down (open). The aria-expanded attribute drives it so state is accessible. */
+.lobby-toggle-btn[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lobby-toggle-btn[aria-expanded="false"] svg {
+  transform: rotate(0deg);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Unread badge pill — overlays top-right of the toggle icon.
+   WHY: small number badge makes it clear at a glance how many messages
+   arrived while the drawer was closed, without needing a separate indicator. */
+.chat-badge-pill {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  /* WHY: --radius-md (8px) matches the design-system token from 01-base.css
+     instead of a raw literal, keeping all radii tokenised. */
+  border-radius: var(--radius-md);
+  background: var(--accent-primary);
+  /* WHY: --text-on-accent (#fff) from 01-base.css; the indigo chip is dark
+     enough for white text to pass WCAG AA. --text-inverse is dark navy, not
+     usable here. */
+  color: var(--text-on-accent);
+  pointer-events: none;
+}
+.chat-badge-pill.hidden {
+  display: none;
+}
+
+/* Drawer collapse: when .open is NOT present on desktop, shrink the chat half
+   to just the header row so content is hidden without removing from DOM
+   (preserves scroll position and ids). Only applied ≥ 768px; mobile uses the
+   tab-bar pattern instead.
+   WHY: max-height + overflow:hidden gives a CSS transition with no JS layout
+   jank. We default to closed (max-height clips to the header row until
+   .open is added). */
+@media (min-width: 768px) {
+  .lobby-drawer {
+    /* WHY: default (closed) state clips to just the header row (~52px) so
+       chat doesn't crowd the right panel on first load. The .open class
+       expands to full height. Using max-height for the transition avoids
+       needing a fixed height on the open state (content-driven). */
+    max-height: 52px;
+    overflow: hidden;
+    /* 320ms --ease-gate — spec §7 slow-entrance step; panel-scale reveal. */
+    transition: max-height 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Open state: app.js adds .open when the toggle is clicked. */
+  .lobby-drawer.open {
+    /* WHY: 600px is a generous cap; the sidebar will never be that tall so
+       max-height effectively means "natural height". */
+    max-height: 600px;
+  }
+
+  /* Hide messages and input when collapsed so keyboard focus can't reach them. */
+  .lobby-drawer:not(.open) .chat-messages,
+  .lobby-drawer:not(.open) .chat-input-wrapper {
+    /* WHY: visibility:hidden removes from tab order (a11y) when collapsed;
+       combined with max-height clip, the content is truly inaccessible. */
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+/* ── BOOTH TASK 4: TICKET-STUB REACTIONS ──────────────────────────────────── */
+/* WHY: plain emoji buttons break the booth aesthetic and couple visible text
+   to the wire payload. Die-cut ticket stubs (perforation notch on the left)
+   give each reaction booth physicality while the data-reaction attribute
+   carries the emoji payload independently of the label text.
+   Ported from reference .stub; applied on top of the existing .reaction-btn
+   base rules in 04-modals.css (which handle min-height/tap targets). */
+.reaction-btn {
+  /* WHY: replace pill shape with the booth's rectangular ticket look.
+     A small border-radius keeps it approachable, not cold. */
+  font-family: var(--font-display, 'Saira Condensed', 'Plus Jakarta Sans', sans-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--t-1, 12.8px);
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--booth-edge, var(--border-subtle));
+  /* WHY: --radius-sm (6px) token from 01-base.css; avoids raw literals. */
+  border-radius: var(--radius-sm);
+  /* WHY: grid-conforming steps (spec §5.4 — 4/8/12/16px grid): 4px top/bottom,
+     8px right, 16px left. The wider left padding gives the perforation notch
+     (::before at left:6px) 10px of clear space — notch still fits comfortably. */
+  padding: 4px 8px 4px 16px;
+  position: relative;
+  /* Keep the tap-target size from 04-modals.css (min-height:44px). The
+     padding reduction is safe because the existing min-height floor holds. */
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Die-cut perforation: a dashed vertical line 6px from the left edge,
+   mimicking a tear-off stub notch. Ported from reference .stub::before. */
+.reaction-btn::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  /* WHY: repeating-linear-gradient creates the dashed perforation pattern
+     without an extra element. Color uses --text-dim alias which resolves to
+     the same dimmed grey as the reference's --g3. Falls back to border-subtle
+     if --text-dim is not defined. */
+  background: repeating-linear-gradient(
+    var(--text-dim, var(--border-subtle)) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+.reaction-btn:hover {
+  color: var(--text-main);
+  border-color: var(--beam, var(--accent-primary));
+  /* WHY: keep the existing scale/lift hover from 04-modals.css — it signals
+     interactivity. No change needed; just declare so the stub border shows. */
+}
+
+/* ============================================================================
+   BOOTH TASK 5 — MOTION TRANSITION HOOKS
+   WHY (in 03-game.css not 06-states-anim.css): the layout rules for
+   .reel-node, .reel-bridge, and .reel-poster live in this file. Adding
+   the transition hook here keeps the rule and its transition together in
+   the same file — the composite layer declaration belongs with the
+   element's base layout. The keyframes and curve tokens live in
+   06-states-anim.css as spec requires.
+   ============================================================================ */
+
+/* REEL-NODE — transition into the booth-splice-enter and booth-gate-flare
+   states so nodes that ARE already visible (re-entering after a re-render)
+   transition gracefully rather than snapping.
+   WHY only opacity + transform: these are the only properties the Task 5
+   keyframes animate; specifying only them avoids accidentally animating any
+   layout property (width, height, padding) set elsewhere on .reel-node.
+   Duration uses --dur-sm (200ms) as a safe default; the keyframe animations
+   declared in 06-states-anim.css override this where a specific duration
+   is required (animation beats the transition for the same property). */
+.reel-node {
+  transition: opacity var(--dur-sm, 200ms) var(--ease-snap, ease),
+              transform var(--dur-sm, 200ms) var(--ease-snap, ease);
+}
+
+/* REEL-BRIDGE — seam text transition.
+   WHY: the seam fades in over 110ms (boothSeamFade). Adding an opacity
+   transition here ensures that even without the .booth-seam-enter class
+   the bridge cross-fades gracefully when its text changes (e.g. when a
+   new movie is played and the connecting-actor name updates). Duration
+   --dur-xs (120ms) is the shortest spec step — matches the seam-fade beat. */
+.reel-bridge {
+  transition: opacity var(--dur-xs, 120ms) var(--ease-snap, ease);
 }
 

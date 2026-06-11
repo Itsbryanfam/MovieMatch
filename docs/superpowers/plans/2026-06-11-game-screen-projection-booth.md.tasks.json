@@ -1,0 +1,54 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-11-game-screen-projection-booth.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Foundation — tokens, font, booth surfaces",
+      "status": "completed",
+      "description": "**Goal:** Land design tokens (Saira Condensed, 5-step scale, --beam/--cue-hot), reskin board surfaces to opaque booth-dark + grain/vignette; no structural/JS change.\n\n**Files:** public/index.html, public/css/01-base.css, public/css/03-game.css\n\n```json:metadata\n{\"files\":[\"public/index.html\",\"public/css/01-base.css\",\"public/css/03-game.css\"],\"verifyCommand\":\"npm test -- --runInBand\",\"acceptanceCriteria\":[\"Saira loads + --font-display resolves\",\"--beam/--beam-glow/--cue-hot + 5 --t* resolve\",\"feed-container frost removed, opaque charcoal\",\"grain+vignette ≤6%\",\"npm test baseline unchanged\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: The Beam — gate, sprockets, splice seam, billing",
+      "status": "completed",
+      "blockedBy": [0],
+      "description": "**Goal:** Evolve filmstrip/reel/reel-node/reel-bridge/now-cast into film through a gate: sprocket perfs, enlarged sharp gate frame, connecting actor on splice seam, cast as billing block. Keep burned/ghost states.\n\n**Files:** public/css/03-game.css\n\n```json:metadata\n{\"files\":[\"public/css/03-game.css\"],\"verifyCommand\":\"npm test -- --runInBand\",\"acceptanceCriteria\":[\"reel = sprocketed filmstrip, keeps overflow behavior\",\"now-playing = sharp gate frame w/ indigo border+glow\",\"reel-bridge = splice credit (display caps)\",\"now-cast = billing block\",\"survives 26-char title + 9-name cast\",\"burned/ghost/broken evolved not removed\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: The Bench — operator frames + Up Next (TDD)",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** Restyle roster as film-frame operators + box-office status; add Up Next via exported pure nextAliveIndex.\n\n**Files:** public/js/ui/ui-render.js, public/css/03-game.css, client-tests/booth-bench.test.js\n\n```json:metadata\n{\"files\":[\"public/js/ui/ui-render.js\",\"public/css/03-game.css\",\"client-tests/booth-bench.test.js\"],\"verifyCommand\":\"npx jest client-tests/booth-bench.test.js\",\"acceptanceCriteria\":[\"nextAliveIndex skips eliminated + wraps + -1 alone (TDD)\",\"active=On Screen, up-next=Up Next, eliminated=Walked Out\",\"team/solo branches still render\",\"rows = film-frame chips\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Splice console + cue dot + suggestions float",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "**Goal:** #input-area as splice console (Roll It); timer as cue dot via existing timerSeverity; desktop suggestions float (reuse #mobile-ac-dropdown).\n\n**Files:** public/index.html, public/js/socketClient.js, public/js/ui/ui-autocomplete.js, public/css/03-game.css\n\n```json:metadata\n{\"files\":[\"public/index.html\",\"public/js/socketClient.js\",\"public/js/ui/ui-autocomplete.js\",\"public/css/03-game.css\"],\"verifyCommand\":\"npx jest client-tests/submission-pill.test.js client-tests/socket-handlers.test.js\",\"acceptanceCriteria\":[\"console + Roll It (id+aria+SVG kept)\",\"cue-dot reflects severity, amber pulse at critical/panic\",\"#timer-bar + #time-text preserved\",\"desktop suggestions float\",\"out-of-turn disabled preserved\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Chat lobby drawer + ticket-stub reactions (TDD)",
+      "status": "completed",
+      "blockedBy": [3],
+      "description": "**Goal:** Chat in collapsible lobby drawer (bench toggle + unread); ticket-stub reactions, fix innerText payload via data-reaction.\n\n**Files:** public/index.html, public/js/app.js, public/css/03-game.css, client-tests/booth-reactions.test.js, client-tests/booth-chat-drawer.test.js\n\n```json:metadata\n{\"files\":[\"public/index.html\",\"public/js/app.js\",\"public/css/03-game.css\",\"client-tests/booth-reactions.test.js\",\"client-tests/booth-chat-drawer.test.js\"],\"verifyCommand\":\"npx jest client-tests/booth-reactions.test.js client-tests/booth-chat-drawer.test.js\",\"acceptanceCriteria\":[\"reactionPayload uses data-reaction, falls back to text (TDD)\",\"ChatDrawerState unread closed-only, resets on open (TDD)\",\"chat drawer + toggle + unread, #chat-* preserved\",\"reactions = ticket stubs, aria kept\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Motion system + reduced-motion",
+      "status": "completed",
+      "blockedBy": [4],
+      "description": "**Goal:** Named-curve motion + booth beats (accepted splice, handoff travel, failed recoil, cue burn, win) + first-class reduced-motion.\n\n**Files:** public/css/06-states-anim.css, public/css/03-game.css\n\n```json:metadata\n{\"files\":[\"public/css/06-states-anim.css\",\"public/css/03-game.css\"],\"verifyCommand\":\"npx jest client-tests/turn-motion.test.js client-tests/timer-panic.test.js\",\"acceptanceCriteria\":[\"curves tokenized, durations 120/200/320\",\"accepted/handoff/failed/cue beats\",\"reuses choreographTurn/clutch\",\"reduced-motion extends existing block, preserves info+cue color\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Responsive stack + 10-case validation",
+      "status": "completed",
+      "blockedBy": [5],
+      "description": "**Goal:** Booth stacks on mobile, tabs relabeled (data-tab kept), seam horizontal fallback; validate hostile-content matrix + coverage gate.\n\n**Files:** public/css/05-responsive.css, public/index.html\n\n```json:metadata\n{\"files\":[\"public/css/05-responsive.css\",\"public/index.html\"],\"verifyCommand\":\"npm test -- --runInBand --coverage\",\"acceptanceCriteria\":[\"mobile stack via .mobile-tabs, data-tab unchanged\",\"seam horizontal ≤767px\",\"10-case matrix passes\",\"public/js coverage ≥ floors\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-11T00:00:00Z"
+}
