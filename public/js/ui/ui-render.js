@@ -643,10 +643,17 @@ function choreographTurn(heroNode, gameState, clutch) {
     // Win turn: theatrical beam supersedes the per-turn gate-flare.
     heroNode.classList.add('booth-match-win');
     const onWinEnd = (e) => {
-      // WHY guard animationName: .reel-poster may carry other animations;
-      // only act when the win-beam keyframe itself completes, then detach so
-      // no stray listener survives after the class is stripped.
-      if (e.animationName !== 'boothWinBeam') return;
+      // WHY accept the win-beam FAMILY (full + reduced), not a single name:
+      // under full motion the win keyframe is boothWinBeam; under
+      // prefers-reduced-motion the CSS substitutes boothWinBeamReduced. Gating
+      // on only 'boothWinBeam' meant the reduced-motion path never matched, so
+      // the class was never stripped and THIS listener leaked. The compound
+      // CSS rules guarantee a win-beam-family keyframe always ends on the
+      // hero (alongside the splice keyframe), so matching either name strips
+      // the class exactly once and detaches. Other keyframes (e.g.
+      // boothSpliceAdvance/boothSpliceAppear) are ignored so we act once.
+      if (e.animationName !== 'boothWinBeam' &&
+          e.animationName !== 'boothWinBeamReduced') return;
       heroNode.classList.remove('booth-match-win');
       heroNode.removeEventListener('animationend', onWinEnd);
     };
@@ -655,11 +662,14 @@ function choreographTurn(heroNode, gameState, clutch) {
     // Normal turn: indigo gate-flare confirms the accepted splice.
     heroNode.classList.add('booth-gate-flare');
     const onFlareEnd = (e) => {
-      // WHY guard animationName: when the hero is also entering this tick the
-      // compound rule plays boothSpliceAdvance + boothGateFlare at the same
-      // duration; ignore the splice event and act only on the gate-flare,
-      // then detach so the listener never outlives the removed class.
-      if (e.animationName !== 'boothGateFlare') return;
+      // WHY accept the gate-flare FAMILY (full + reduced): full motion ends
+      // boothGateFlare; prefers-reduced-motion substitutes boothGateFlareReduced.
+      // The prior single-name gate let the reduced-motion entering-hero path
+      // (compound splice+flare rule) leak its listener because only
+      // boothSpliceAppear ended. Matching either gate-flare name strips the
+      // class and detaches; the splice keyframes are ignored so we act once.
+      if (e.animationName !== 'boothGateFlare' &&
+          e.animationName !== 'boothGateFlareReduced') return;
       heroNode.classList.remove('booth-gate-flare');
       heroNode.removeEventListener('animationend', onFlareEnd);
     };

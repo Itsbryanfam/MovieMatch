@@ -993,10 +993,18 @@
   }
 
   /* Hero entering the reel on the same tick (splice-enter + gate-flare):
-     same opacity-only treatment; the compound rule above is neutralised
-     and this simpler fade fires instead. */
+     opacity-only treatment, but keep BOTH keyframe names. WHY two names
+     (regression fix): a single `animation-name: boothSpliceAppear` truncated
+     the full-motion compound's two-animation list (L1444), so under reduced
+     motion boothGateFlare never ran and NO gate-flare-family keyframe ended —
+     onFlareEnd (ui-render.js) then rejected the boothSpliceAppear event and
+     never detached, leaking a listener on every normal entering-hero turn.
+     Listing boothGateFlareReduced as the second name guarantees a gate-flare
+     keyframe still ends so onFlareEnd strips .booth-gate-flare and detaches.
+     The animation-name count must match the animation-duration count the
+     global 0.01ms rule applies, so both keyframes stay instant. */
   .reel-node.now-playing.booth-gate-flare.booth-splice-enter .reel-poster {
-    animation-name: boothSpliceAppear;
+    animation-name: boothSpliceAppear, boothGateFlareReduced;
   }
 
   /* SEAM FADE — already opacity-only in the full motion version;
@@ -1069,6 +1077,21 @@
   @keyframes boothWinBeamReduced {
     from { opacity: 0.8; }
     to   { opacity: 1; }
+  }
+
+  /* Hero winning on the same tick it splices in (splice-enter + match-win):
+     opacity-only, but keep BOTH keyframe names. WHY (same regression class as
+     the gate-flare compound above): a winning turn IS a grown turn, so the
+     hero carries .booth-splice-enter too; the splice reduced rule (0,5,0,
+     L987) outranks the win-beam reduced rule (0,4,0) and would substitute
+     boothWinBeamReduced away, leaving only boothSpliceAppear — onWinEnd
+     (ui-render.js) would reject that event and leak its listener under reduced
+     motion. Mirroring the full-motion compound (L1612) with both names keeps a
+     win-beam-family keyframe ending so onWinEnd strips .booth-match-win and
+     detaches. The two animation-names match the two durations the global
+     0.01ms rule applies, so both stay instant. */
+  .reel-node.now-playing.booth-match-win.booth-splice-enter .reel-poster {
+    animation-name: boothSpliceAppear, boothWinBeamReduced;
   }
 }
 
@@ -1609,6 +1632,25 @@ a:focus-visible,
          opacity: 1; transform: scale(1.015); }
   100% { box-shadow: 0 0 38px rgba(129, 140, 248, 0.45);
          opacity: 1; transform: scale(1); }
+}
+
+/* WHY this compound rule exists (specificity fix, mirrors the gate-flare
+   compound at L1444): on a WINNING turn the now-playing hero is ALSO the
+   newly-spliced node, so it carries BOTH .booth-splice-enter and
+   .booth-match-win. The splice rule (.reel-node:not(...).booth-splice-enter
+   .reel-poster, specificity 0,5,0) outranks the win-beam rule
+   (.reel-node.now-playing.booth-match-win .reel-poster, 0,4,0) on the shared
+   `animation` property, so boothWinBeam was silently suppressed and onWinEnd
+   (ui-render.js) never saw its keyframe end → booth-match-win was never
+   stripped AND the animationend listener leaked every win turn. This explicit
+   compound selector (specificity 0,6,0) beats the splice-enter-only rule and
+   plays BOTH animations via a comma-separated list, so boothWinBeam always
+   fires and onWinEnd reliably strips the class + detaches.
+   WHY comma-separated list: CSS allows multiple animations on one property;
+   boothSpliceAdvance and boothWinBeam run independently without interfering. */
+.reel-node.now-playing.booth-match-win.booth-splice-enter .reel-poster {
+  animation: boothSpliceAdvance var(--dur-sm) var(--ease-gate) both,
+             boothWinBeam       var(--dur-md) var(--ease-gate) both;
 }
 
 /* WHY no second @media (prefers-reduced-motion: reduce) block here:
