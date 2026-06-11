@@ -902,3 +902,289 @@
   margin-left: 0.5rem;
 }
 
+/* ============================================================================
+   BOOTH TASK 1 — Gate frame, sprocket strip, splice seam, billing block
+   WHY: evolves the Phase 7.7 Constellation filmstrip into "film running
+   through a projector gate." All selectors map to the LIVE DOM produced by
+   renderChainItems in ui-render.js — no class names are renamed or removed.
+   Selector mapping (reference → live):
+     .strip        → .filmstrip .reel
+     .perfwrap     → .filmstrip .reel (::before/::after sprocket bands)
+     .cell img     → .reel-poster (non-now-playing)
+     .gate img     → .reel-node.now-playing .reel-poster  (KEEPS existing
+                     indigo border + glow — spec §2 / §6.1)
+     .seam/.splice → .reel-bridge (splice-seam credit in display font)
+     .billing      → .now-cast
+     .billing .title → .now-cast-title
+     .billing .cast  → .now-cast-list
+     .billing .lead  → .now-cast-link (the "linked via" credit line —
+                       it contains the connecting actor's name and is the
+                       closest live equivalent to the one-sheet "lead" credit)
+     .gate.broken  → .reel-node.burned / .reel-node-ghost  (evolved, not removed)
+     .seam.torn    → .reel-bridge-broken  (evolved, not removed)
+   ============================================================================ */
+
+/* ── SPROCKET STRIP ─────────────────────────────────────────────────────────
+   WHY: The .reel flex container is the physical filmstrip. We add top and
+   bottom pseudo-element bands that render repeating sprocket perforations —
+   small rectangular "holes" punched every 9px — so the strip reads as 35mm
+   film running through a gate. The ::before/::after are absolutely positioned
+   outside the flex flow so they don't disturb the existing flex-end alignment
+   of reel-nodes. overflow-y:clip + overflow-clip-margin (already on .reel)
+   keeps them visible above/below without triggering a y-scroll container.
+   Height 6px matches the reference .perfwrap band height; the dark 55%-opaque
+   holes mimic the light-blocking frame holes on film stock. */
+.filmstrip .reel {
+  position: relative; /* establishes stacking context for the perf bands */
+}
+.filmstrip .reel::before,
+.filmstrip .reel::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 6px;
+  /* repeating sprocket holes: 5px transparent gap → 4px dark hole, every 9px */
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 5px,
+    rgba(0, 0, 0, 0.55) 5px 9px
+  );
+  pointer-events: none;
+  z-index: 1; /* sits above the reel background, below the poster nodes */
+}
+.filmstrip .reel::before { top: 0; }
+.filmstrip .reel::after  { bottom: 0; }
+
+/* ── NON-NOW-PLAYING POSTER (film cell) ────────────────────────────────────
+   WHY: Past entries read as smaller, slightly dimmed film cells — the
+   physical analogy of frames that have already passed through the gate.
+   Opacity .62 matches the reference .cell img. The existing 64px width and
+   radius token are kept; we only add the dim and a black-cell background on
+   the parent node to reinforce the celluloid-on-black-strip read. */
+.reel-node:not(.now-playing):not(.reel-node-ghost) .reel-poster {
+  opacity: 0.62;
+}
+/* WHY: a pure-black cell background behind each poster (mirroring reference
+   .cell { background:#000 }) so the slight poster transparency bleeds to
+   black rather than to the booth surface. */
+.reel-node:not(.now-playing) {
+  background: #000;
+  padding: 7px 5px;
+}
+
+/* ── GATE FRAME (now-playing poster) ────────────────────────────────────────
+   WHY: The now-playing node is the gate — the film frame actually in the
+   projector aperture. It is enlarged (118px from 104px in the base rule),
+   given a slightly taller black cell padding that reads as the film matte,
+   and allowed to bleed slightly past the reel's safe area for visual weight.
+   CRITICAL: The existing indigo border (2px solid var(--accent-primary)) and
+   glow (0 0 24px rgba(129,140,248,0.55)) on .reel-node.now-playing .reel-poster
+   are KEPT VERBATIM — the spec explicitly requires continuity with the chain
+   board's indigo language (spec §2). We only ADD the enlarged gate treatment
+   on top via the .now-playing node wrapper.
+   The .nowtag equivalent ("IN THE GATE") is a pure-CSS ::before on the node
+   so no JS/DOM change is needed. */
+.reel-node.now-playing {
+  background: #000; /* black film-cell matte behind the gate poster */
+  padding: 9px 7px; /* slightly deeper matte than a regular cell */
+}
+/* Enlarge the gate poster to 118px (up from the shipped 104px base rule).
+   WHY: The gate frame must read as larger / more prominent than the strip —
+   the projector is actively beaming THIS frame. Stays within the reel's
+   flex-end alignment so it sits at the bottom of the strip row. */
+.reel-node.now-playing .reel-poster {
+  width: 118px; /* enlarged gate — overrides the 104px base rule */
+  /* indigo border + glow from the 7.7 base rule are intentionally preserved:
+     border: 2px solid var(--accent-primary)
+     box-shadow: 0 0 24px rgba(129,140,248,0.55)
+     Both remain — we add the deeper outer glow on top. */
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.8),      /* thin black inset to separate poster from matte */
+    0 0 38px var(--beam-glow),           /* wider soft beam halo */
+    0 16px 40px rgba(0, 0, 0, 0.7);     /* depth shadow below the gate */
+}
+/* "IN THE GATE" label above the now-playing poster — CSS-only, no JS needed.
+   WHY: mirrors the reference .gate .nowtag — a tiny caps label sitting above
+   the poster, typeset in the display font at the smallest scale step. Uses
+   the beam colour so it reads as projector-light copy, not UI chrome. */
+.reel-node.now-playing::before {
+  content: "IN THE GATE";
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--t-1);   /* 12.8px — smallest scale step */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--beam);
+  text-align: center;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+
+/* ── SPLICE SEAM CREDIT ──────────────────────────────────────────────────────
+   WHY: .reel-bridge is the connecting-actor label between poster nodes.
+   In the booth world it is the SPLICE — the physical join point between the
+   outgoing and incoming reel. The reference .seam .splice is vertical-mode
+   Saira Condensed ALL-CAPS; per spec §6.1 and §9, vertical treatment is
+   desktop-only and a horizontal fallback is formally fine and handled in
+   Task 6. We apply the display font + caps + beam colour here; keep it
+   legible horizontally since the writing-mode vertical adds complexity
+   (and would need a min-height budget that this task doesn't own).
+   The existing ↔ character in the textContent is already part of the
+   live DOM text ("↔ ActorName") — we override the font so the actor name
+   reads as a billing credit, and keep the arrow as a lightweight splice cue.
+   The .tape dashed line is emulated as the border-left of the bridge element. */
+.reel-bridge {
+  font-family: var(--font-display); /* display font — billing voice */
+  font-size: var(--t-1);            /* 12.8px — compact between-poster slot */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-main);   /* full white — the actor name is the splice point */
+  padding: 0 12px;
+  align-self: center;
+  /* WHY: a faint dashed left border mimics the reference .seam .tape dashed
+     vertical line — a visual cue that this is the physical splice joint. */
+  border-left: 1px dashed rgba(255, 255, 255, 0.2);
+  white-space: nowrap;
+}
+
+/* ── BILLING BLOCK ───────────────────────────────────────────────────────────
+   WHY: .now-cast is the one-sheet billing block beneath the gate. The spec
+   (§6.1 / §5.2) calls for:
+     - Title in --font-display, --t-display (≈46px), ALL-CAPS, tight leading
+     - Cast as a credit stack in display font, smaller caps
+     - The connecting actor ("linked via") as the lead credit
+   .now-cast-title  → reference .billing .title
+   .now-cast-list   → reference .billing .cast
+   .now-cast-link   → reference .billing .lead  (the "linked via" line)
+   The 26-char movie title is handled via word-break:break-word so a very
+   long single word folds rather than overflows. A 9-name cast wraps
+   naturally in the inline flow (the dots between names are text nodes, not
+   flex children) — no clamp needed; leading 1.45 gives the stack room.
+   WHY we override the previous font-size rules with scale tokens: the
+   existing 1.1rem/.92rem/.78rem values are the ad-hoc sizes the spec
+   calls out to kill; replacing them with scale tokens is the bounded work
+   scoped to the billing block by Task 1. */
+.now-cast {
+  width: 100%;
+  padding-top: 4px; /* small vertical gap between reel and billing block */
+}
+.now-cast-head {
+  margin-bottom: 6px;
+}
+/* The "linked via ActorName" / "chain starts here" line — styled as the
+   one-sheet LEAD credit: display font, small caps, beam colour. */
+.now-cast-link {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--t-1);        /* 12.8px — caption-scale credit line */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--beam);           /* indigo — the connecting actor is "in the beam" */
+  margin-bottom: 4px;
+}
+/* The movie title — typeset as a one-sheet display credit.
+   WHY --t-display (46px): the billing block's prime real estate; the title
+   SHOULD be large and authoritative. word-break:break-word ensures a 26-char
+   title without spaces (worst case) folds across two lines rather than
+   bleeding out of the panel. line-height:.98 matches the reference. */
+.now-cast-title {
+  font-family: var(--font-display);
+  font-size: var(--t-display);   /* 46px billing-block title */
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+  line-height: 0.98;
+  color: var(--text-main);
+  word-break: break-word;        /* handles 26-char titles without overflow */
+  overflow-wrap: break-word;
+}
+/* Cast credit stack — reference .billing .cast.
+   WHY display font + small caps: the one-sheet billing voice; distinguishes
+   the cast listing from body-copy paragraphs. max-width:560px prevents a
+   very wide screen from stretching the cast line into a single hard-to-scan
+   stripe. 9-name cast wraps naturally at the separator dots. */
+.now-cast-list {
+  font-family: var(--font-display);
+  font-size: var(--t-1);          /* 12.8px — billing block caption tier */
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  line-height: 1.6;               /* generous for wrapped 9-name cast */
+  margin-top: 8px;
+  max-width: 560px;               /* prevents ultra-wide stretch */
+}
+/* All cast members share .cast-name — we style the first one as the "lead"
+   (the connecting actor is always listed first by the server). WHY :first-child
+   pseudo: the JS does not add a "lead" class, so CSS structural selection is
+   the only lever available without a DOM change. The spec doesn't mandate a
+   separate class for Task 1; first-of-type emphasis is a faithful translation
+   of the reference .billing .cast .lead pattern. */
+.now-cast-list .cast-name {
+  color: var(--text-muted); /* non-lead cast members: muted */
+}
+.now-cast-list .cast-name:first-child {
+  color: var(--text-main);  /* lead (first listed) gets full brightness */
+  font-weight: 700;
+}
+
+/* ── FAILURE STATES (evolved, not removed) ──────────────────────────────────
+   WHY: The spec (§6.8) says "evolve into the booth language: a failed splice =
+   the incoming strip jumps the sprockets + the seam tears red." The existing
+   .reel-node.burned / .reel-node-ghost / .reel-bridge-broken rules from Phase
+   7.7/7.8 are KEPT — we add booth-flavoured augmentation on top.
+
+   .reel-bridge-broken (live class on broken ghost bridge):
+     Already ships with color:var(--status-danger) and a ghostBridgeEnter anim.
+     Add the torn-seam tape treatment: red dashed left-border (matching the
+     healthy .reel-bridge treatment but in danger red) so the break point is
+     visually clear. Override the font to match the splice-seam voice. */
+.reel-bridge-broken {
+  font-family: var(--font-display);  /* same display voice as the healthy seam */
+  font-size: var(--t-1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-left: 1px dashed var(--status-danger); /* torn red seam */
+  /* existing color:var(--status-danger) and animation are inherited from the
+     Phase 7.8 .reel-bridge-broken rule above — not removed or overridden. */
+}
+
+/* .reel-node-ghost: already ships with grayscale + dashed-red border + ✗ stamp.
+   The booth "strip jumps the sprockets" treatment: a subtle horizontal translate
+   to suggest the frame has mis-seated in the gate. No new transform animation —
+   the existing ghostNodeEnter handles entry. Just a small settled-state offset.
+   WHY only 4px: enough to read as "misaligned" without looking broken-by-CSS. */
+.reel-node-ghost {
+  transform: translateX(4px); /* mis-seated frame — augments Phase 7.8 rules */
+}
+
+/* .reel-node.burned: already ships with opacity:.6, grayscale/brightness filter,
+   and warm amber border. Add the film-cell matte background so burned nodes
+   still read as physical film, not floating poster fragments. */
+.reel-node.burned {
+  background: #000;   /* same black cell matte as live nodes */
+  padding: 7px 5px;   /* same cell padding */
+}
+
+/* ── MOBILE OVERRIDES ────────────────────────────────────────────────────────
+   WHY: at 767px and below, the billing title at --t-display (46px) would
+   dominate the narrow viewport. Scale it to --t3 (33px) — still clearly a
+   display title, but comfortable in the mobile column. The splice-seam bridge
+   stays legible at --t-1 (no change needed). */
+@media (max-width: 767px) {
+  .now-cast-title {
+    font-size: var(--t3); /* 33px — scaled down from 46px for narrow viewports */
+  }
+  /* WHY: the gate poster enlargement (118px) is fine on tablet widths but on
+     very narrow phones it can crowd the reel. The existing 76px mobile override
+     in the Phase 7.7 media block handles .reel-node.now-playing .reel-poster;
+     we need to also reset the cell padding on the now-playing node itself. */
+  .reel-node.now-playing {
+    padding: 7px 5px; /* match regular cell padding on mobile */
+  }
+}
+
