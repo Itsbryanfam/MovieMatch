@@ -524,6 +524,13 @@
               <span id="turn-indicator" class="status-indicator">Waiting for game to start...</span>
               <div class="input-header-right">
                 <span id="time-text" class="time-text">60s</span>
+                <!-- Booth cue dot: the reel-change "cigarette burn" marker at the
+                     cue edge. Mirrors the timer severity that socketClient.js
+                     already computes (timer-critical / timer-panic classes on
+                     #timer-bar); #time-text stays as the numeric, screen-reader-
+                     safe cue — color alone is NOT the only signal. aria-hidden
+                     keeps this purely visual decoration out of the a11y tree. -->
+                <span id="cue-dot" class="cue-dot" aria-hidden="true"></span>
                 <!-- aria-label gives an accessible name; aria-pressed surfaces the on/off state.
                      title is just a tooltip and is unreliable for screen readers (especially mobile). -->
                 <!-- Phase 4: .btn additive base (cursor:pointer already on btn-icon); zero visual change. -->
@@ -549,8 +556,15 @@
                    announce it as just "button" with no purpose. aria-hidden on the SVG hides
                    the decorative path data so assistive tech reads only the button's accessible name. -->
               <!-- Phase 4: .btn additive base (cursor:pointer already on btn-icon); zero visual change. -->
+              <!-- Booth Task 3 (Roll It): text label span added beside the
+                   existing SVG so the button reads visually as "▸ Roll It".
+                   The SVG keeps aria-hidden="true" (set above); the button's
+                   accessible name remains aria-label="Submit movie". The span
+                   is aria-hidden so screen readers hear the button label, not
+                   the decorative label text. CSS widens #submit-btn to fit. -->
               <button id="submit-btn" class="btn btn-icon" aria-label="Submit movie" title="Submit movie" disabled>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                <span class="roll-label" aria-hidden="true">Roll It</span>
               </button>
             </div>
             <p id="hint-text" class="hint-text">Waiting...</p>

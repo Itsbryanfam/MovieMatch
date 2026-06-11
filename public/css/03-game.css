@@ -1465,3 +1465,167 @@
   color: var(--beam);
 }
 
+/* ============================================================================
+   BOOTH TASK 3 — SPLICE CONSOLE, CUE DOT, FLOATING SUGGESTIONS
+   ============================================================================ */
+
+/* ── CUE DOT ─────────────────────────────────────────────────────────────── */
+/* WHY (cue dot at rest): the "cigarette burn" marker is a projector-room
+   concept — a subtle ring of projector-beam indigo at the cue edge of the
+   input header. It carries no urgency at rest; the faint opacity reads as a
+   passive indicator only. It sits next to #time-text so both signals
+   (numeric text + visual dot) live in the same eye zone and reinforce
+   each other for all users. Sized at 12px to be touch-visible but not
+   dominant alongside the time number. */
+.cue-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  /* Faint indigo ring at rest — projector light, not alert */
+  border: 2px solid var(--beam);
+  opacity: 0.45;
+  flex-shrink: 0;
+  vertical-align: middle;
+  /* Smooth transition into the hot state so the change is noticeable
+     without being harsh — 200ms is below the "feels slow" threshold for
+     urgency signals. */
+  transition: background-color 0.2s ease, border-color 0.2s ease,
+              opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* WHY (cue-hot): at ≤10s (critical band) the dot turns amber — --cue-hot is
+   the exact same token as --status-warning (#f59e0b), already used for the
+   yellow timer bar. The pulse animation (burn) mirrors the reference .cue.hot
+   rule: scale 1→1.28→1 at 0.9s infinite, using ease-in-out so the expand is
+   fast and the contract is gentle — reads as a heartbeat, not a flash.
+   box-shadow adds an amber halo so the indicator is legible against both
+   dark and mid-grey backgrounds (the input area varies). */
+.cue-dot.cue-hot {
+  background: var(--cue-hot);       /* amber fill */
+  border-color: var(--cue-hot);     /* border matches fill — solid dot */
+  opacity: 1;
+  box-shadow: 0 0 10px var(--cue-hot);   /* amber halo */
+  animation: cueDotBurn 0.9s ease-in-out infinite;
+}
+
+/* WHY (cueDotBurn keyframe): named with the booth-verb-noun convention
+   (same as boothGrain above) to avoid colliding with any future generic
+   `burn` keyframe. Scale 1→1.28→1 ported from reference .cue.hot @keyframes
+   burn — the 28% scale-up is large enough to read at 12px but won't push
+   adjacent text around (the dot is inline-block with fixed size). */
+@keyframes cueDotBurn {
+  0%,  100% { transform: scale(1);    }
+  50%       { transform: scale(1.28); }
+}
+
+/* ── SPLICE CONSOLE (#input-area → console) ──────────────────────────────── */
+/* WHY (splice console): the input area is the "splice console" — the physical
+   control surface from which the operator rolls the next reel. Porting the
+   reference .console border-top treatment and a slightly darker background
+   to make it read as a distinct panel below the board. We keep all padding,
+   border-radius, and overflow:visible from the existing rule (they're load-
+   bearing for the timer-wrapper absolute positioning and the floating
+   dropdown anchor). Only the surface treatment is evolved. */
+.input-area {
+  /* Booth-dark console surface — slightly deeper than the board sidebar
+     so the console reads as a physical panel rather than a sibling card.
+     Using --bg-elevated (one step darker than --bg-surface) to stay within
+     the defined token set. */
+  background: var(--bg-elevated);
+  /* Booth-edge border tone — matches the gate/perf matte separators in T1 */
+  border-color: var(--booth-edge);
+  /* Top accent seam — a 1px indigo line at the very top of the console
+     (inside the border) to echo the splice-tape motif. Layered via
+     background (not border) so it doesn't interfere with the timer-wrapper
+     that sits at top:0 absolutely. */
+  border-top: 1px solid rgba(129, 140, 248, 0.18);
+}
+
+/* ── ROLL IT BUTTON (#submit-btn) ────────────────────────────────────────── */
+/* WHY (Roll It key): the submit button is the "Roll It" operator key — the
+   one decisive action on the console. The reference .roll styling (display
+   font, uppercase, gradient fill) is adapted here while keeping the EXISTING
+   id, aria-label, SVG icon, and .btn/.btn-icon base classes intact. A text
+   label span is added in index.html beside the SVG so the visual reads as
+   "▸ Roll It"; the SVG stays for screen readers (aria-hidden already set on
+   it). Width is widened to fit both the icon and label. */
+#submit-btn {
+  /* Wider key — needs room for icon + "Roll It" text */
+  width: auto;
+  min-width: 90px;
+  padding: 0 1rem;
+  gap: 0.4rem;
+  /* Display font in uppercase — billing-block voice, same as bench labels */
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--t-1);   /* 12.8px — compact key label */
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  /* Gradient from reference .roll: beam-hover → beam (left-to-right) */
+  background: linear-gradient(135deg, var(--accent-primary-hover), var(--accent-primary));
+  /* Keep the inherited color:#fff, border:none, border-radius, cursor,
+     transition from .btn-icon — only surface and typography are overridden */
+}
+
+/* WHY (roll-label): the text inside the Roll It key is a visual-only
+   decoration alongside the SVG icon. It inherits the button's font-family
+   (--font-display via #submit-btn) and color (#fff) automatically. This rule
+   just ensures the span never wraps or adds unexpected block layout. */
+.roll-label {
+  display: inline;
+  white-space: nowrap;
+  /* Inherits font-family, text-transform, letter-spacing, font-weight, color
+     from #submit-btn — no need to repeat them here. */
+}
+
+/* Disabled Roll It state — muted console key, matches reference .roll.dim */
+#submit-btn:disabled {
+  background: var(--booth-edge);
+  color: var(--text-dim);
+  /* Remove box-shadow from .btn-icon:disabled so the dim state is flat */
+  box-shadow: none;
+}
+
+/* ── FLOATING SUGGESTIONS DROPDOWN (desktop + mobile) ───────────────────── */
+/* WHY (un-hide on desktop): the floating dropdown is the primary suggestions
+   surface post-Task-3. It's anchored inside #input-area (position:relative)
+   so it floats directly above the console — exactly where the player's eye
+   is. The right-rail autocomplete-container stays as a harmless fallback but
+   is no longer the primary affordance.
+   The base .mobile-ac-dropdown { display:none } at ~L339 stays as the closed
+   state. The .open rule below uses higher specificity (two-class selector)
+   to show the panel, overriding the L339 base regardless of source order.
+   No mobile-only breakpoint guard existed in JS — the CSS was the sole gate. */
+
+/* WHY (open state): when autocomplete populates the dropdown, JS adds .open.
+   We make it visually float above the console, anchored to the bottom edge
+   of #input-area. z-index:10 clears the grain/vignette overlays (z-index:0)
+   and the sidebar (z-index:auto) without conflicting with modals (z-index:50+).
+   max-height + overflow-y let a long result list scroll without pushing the
+   rest of the layout. The translucent dark background echoes the board surface
+   and matches the existing autocomplete-item hover treatment. */
+.mobile-ac-dropdown.open {
+  display: block;
+  position: absolute;
+  /* Anchor to bottom of #input-area (which is position:relative).
+     A negative bottom offset pulls the dropdown UP so it sits just above
+     the input row, not below (the console is near the viewport bottom). */
+  bottom: calc(100% + 4px); /* 4px gap above the console top edge */
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: var(--bg-elevated);
+  border: 1px solid var(--booth-edge);
+  border-radius: var(--radius-md);
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.55);
+}
+
+/* WHY (overflow anchor): the floating dropdown overlaps content above it.
+   The scrollable .feed-container does not need to know about it because the
+   dropdown is absolutely positioned out of flow. Ensure it doesn't clip
+   against the input-area overflow:visible rule (already set). */
+

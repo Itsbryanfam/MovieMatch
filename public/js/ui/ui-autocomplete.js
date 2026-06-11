@@ -2,6 +2,18 @@
 // WHY: isolating autocomplete logic from the rest of the render layer keeps
 // socket-emit-on-click plumbing out of the general rendering functions and
 // makes it straightforward to swap or extend the dropdown behaviour.
+//
+// Booth Task 3 — FLOATING SUGGESTIONS (desktop + mobile):
+// Previously, #mobile-ac-dropdown was display:none in 03-game.css at all
+// desktop widths — the right-rail #autocomplete-container was the desktop
+// surface. This JS file has NEVER had a width/breakpoint guard; it populates
+// mobileAcDropdown on every renderAutocompleteResults call regardless of
+// viewport. The mobile-only restriction lived entirely in CSS.
+// Task 3 un-hides .mobile-ac-dropdown.open at ALL widths in 03-game.css so
+// the floating dropdown (anchored over the console) becomes the primary
+// suggestions surface on desktop too. No JS change is needed here; this
+// comment documents the intentional removal of the CSS-side mobile gate so
+// future readers understand why the "mobile" dropdown appears everywhere.
 
 // Import DOM refs and shared helpers — live bindings written by
 // initUIElements() in ui-dom.js; attachPosterFallback is a shared DOM

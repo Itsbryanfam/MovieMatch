@@ -444,6 +444,10 @@ export function initSocket() {
             // Phase 7.4: panic is a strict subset of critical — clear it
             // wherever critical is cleared so it can never outlive critical.
             if (timerBar) timerBar.classList.remove('timer-panic');
+            // WHY (booth cue dot): clear the amber dot when the timer stops
+            // (game ended, turn changed, etc.) so it always reflects live state.
+            const cueDotCleanup = document.getElementById('cue-dot');
+            if (cueDotCleanup) cueDotCleanup.classList.remove('cue-hot');
             return;
           }
 
@@ -461,6 +465,14 @@ export function initSocket() {
           if (timerBar) {
             timerBar.style.width = percentage + '%';
 
+            // Booth Task 3 — CUE DOT: resolved once per tick inside the
+            // timerBar guard so it shares the exact same thresholds the bar
+            // uses. A single const keeps the lookup outside the
+            // critical/non-critical branches so BOTH branches can toggle it —
+            // there is ONE source of truth and zero chance of the dot going
+            // stale while the bar is updated correctly.
+            const cueDot = document.getElementById('cue-dot');
+
             if (tr <= 10) {
               timerBar.style.backgroundColor = 'var(--timer-red)';
               timerBar.classList.add('timer-critical');
@@ -468,6 +480,11 @@ export function initSocket() {
               // seam so 6–10s correctly CLEARS panic while still inside the
               // critical band — panic ⊂ critical, decided in one place.
               timerBar.classList.toggle('timer-panic', timerSeverity(tr) === 'panic');
+              // WHY (booth cue dot): tr≤10 is the critical band — the bar is
+              // already red and ticking. Drive the dot amber (cue-hot) for the
+              // full critical window so the player has TWO simultaneous cues
+              // (bar colour + dot pulse) that are never out of sync.
+              if (cueDot) cueDot.classList.add('cue-hot');
               if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
                 playTick();
                 setLastTickSound(Math.floor(Date.now() / 1000));
@@ -476,6 +493,10 @@ export function initSocket() {
               timerBar.classList.remove('timer-critical');
               // Phase 7.4: tr>10 → neither critical nor panic.
               timerBar.classList.remove('timer-panic');
+              // WHY (booth cue dot): mirror the bar's "all-clear" — remove
+              // cue-hot so the dot returns to the faint indigo ring at-rest
+              // state when a new turn starts or the timer is reset.
+              if (cueDot) cueDot.classList.remove('cue-hot');
               if (tr <= 30) {
                 timerBar.style.backgroundColor = 'var(--timer-yellow)';
               } else {
