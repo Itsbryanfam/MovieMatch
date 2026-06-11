@@ -203,10 +203,13 @@ body {
      so the UI degrades gracefully while the font loads. */
   --font-display: 'Saira Condensed', 'Plus Jakarta Sans', sans-serif;
 
-  /* TYPE SCALE — 1.2 modular ratio off a 16px base.
-     Every Booth font-size must reference one of these steps; the ~19
-     ad-hoc px sizes scattered through the file are intentionally killed
-     over the Booth task arc in favour of this unified scale. */
+  /* TYPE SCALE — a curated 6-step scale, NOT a strict modular run.
+     t0–t2 follow a ~1.2 ratio off the 16px base (16 / 19.2 / 23); --t-1 is a
+     tighter caption step (16/1.25) and --t3 / --t-display are deliberately
+     larger display jumps (primary headings / billing-block movie title), sized
+     to the approved mockup rather than to a formula. Every Booth font-size must
+     reference one of these steps; the ~19 ad-hoc px sizes scattered through the
+     file are intentionally killed over the Booth task arc in favour of it. */
   --t-1: 12.8px;    /* small labels, captions            */
   --t0:  16px;      /* body / base                       */
   --t1:  19.2px;    /* secondary headings, large labels  */
