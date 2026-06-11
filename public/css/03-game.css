@@ -121,13 +121,20 @@
    frame to read as real grain motion without being distracting.
    mix-blend-mode:overlay lets the grain react to the surface lightness —
    brighter regions of the radial pick up slightly more texture.
-   pointer-events:none + z-index:2 keep it invisible to clicks and behind
-   chain content (chain items get z-index:3 below). */
+   pointer-events:none + z-index:0 keep it invisible to clicks and BELOW
+   all real children (real children are lifted to z-index:1 via the rule
+   below). The previous commit used z-index:2 and compensated with a
+   z-index:3 guard on .chain-item — but .chain-item is the LEGACY/DEAD
+   class; renderChainItems no longer emits it. The live chain content is
+   .filmstrip / .reel-node / .now-cast / .empty-board-hint. Setting the
+   overlays to z-index:0 and lifting all direct children with
+   .feed-container > * { z-index:1 } is the robust fix that covers every
+   real child without relying on any specific class name. */
 .feed-container::before {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 2; /* above board background, below chain items (z-index:3) */
+  z-index: 0; /* below all real children — lifted by .feed-container > * rule below */
   pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   opacity: .05; /* ≤6% cap from spec — subtle, not visible as texture at a glance */
@@ -142,13 +149,13 @@
    attention on the center (where the chain content lives) and reinforces
    the projector-lens framing of the booth metaphor.
    Ported verbatim from .booth::after in the approved reference mockup.
-   z-index:1 keeps it behind the grain layer (z-index:2) and both behind
-   chain items (z-index:3). */
+   z-index:0 keeps it below all real children — same stacking strategy as
+   ::before above. */
 .feed-container::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 0; /* below all real children — lifted by .feed-container > * rule below */
   pointer-events: none;
   background: radial-gradient(125% 95% at 50% 28%, transparent 55%, rgba(0, 0, 0, .55) 100%);
   border-radius: var(--radius-xl);
@@ -165,15 +172,22 @@
   100% { transform: translate(0,    0);   }
 }
 
-/* Booth Task 0 — CHAIN ITEM STACKING CONTEXT
-   WHY: the film-grain (z-index:2) and vignette (z-index:1) overlays are
-   absolutely positioned inside .feed-container. Without an explicit
-   z-index on .chain-item the overlays would paint over the chain content.
-   Setting z-index:3 (with position:relative, which .chain-item already
-   has) ensures chain items always render above both overlay layers.
-   This is an additive declaration — no existing property is changed. */
-.chain-item {
-  z-index: 3;
+/* Booth Task 0 (fix) — LIFT LIVE CHAIN CONTENT ABOVE OVERLAYS
+   WHY: The previous guard used .chain-item { z-index:3 }, but .chain-item
+   is the DEAD legacy class — renderChainItems no longer emits it. The live
+   chain renders as .filmstrip → .reel / .reel-node / .reel-bridge / .now-cast,
+   and the empty-board state uses .empty-board-hint. None of those have an
+   explicit z-index, so they were falling UNDER the ::before grain overlay.
+   The robust fix: drop the overlay pseudo-elements to z-index:0, then lift
+   every direct child of .feed-container to z-index:1 with position:relative.
+   This covers .filmstrip, .empty-board-hint, .game-over-banner, and any
+   future sibling without relying on a specific class name. The grain and
+   vignette remain visible in the dark negative space between/around content
+   because mix-blend-mode:overlay only activates where there is underlying
+   colour — the boardgrounds still show texture; posters are opaque on top. */
+.feed-container > * {
+  position: relative; /* Establishes stacking context so z-index takes effect */
+  z-index: 1; /* Above ::before (grain, z-index:0) and ::after (vignette, z-index:0) */
 }
 
 
