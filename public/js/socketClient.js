@@ -480,11 +480,12 @@ export function initSocket() {
               // seam so 6–10s correctly CLEARS panic while still inside the
               // critical band — panic ⊂ critical, decided in one place.
               timerBar.classList.toggle('timer-panic', timerSeverity(tr) === 'panic');
-              // WHY (booth cue dot): tr≤10 is the critical band — the bar is
-              // already red and ticking. Drive the dot amber (cue-hot) for the
-              // full critical window so the player has TWO simultaneous cues
-              // (bar colour + dot pulse) that are never out of sync.
-              if (cueDot) cueDot.classList.add('cue-hot');
+              // WHY (booth cue dot threshold): spec §2 + §7 both say amber at
+              // <5s (the panic band), not the full 10s critical band — the dot
+              // is the reel-change cigarette burn, not a general warning light.
+              // Mirroring timerSeverity 'panic' keeps ONE source of truth and
+              // matches the design intent: silent until the final 5s, then fire.
+              if (cueDot) cueDot.classList.toggle('cue-hot', timerSeverity(tr) === 'panic');
               if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
                 playTick();
                 setLastTickSound(Math.floor(Date.now() / 1000));

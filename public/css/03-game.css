@@ -1539,7 +1539,7 @@
      (inside the border) to echo the splice-tape motif. Layered via
      background (not border) so it doesn't interfere with the timer-wrapper
      that sits at top:0 absolutely. */
-  border-top: 1px solid rgba(129, 140, 248, 0.18);
+  border-top: 1px solid rgba(129, 140, 248, 0.18); /* 0.18 = beam at ~18% alpha — no token exists at this step; update if --beam-subtle is added to 01-base.css */
 }
 
 /* ── ROLL IT BUTTON (#submit-btn) ────────────────────────────────────────── */
@@ -1611,7 +1611,10 @@
   /* Anchor to bottom of #input-area (which is position:relative).
      A negative bottom offset pulls the dropdown UP so it sits just above
      the input row, not below (the console is near the viewport bottom). */
-  bottom: calc(100% + 4px); /* 4px gap above the console top edge */
+  bottom: calc(100% + 4px); /* 4px gap above the #input-area top edge —
+     bottom is measured from the containing block (#input-area,
+     position:relative) bottom edge, so calc(100%+4px) places the
+     dropdown just above #input-area */
   left: 0;
   right: 0;
   z-index: 10;
