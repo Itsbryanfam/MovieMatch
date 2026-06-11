@@ -946,7 +946,15 @@
    Honor the OS-level "reduce motion" preference. The animations across
    this app are decorative (entrance flourishes, infinite poster scroll,
    timer pulses, win celebration) — none of them carry information.
-   Neutralizing them via near-zero durations is the standard pattern. */
+   Neutralizing them via near-zero durations is the standard pattern.
+
+   WHY this is the single block for all reduced-motion overrides:
+   spec §7 AC mandates that Task 5 fallbacks extend THIS block rather
+   than open a new @media block. A single block gives the complete picture
+   of reduced-motion behaviour in one place (easier to audit, consistent
+   with the project rule that scattered same-condition @media blocks obscure
+   intent). The Booth T5 keyframe alternatives and selector overrides are
+   appended below the original carousel rule. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -959,6 +967,108 @@
   #poster-carousel,
   .poster-row {
     animation: none !important;
+  }
+
+  /* ── BOOTH T5 REDUCED-MOTION EXTENSIONS ─────────────────────────
+     WHY here (not a separate @media block): spec §7 AC says "extends
+     the existing global reduced-motion block." The global `* { 0.01ms }`
+     rule above already zeroes all durations; these rules supplement it
+     by overriding animation-name to opacity-only alternatives so every
+     state change is still perceptible without transforms/recoils.
+
+     Rule: for every Booth T5 animation, add an opacity-only fallback
+     that makes the state transition visible without any translate/scale/
+     recoil. The global * block ensures no position blip occurs; these
+     rules reinforce by substituting a known opacity-only keyframe. */
+
+  /* ACCEPTED SPLICE — strip advance: no translateY; poster just
+     appears (opacity 0→1). The global 0.01ms duration already
+     makes it instant; this override ensures no position blip. */
+  .reel-node:not(.reel-node-ghost):not(.burned).booth-splice-enter .reel-poster {
+    animation-name: boothSpliceAppear;  /* opacity-only replacement */
+  }
+  @keyframes boothSpliceAppear {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* Hero entering the reel on the same tick (splice-enter + gate-flare):
+     same opacity-only treatment; the compound rule above is neutralised
+     and this simpler fade fires instead. */
+  .reel-node.now-playing.booth-gate-flare.booth-splice-enter .reel-poster {
+    animation-name: boothSpliceAppear;
+  }
+
+  /* SEAM FADE — already opacity-only in the full motion version;
+     the global 0.01ms duration makes it instant. No extra rule needed,
+     but we explicitly confirm no transform is applied. */
+  .reel-bridge.booth-seam-enter {
+    animation-name: boothSeamFade; /* same opacity-only keyframe — no transform */
+  }
+
+  /* GATE FLARE — box-shadow pulse: reduce to a plain opacity pulse
+     so the "something happened here" signal is preserved without
+     the glow expanding (which could cause flicker for vestibular users). */
+  .reel-node.now-playing.booth-gate-flare .reel-poster {
+    animation-name: boothGateFlareReduced;
+  }
+  @keyframes boothGateFlareReduced {
+    from { opacity: 0.7; }
+    to   { opacity: 1; }
+  }
+
+  /* TURN HANDOFF — the travel transition is zeroed by the global
+     * block. Override the transition durations to 0 so the new
+     active row appears instantly (information preserved via the
+     indigo border + "On Screen" label; no motion needed). */
+  .sidebar-players li.active-turn,
+  .sidebar-players li {
+    transition: none;
+  }
+
+  /* FAILED SPLICE recoil — the translateX oscillation is silenced
+     by the global block. Replace with a simple opacity fade-in so
+     the ghost node still "appears" as a state change. The amber
+     cue colour and "Walked Out" label carry the failure information. */
+  .reel-node-ghost.booth-recoil {
+    animation-name: boothRecoilReduced;
+  }
+  @keyframes boothRecoilReduced {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* TORN-SEAM recoil — same treatment: opacity fade preserves the
+     visual appearance of the broken seam without horizontal oscillation. */
+  .reel-bridge-broken.booth-seam-recoil {
+    animation-name: boothSeamRecoilReduced;
+  }
+  @keyframes boothSeamRecoilReduced {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* CUE-DOT PANIC — the accelerating pulse is zeroed by the global
+     block. The amber fill (.cue-dot.cue-hot background/border-color)
+     still shows via 03-game.css; the dot stays lit amber to preserve
+     the urgency information without the pulsing transform. */
+  .cue-dot.cue-panic {
+    animation: none;
+    /* WHY: opacity 1 + the amber fill from .cue-dot.cue-hot give a
+       fully-visible static indicator. The numeric #time-text (screen-
+       reader-safe) carries the countdown for users who rely on it. */
+    opacity: 1;
+  }
+
+  /* MATCH WIN gate beam — no transform/glow burst; just hold full
+     opacity so the win state is visible (the .win-flash overlay and
+     game-over modal carry the narrative). */
+  .reel-node.now-playing.booth-match-win .reel-poster {
+    animation-name: boothWinBeamReduced;
+  }
+  @keyframes boothWinBeamReduced {
+    from { opacity: 0.8; }
+    to   { opacity: 1; }
   }
 }
 
@@ -1256,6 +1366,11 @@ a:focus-visible,
   --dur-xs:  120ms;  /* seam-fade, micro confirms — every-turn whisper level */
   --dur-sm:  200ms;  /* gate-flare, splice-advance — every-turn quiet level  */
   --dur-md:  320ms;  /* handoff travel, win flare — per-turn / rare level    */
+  /* WHY --dur-cue-panic is intentionally outside the canonical 120/200/320ms steps:
+     it must be exactly half of the .cue-hot animation's 0.9s cadence so the panic
+     pulse is 2× faster (the same cueDotBurn keyframe, shorter period). A canonical
+     step would break the 2× relationship. Named token avoids the magic number. */
+  --dur-cue-panic: 0.45s;
 }
 
 /* ── ACCEPTED SPLICE ────────────────────────────────────────────
@@ -1314,6 +1429,22 @@ a:focus-visible,
      vocabulary. Short enough to read as a flash, not a linger. */
   animation: boothGateFlare var(--dur-sm) var(--ease-snap) both;
 }
+
+/* WHY this compound rule exists (specificity fix): when the now-playing
+   hero is ALSO entering the reel in the same tick, .booth-splice-enter is
+   present on the same node, giving the splice rule specificity 0,5,0 vs
+   this rule's 0,4,0 — the splice-advance animation wins and the gate-flare
+   is silently suppressed. The fix: add an explicit compound selector that
+   matches the hero-in-same-tick case and plays BOTH animations simultaneously
+   via a comma-separated list. Specificity 0,6,0 beats the splice-enter-only
+   rule (0,5,0) so the gate-flare is never blocked on the most important node.
+   WHY comma-separated animation list: CSS allows multiple animations on one
+   property; both boothSpliceAdvance and boothGateFlare fire independently
+   without interfering with each other. */
+.reel-node.now-playing.booth-gate-flare.booth-splice-enter .reel-poster {
+  animation: boothSpliceAdvance var(--dur-sm) var(--ease-gate) both,
+             boothGateFlare     var(--dur-sm) var(--ease-snap) both;
+}
 @keyframes boothGateFlare {
   /* WHY: expand the glow from the existing state (Phase 7.7 clutch
      uses 0 0 34px at .85 opacity) to a wider burst, then settle.
@@ -1338,15 +1469,18 @@ a:focus-visible,
    read as motion, not instantaneous. The spring feel of --ease-gate
    gives the "light landing on a new seat" quality. */
 .sidebar-players li.active-turn {
-  /* WHY animate these three compositor-friendy props: border-color
-     drives the indigo frame; box-shadow drives the halo; opacity
-     handles the name brightness shift. layout props are NOT animated.
+  /* WHY animate these three compositor-friendly props only: border-color
+     drives the indigo frame; box-shadow drives the halo; opacity handles
+     the name brightness shift. WHY NOT background: transitioning background
+     between var(--accent-glow) and the surface color triggers a repaint on
+     every frame of every turn handoff — contradicts spec §7 "transform +
+     opacity only, GPU." The class change already provides instant visual
+     feedback via the static background value; no transition needed.
      Duration 320ms --ease-gate = spec §7 handoff spec. */
   transition:
     border-color  var(--dur-md) var(--ease-gate),
     box-shadow    var(--dur-md) var(--ease-gate),
-    opacity       var(--dur-md) var(--ease-gate),
-    background    var(--dur-md) var(--ease-gate);
+    opacity       var(--dur-md) var(--ease-gate);
 }
 
 /* The leaving row (any li that LOSES active-turn) transitions out
@@ -1354,13 +1488,14 @@ a:focus-visible,
    WHY target li (not .active-turn): the transition out fires on the
    same element after the class is removed, so the li base rule
    carries the exit timing (--dur-sm = 200ms — shorter than the
-   320ms entrance keeps the arrival dominant). */
+   320ms entrance keeps the arrival dominant). WHY NOT background:
+   same GPU reasoning as active-turn above — instant class-change
+   feedback is sufficient, no repaint-triggering transition needed. */
 .sidebar-players li {
   transition:
     border-color  var(--dur-sm) var(--ease-snap),
     box-shadow    var(--dur-sm) var(--ease-snap),
-    opacity       var(--dur-sm) var(--ease-snap),
-    background    var(--dur-sm) var(--ease-snap);
+    opacity       var(--dur-sm) var(--ease-snap);
 }
 
 /* ── FAILED SPLICE (strip recoil + torn-seam stamp) ────────────
@@ -1399,10 +1534,14 @@ a:focus-visible,
 }
 
 /* Torn-seam stamp: the .reel-bridge-broken shakes horizontally
-   as the broken bridge materialises. Shorter than the ghost recoil
-   (200ms) because the seam is a smaller element — a lighter snap. */
+   as the broken bridge materialises. WHY var(--dur-sm) / 200ms: same
+   canonical step as the seam-fade, making the seam element match the
+   vocab rather than a magic-number raw literal. Shorter than the ghost
+   recoil (--dur-md / 320ms) because the seam is a smaller element. */
 .reel-bridge-broken.booth-seam-recoil {
-  animation: boothSeamRecoil 200ms var(--ease-in) both;
+  /* WHY var(--dur-sm) not 200ms: token keeps all durations in one source
+     of truth; --dur-sm = 200ms so behaviour is identical. */
+  animation: boothSeamRecoil var(--dur-sm) var(--ease-in) both;
 }
 @keyframes boothSeamRecoil {
   /* WHY different amplitude from the strip: the bridge is a text
@@ -1425,14 +1564,18 @@ a:focus-visible,
    second class that overrides animation-duration to a shorter
    value, making the pulse literally faster as time empties. */
 .cue-dot.cue-panic {
-  /* WHY 0.45s: exactly half the .cue-hot 0.9s duration, so the
-     panic pulse is perceptibly faster without being frantic.
+  /* WHY var(--dur-cue-panic): exactly half the .cue-hot 0.9s duration,
+     so the panic pulse is perceptibly faster without being frantic.
+     This is an out-of-band value (not one of the 120/200/320ms canonical
+     steps) because it derives from a musical relationship with the cue-hot
+     cadence rather than the spec vocabulary — documented as a deliberate
+     exception in the :root token block above.
      The keyframe (cueDotBurn, from 03-game.css) is the same;
      only the speed changes. animation-name must be declared to
      avoid the property reset that would occur from an empty rule. */
-  animation-name: cueDotBurn;     /* same keyframe, faster cadence */
-  animation-duration: 0.45s;
-  animation-timing-function: ease-in; /* accelerating — mirrors --ease-in */
+  animation-name: cueDotBurn;             /* same keyframe, faster cadence */
+  animation-duration: var(--dur-cue-panic);
+  animation-timing-function: ease-in;    /* accelerating — mirrors --ease-in */
   animation-iteration-count: infinite;
 }
 
@@ -1447,7 +1590,11 @@ a:focus-visible,
    the now-playing poster node for spatial grounding (the win
    happened HERE in the gate). */
 .reel-node.now-playing.booth-match-win .reel-poster {
-  animation: boothWinBeam 320ms var(--ease-gate) both;
+  /* WHY var(--dur-md) not 320ms: token keeps all durations in one source
+     of truth; --dur-md = 320ms so behaviour is identical. The win beam
+     uses the slowest canonical step — once per game, so the longer
+     duration is appropriate (rare beat, spec §7). */
+  animation: boothWinBeam var(--dur-md) var(--ease-gate) both;
 }
 @keyframes boothWinBeam {
   /* WHY 3-step: snap to intense glow (0→10%), linger slightly
@@ -1464,102 +1611,7 @@ a:focus-visible,
          opacity: 1; transform: scale(1); }
 }
 
-/* ── REDUCED-MOTION EXTENSIONS ─────────────────────────────────
-   WHY extend the existing block (not duplicate or bypass it):
-   spec §7 and §10 mandate a first-class reduced-motion path.
-   The existing global `* { animation-duration: 0.01ms }` block
-   at ~L950 zeroes all animations automatically. These rules sit
-   INSIDE the prefers-reduced-motion block and REPLACE the motion
-   effects with opacity cross-fades that PRESERVE the information
-   and the amber cue colour — so every state change is still
-   perceptible, just without transforms.
-
-   Rule: for every new animation above, add an opacity-only
-   fallback here that makes the state transition visible without
-   any translate/scale/recoil. The global * block already ensures
-   no transforms occur; these rules reinforce by overriding the
-   animation-name to a known opacity-only alternative. */
-@media (prefers-reduced-motion: reduce) {
-  /* ACCEPTED SPLICE — strip advance: no translateY; poster just
-     appears (opacity 0→1). The global 0.01ms duration already
-     makes it instant; this override ensures no position blip. */
-  .reel-node:not(.reel-node-ghost):not(.burned).booth-splice-enter .reel-poster {
-    animation-name: boothSpliceAppear;  /* opacity-only replacement */
-  }
-  @keyframes boothSpliceAppear {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
-
-  /* SEAM FADE — already opacity-only in the full motion version;
-     the global 0.01ms duration makes it instant. No extra rule needed,
-     but we explicitly confirm no transform is applied. */
-  .reel-bridge.booth-seam-enter {
-    animation-name: boothSeamFade; /* same opacity-only keyframe — no transform */
-  }
-
-  /* GATE FLARE — box-shadow pulse: reduce to a plain opacity pulse
-     so the "something happened here" signal is preserved without
-     the glow expanding (which could cause flicker for vestibular users). */
-  .reel-node.now-playing.booth-gate-flare .reel-poster {
-    animation-name: boothGateFlareReduced;
-  }
-  @keyframes boothGateFlareReduced {
-    from { opacity: 0.7; }
-    to   { opacity: 1; }
-  }
-
-  /* TURN HANDOFF — the travel transition is zeroed by the global
-     * block. Override the transition durations to 0 so the new
-     active row appears instantly (information preserved via the
-     indigo border + "On Screen" label; no motion needed). */
-  .sidebar-players li.active-turn,
-  .sidebar-players li {
-    transition: none;
-  }
-
-  /* FAILED SPLICE recoil — the translateX oscillation is silenced
-     by the global block. Replace with a simple opacity fade-in so
-     the ghost node still "appears" as a state change. The amber
-     cue colour and "Walked Out" label carry the failure information. */
-  .reel-node-ghost.booth-recoil {
-    animation-name: boothRecoilReduced;
-  }
-  @keyframes boothRecoilReduced {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
-
-  /* TORN-SEAM recoil — same treatment: opacity fade preserves the
-     visual appearance of the broken seam without horizontal oscillation. */
-  .reel-bridge-broken.booth-seam-recoil {
-    animation-name: boothSeamRecoilReduced;
-  }
-  @keyframes boothSeamRecoilReduced {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
-
-  /* CUE-DOT PANIC — the accelerating pulse is zeroed by the global
-     block. The amber fill (.cue-dot.cue-hot background/border-color)
-     still shows via 03-game.css; the dot stays lit amber to preserve
-     the urgency information without the pulsing transform. */
-  .cue-dot.cue-panic {
-    animation: none;
-    /* WHY: opacity 1 + the amber fill from .cue-dot.cue-hot give a
-       fully-visible static indicator. The numeric #time-text (screen-
-       reader-safe) carries the countdown for users who rely on it. */
-    opacity: 1;
-  }
-
-  /* MATCH WIN gate beam — no transform/glow burst; just hold full
-     opacity so the win state is visible (the .win-flash overlay and
-     game-over modal carry the narrative). */
-  .reel-node.now-playing.booth-match-win .reel-poster {
-    animation-name: boothWinBeamReduced;
-  }
-  @keyframes boothWinBeamReduced {
-    from { opacity: 0.8; }
-    to   { opacity: 1; }
-  }
-}
+/* WHY no second @media (prefers-reduced-motion: reduce) block here:
+   all Booth T5 reduced-motion fallbacks have been merged into the
+   single global block at ~L950 per spec §7 AC (one block, complete
+   picture of reduced-motion behaviour). */

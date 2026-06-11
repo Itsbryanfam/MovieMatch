@@ -616,28 +616,45 @@ function choreographTurn(heroNode, gameState, clutch) {
   cancelTurnMotion();
   heroNode.classList.add('settled');
 
-  // Booth T5 fix: wire the gate-flare animation that 06-states-anim.css
-  // declares. WHY fire it here (not in the reel loop): choreographTurn is
-  // the designated "per-turn cinematic hook" for the now-playing hero; the
-  // reel loop is a pure build pass that should not diverge timings.
+  // Booth T5 fix: wire the per-turn cinematic beat. WHY fire here (not in
+  // the reel loop): choreographTurn is the designated hook for the hero;
+  // the reel loop is a pure build pass that must not diverge timings.
   // WHY animationend + { once: true }: removes the class after a single
   // fire so the same node can re-trigger if it somehow remains hero across
   // two consecutive renders (no memory leak, no double-fire risk).
-  heroNode.classList.add('booth-gate-flare');
-  heroNode.addEventListener('animationend', () => {
-    heroNode.classList.remove('booth-gate-flare');
-  }, { once: true });
-
-  // Booth T5 fix: match-win theatrical beam — fires once per game on the
-  // hero node at the moment the winning play is confirmed.
-  // WHY check gameState.winner: the reel is rebuilt on every stateUpdate,
-  // but choreographTurn only fires on grew, so the win flag is guaranteed
-  // to be present in the same tick that introduced the winning chain entry.
-  // WHY animationend cleanup: same re-trigger safety as gate-flare above.
+  //
+  // WHY win branch uses booth-match-win INSTEAD OF booth-gate-flare:
+  // both classes would compete for the same animationend event from
+  // .reel-poster. The { once: true } gate-flare listener would consume the
+  // event first, leaving booth-match-win permanently on the node (the
+  // advertised "animationend cleanup" contract silently fails). The win beam
+  // supersedes the gate flare on that turn — only one class is added so
+  // exactly one animationend fires and cleanup is reliable.
+  // WHY check gameState.winner before adding either class: the win flag is
+  // guaranteed present in the same tick that introduced the winning entry
+  // (choreographTurn only fires on grew).
   if (gameState && gameState.winner) {
+    // Win turn: theatrical beam supersedes the per-turn gate-flare.
     heroNode.classList.add('booth-match-win');
-    heroNode.addEventListener('animationend', () => {
-      heroNode.classList.remove('booth-match-win');
+    heroNode.addEventListener('animationend', (e) => {
+      // WHY guard animationName: .reel-poster may carry other animations;
+      // only remove booth-match-win when the win-beam keyframe completes.
+      if (e.animationName === 'boothWinBeam') {
+        heroNode.classList.remove('booth-match-win');
+      }
+    }, { once: true });
+  } else {
+    // Normal turn: indigo gate-flare confirms the accepted splice.
+    heroNode.classList.add('booth-gate-flare');
+    heroNode.addEventListener('animationend', (e) => {
+      // WHY guard animationName: ensures cleanup targets the right animation
+      // even if the node carries booth-splice-enter simultaneously (the
+      // compound CSS rule plays both; two animationend events fire and
+      // { once: true } only catches the first — but both animate .reel-poster
+      // so order is non-deterministic; guarding by name makes it robust).
+      if (e.animationName === 'boothGateFlare') {
+        heroNode.classList.remove('booth-gate-flare');
+      }
     }, { once: true });
   }
 }
