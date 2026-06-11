@@ -566,19 +566,53 @@
   position: relative;
 }
 
-/* Chat tab badge */
-.mobile-tab[data-tab="chat"] {
-  position: relative;
-}
+/* Chat tab badge — scoped to mobile only so the .chat-badge-pill rules in
+   03-game.css (which shape the numbered pill on the desktop lobby-toggle)
+   are not outranked by this ID selector on wider viewports. Without this
+   @media guard the ID specificity (0-1-0-0) overrides the class (0-0-1-0)
+   at every width, collapsing the pill to a tiny 8px red dot and hiding the
+   unread count text entirely. */
+@media (max-width: 767px) {
+  .mobile-tab[data-tab="chat"] {
+    position: relative;
+  }
 
-#chat-badge {
-  position: absolute;
-  top: 4px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
-  background: var(--status-danger);
-  border-radius: 50%;
+  /* Legacy dot badge on the mobile chat tab (kept for backward compatibility;
+     .mobile-chat-badge is the new numbered pill for the same tab button). */
+  #chat-badge {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    background: var(--status-danger);
+    border-radius: 50%;
+  }
+
+  /* WHY: .mobile-chat-badge is the numbered unread pill for the mobile chat
+     tab button. It mirrors the desktop .chat-badge-pill shape/tokens but is
+     positioned relative to the tab button rather than the lobby-toggle. The
+     separate element ensures mobile users see unread counts even though
+     #chat-badge lives inside the hidden right-panel aside on mobile. */
+  .mobile-chat-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    border-radius: var(--radius-md);
+    background: var(--accent-primary);
+    color: #fff;
+    pointer-events: none;
+  }
+  .mobile-chat-badge.hidden {
+    display: none;
+  }
 }
 
 /* Chat send button */

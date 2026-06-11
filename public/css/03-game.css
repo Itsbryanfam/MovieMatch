@@ -1695,7 +1695,9 @@
   font-weight: 700;
   line-height: 16px;
   text-align: center;
-  border-radius: 8px;
+  /* WHY: --radius-md (8px) matches the design-system token from 01-base.css
+     instead of a raw literal, keeping all radii tokenised. */
+  border-radius: var(--radius-md);
   background: var(--accent-primary);
   color: #fff;
   pointer-events: none;
@@ -1709,7 +1711,8 @@
    (preserves scroll position and ids). Only applied ≥ 768px; mobile uses the
    tab-bar pattern instead.
    WHY: max-height + overflow:hidden gives a CSS transition with no JS layout
-   jank; the starting height (open) is unrestricted. We default to open. */
+   jank. We default to closed (max-height clips to the header row until
+   .open is added). */
 @media (min-width: 768px) {
   .lobby-drawer {
     /* WHY: default (closed) state clips to just the header row (~52px) so
@@ -1756,7 +1759,8 @@
   color: var(--text-muted);
   background: var(--bg-surface);
   border: 1px solid var(--booth-edge, var(--border-subtle));
-  border-radius: 6px;
+  /* WHY: --radius-sm (6px) token from 01-base.css; avoids raw literals. */
+  border-radius: var(--radius-sm);
   /* WHY: left padding wider than right so the perforation notch (::before)
      sits inside the padding zone without clipping the emoji/label. */
   padding: 5px 9px 5px 14px;

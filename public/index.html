@@ -490,9 +490,14 @@
       <nav class="mobile-tabs" id="mobile-tabs">
         <button class="mobile-tab active" data-tab="board">🎬 Board</button>
         <button class="mobile-tab" data-tab="players">👥 Players</button>
-        <!-- Booth Task 4: chat badge moved to #lobby-toggle inside the drawer header
-             so a single #chat-badge serves both desktop toggle and mobile context. -->
-        <button class="mobile-tab" data-tab="chat">💬 Chat</button>
+        <!-- Booth Task 4 fix: mobile chat tab needs its own badge element because
+             #chat-badge lives inside the desktop right-panel aside (hidden on mobile).
+             .mobile-chat-badge is updated in parallel by renderDrawerBadge() in app.js
+             so mobile users see the unread count on the tab bar while the board tab
+             is active. data-tab routing in app.js clears both badges on open. -->
+        <button class="mobile-tab" data-tab="chat">💬 Chat
+          <span class="mobile-chat-badge hidden" aria-live="polite" aria-atomic="true"></span>
+        </button>
       </nav>
       <div class="layout-grid">
         <!-- Sidebar -->
@@ -602,12 +607,16 @@
                   each reaction a real name; the emoji stays as the visual. -->
              <!-- Phase 4: .btn additive base (cursor:pointer already on reaction-btn); zero visual change. -->
              <!-- Booth Task 4: data-reaction carries the canonical wire payload so
-                  visible ticket-stub labels ("Bravo") can differ from the emoji
-                  without changing what peers receive. reactionPayload(btn) reads this. -->
-             <button class="btn reaction-btn" data-reaction="🔥" aria-label="React with fire" title="Fire">🔥</button>
-             <button class="btn reaction-btn" data-reaction="😂" aria-label="React with laughter" title="Laugh">😂</button>
-             <button class="btn reaction-btn" data-reaction="💀" aria-label="React with skull" title="Skull">💀</button>
-             <button class="btn reaction-btn" data-reaction="👀" aria-label="React with eyes" title="Eyes">👀</button>
+                  visible ticket-stub labels can differ from the emoji without
+                  changing what peers receive. reactionPayload(btn) reads this.
+                  WHY: spec §6.5 replaces raw OS emoji with booth-native labels
+                  ("Bravo", "Brutal", "Cut!", "Eyes") so the button text fits
+                  the ticket-stub aesthetic; aria-label + title keep the screen-
+                  reader meaning tied to the original emoji intent. -->
+             <button class="btn reaction-btn" data-reaction="🔥" aria-label="React with fire" title="Fire">Bravo</button>
+             <button class="btn reaction-btn" data-reaction="😂" aria-label="React with laughter" title="Laugh">Brutal</button>
+             <button class="btn reaction-btn" data-reaction="💀" aria-label="React with skull" title="Skull">Cut!</button>
+             <button class="btn reaction-btn" data-reaction="👀" aria-label="React with eyes" title="Eyes">Eyes</button>
           </div>
         </main>
         

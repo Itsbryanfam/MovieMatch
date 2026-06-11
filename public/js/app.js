@@ -735,19 +735,37 @@ document.addEventListener('DOMContentLoaded', () => {
   const lobbyToggle = document.getElementById('lobby-toggle');
 
   function renderDrawerBadge() {
-    // WHY: render the unread count into #chat-badge (the shared badge used by
-    // both the mobile tab and the new lobby-toggle button). Show as a number
-    // when > 0; hide when zero.
+    // WHY: #chat-badge lives inside the desktop lobby-toggle (hidden on mobile).
+    // .mobile-chat-badge lives inside the mobile chat-tab button. Both must be
+    // updated in sync so unread counts appear in the right context on each
+    // viewport. Without the mobile badge, tapping away to the board tab gives
+    // no visual cue that new messages have arrived.
     const badge = document.getElementById('chat-badge');
-    if (!badge) return;
-    if (drawerState.unread > 0) {
-      badge.textContent = drawerState.unread > 99 ? '99+' : String(drawerState.unread);
-      badge.classList.remove('hidden');
-      badge.style.display = '';
+    const mobileBadge = document.querySelector('.mobile-chat-badge');
+    const count = drawerState.unread;
+    const label = count > 99 ? '99+' : String(count);
+    if (count > 0) {
+      if (badge) {
+        badge.textContent = label;
+        badge.classList.remove('hidden');
+        badge.style.display = '';
+      }
+      if (mobileBadge) {
+        mobileBadge.textContent = label;
+        mobileBadge.classList.remove('hidden');
+        mobileBadge.style.display = '';
+      }
     } else {
-      badge.textContent = '';
-      badge.classList.add('hidden');
-      badge.style.display = 'none';
+      if (badge) {
+        badge.textContent = '';
+        badge.classList.add('hidden');
+        badge.style.display = 'none';
+      }
+      if (mobileBadge) {
+        mobileBadge.textContent = '';
+        mobileBadge.classList.add('hidden');
+        mobileBadge.style.display = 'none';
+      }
     }
   }
 
@@ -938,8 +956,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
         if (playersPanel) playersPanel.classList.add('mobile-visible');
       } else if (tab === 'chat') {
-        const badge = document.getElementById('chat-badge');
-        if (badge) badge.style.display = 'none';
+        // WHY: opening the chat tab reads all messages — clear both badge
+        // elements (desktop pill inside lobby-toggle + mobile tab badge) and
+        // reset the drawer unread counter so renderDrawerBadge stays in sync.
+        drawerState.open();
+        renderDrawerBadge();
         if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
         if (chatPanel) chatPanel.classList.add('mobile-visible');
       }
