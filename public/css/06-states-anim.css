@@ -1229,11 +1229,13 @@ a:focus-visible,
    =============================================================
    WHY (overall): spec §7 defines a frequency-ladder approach:
    animations that happen more often must be quieter/shorter.
-   All keyframes are GPU-friendly (transform + opacity only —
-   never width/height/top/left which trigger layout). Named
-   curve tokens are defined once here and referenced by rule;
-   durations are constrained to 120 / 200 / 320 ms steps so
-   the full vocabulary is consistent across every beat.
+   Keyframes use transform + opacity primarily; box-shadow is
+   used for glow effects where the paint cost is acceptable
+   given short duration and low frequency (never width/height/
+   top/left which trigger layout). Named curve tokens are
+   defined once here and referenced by rule; durations are
+   constrained to 120 / 200 / 320 ms steps so the full
+   vocabulary is consistent across every beat.
    ============================================================= */
 
 /* ── CURVE TOKENS ──────────────────────────────────────────────
@@ -1270,11 +1272,12 @@ a:focus-visible,
        WHY ~220ms: just above the 200ms --dur-sm step to give the
        panel a perceptible (but not slow) displacement. */
 .reel-node:not(.reel-node-ghost):not(.burned).booth-splice-enter .reel-poster {
-  /* WHY: the class .booth-splice-enter is added by choreographTurn
-     (or by the reel re-render) on the turn where a node is newly
-     introduced. It fires alongside phase-reveal on the hero. The
-     220ms is close enough to --dur-sm that it aligns perceptually. */
-  animation: boothSpliceAdvance 220ms var(--ease-gate) both;
+  /* WHY: the class .booth-splice-enter is added by the reel loop in
+     ui-render.js on the turn where a node is newly introduced. It fires
+     alongside the gate-flare on the hero. WHY var(--dur-sm): snapped
+     to the nearest canonical 200ms step (was 220ms raw literal) so all
+     durations share one source of truth in the token block above. */
+  animation: boothSpliceAdvance var(--dur-sm) var(--ease-gate) both;
 }
 @keyframes boothSpliceAdvance {
   /* WHY translateY(-12px): film advances downward through the gate,
@@ -1285,12 +1288,13 @@ a:focus-visible,
 }
 
 /* (b) SEAM FADE: the .reel-bridge (connecting actor splice seam)
-   fades in over ~110ms so it appears to materialise as the film
-   settles. WHY 110ms (~--dur-xs): the seam is text-only; long
-   entrances feel slow for copy. We clamp to just below --dur-xs
-   so it reads as "appeared" not "appeared slowly". */
+   fades in so it appears to materialise as the film settles.
+   WHY var(--dur-xs) / 120ms: the seam is text-only; long entrances
+   feel slow for copy. The 120ms canonical step is the shortest in
+   the spec vocabulary and reads as "appeared" not "appeared slowly".
+   (Was 110ms raw literal; snapped to token for consistency.) */
 .reel-bridge.booth-seam-enter {
-  animation: boothSeamFade 110ms var(--ease-snap) both;
+  animation: boothSeamFade var(--dur-xs) var(--ease-snap) both;
 }
 @keyframes boothSeamFade {
   from { opacity: 0; }
@@ -1298,12 +1302,17 @@ a:focus-visible,
 }
 
 /* (c) GATE FLARE: a brief indigo-glow pulse on the now-playing
-   poster when a new movie locks in, ~180ms. WHY use box-shadow
-   (not filter): box-shadow is compositor-only; filter (glow) is
-   not. WHY 180ms: sits between --dur-xs and --dur-sm — quick
-   enough to read as a flash not a linger. */
+   poster when a new movie locks in. WHY use box-shadow (not
+   filter): box-shadow avoids the texture-upload cost of
+   filter:blur/drop-shadow and does not force a new stacking
+   context, but it still triggers paint on each animated frame.
+   It is the lesser cost here because the animation is short and
+   infrequent (once per turn, 200ms). */
 .reel-node.now-playing.booth-gate-flare .reel-poster {
-  animation: boothGateFlare 180ms var(--ease-snap) both;
+  /* WHY var(--dur-sm) / 200ms: snapped from 180ms raw literal to the
+     nearest canonical step so the duration stays in the shared token
+     vocabulary. Short enough to read as a flash, not a linger. */
+  animation: boothGateFlare var(--dur-sm) var(--ease-snap) both;
 }
 @keyframes boothGateFlare {
   /* WHY: expand the glow from the existing state (Phase 7.7 clutch
@@ -1371,9 +1380,10 @@ a:focus-visible,
   /* WHY override the settled 4px offset during the animation: the
      boothStripRecoil keyframe starts from 0 (neutral) and oscillates
      so the reel-node arrives at the final translateX(4px) settled
-     state naturally at 100%. Animation duration 340ms (within the
-     300–360ms spec range). */
-  animation: boothStripRecoil 340ms var(--ease-in) both;
+     state naturally at 100%. WHY var(--dur-md) / 320ms: snapped from
+     340ms raw literal to the nearest canonical step (within the
+     spec-allowed 300–360ms range). */
+  animation: boothStripRecoil var(--dur-md) var(--ease-in) both;
 }
 @keyframes boothStripRecoil {
   /* WHY 3 oscillations: the spec mandates 3 bounces. The amplitude

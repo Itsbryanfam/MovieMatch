@@ -610,12 +610,36 @@ function choreographTurn(heroNode, gameState, clutch) {
     heroNode.appendChild(flash);
   }
   // Instant settled end-state for ALL turns — restores the pre-PR#39
-  // "instant" feel users expect when validating connections. No phase
-  // classes added, no timers scheduled. Cancel any in-flight phase timer
-  // from a prior render so a stale tick can never re-apply a phase class
-  // to the freshly-rebuilt filmstrip.
+  // "instant" feel users expect when validating connections. Cancel any
+  // in-flight phase timer from a prior render so a stale tick can never
+  // re-apply a phase class to the freshly-rebuilt filmstrip.
   cancelTurnMotion();
   heroNode.classList.add('settled');
+
+  // Booth T5 fix: wire the gate-flare animation that 06-states-anim.css
+  // declares. WHY fire it here (not in the reel loop): choreographTurn is
+  // the designated "per-turn cinematic hook" for the now-playing hero; the
+  // reel loop is a pure build pass that should not diverge timings.
+  // WHY animationend + { once: true }: removes the class after a single
+  // fire so the same node can re-trigger if it somehow remains hero across
+  // two consecutive renders (no memory leak, no double-fire risk).
+  heroNode.classList.add('booth-gate-flare');
+  heroNode.addEventListener('animationend', () => {
+    heroNode.classList.remove('booth-gate-flare');
+  }, { once: true });
+
+  // Booth T5 fix: match-win theatrical beam — fires once per game on the
+  // hero node at the moment the winning play is confirmed.
+  // WHY check gameState.winner: the reel is rebuilt on every stateUpdate,
+  // but choreographTurn only fires on grew, so the win flag is guaranteed
+  // to be present in the same tick that introduced the winning chain entry.
+  // WHY animationend cleanup: same re-trigger safety as gate-flare above.
+  if (gameState && gameState.winner) {
+    heroNode.classList.add('booth-match-win');
+    heroNode.addEventListener('animationend', () => {
+      heroNode.classList.remove('booth-match-win');
+    }, { once: true });
+  }
 }
 
 export function renderGame(gameState, myPlayerId, isSpectator = false) {
@@ -820,6 +844,19 @@ function renderChainItems(gameState, myPlayerId) {
       const bridge = document.createElement('div');
       bridge.className = 'reel-bridge';
       bridge.textContent = linkActor ? `↔ ${linkActor}` : '↔';
+
+      // Booth T5 fix: mark the bridge seam that connects the newly-added node
+      // with .booth-seam-enter so boothSeamFade fires. WHY index === prevCount:
+      // that is the ONLY bridge that is genuinely new this render (it joins the
+      // last existing node to the first new one). WHY animationend cleanup:
+      // same re-trigger safety pattern as booth-splice-enter above.
+      if (grew && index === prevCount) {
+        bridge.classList.add('booth-seam-enter');
+        bridge.addEventListener('animationend', () => {
+          bridge.classList.remove('booth-seam-enter');
+        }, { once: true });
+      }
+
       reel.appendChild(bridge);
     }
 
@@ -831,6 +868,21 @@ function renderChainItems(gameState, myPlayerId) {
     // real data — defensive + NO fabrication. Tested both ways (§4.5).
     const eliminated = !!(item && item.eliminated === true);
     if (eliminated) node.classList.add('burned');
+
+    // Booth T5 fix: mark newly-introduced nodes with .booth-splice-enter so
+    // the boothSpliceAdvance keyframe fires. WHY index >= prevCount: every
+    // chain item from prevCount onward is new to this render (the reel is
+    // rebuilt from scratch each time). WHY !eliminated: the CSS selector
+    // already guards :not(.burned), but skipping the class assignment here
+    // avoids spending a remove-on-animationend listener on a burnt node that
+    // the keyframe will never reach. WHY animationend cleanup: lets the same
+    // node animate again if it re-enters (idempotent re-renders are safe).
+    if (grew && index >= prevCount && !eliminated) {
+      node.classList.add('booth-splice-enter');
+      node.addEventListener('animationend', () => {
+        node.classList.remove('booth-splice-enter');
+      }, { once: true });
+    }
 
     if (item.movie.poster && item.movie.poster.startsWith('https://image.tmdb.org/')) {
       const img = document.createElement('img');

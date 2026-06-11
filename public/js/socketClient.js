@@ -448,6 +448,11 @@ export function initSocket() {
             // (game ended, turn changed, etc.) so it always reflects live state.
             const cueDotCleanup = document.getElementById('cue-dot');
             if (cueDotCleanup) cueDotCleanup.classList.remove('cue-hot');
+            // Booth T5 fix: cue-panic is the accelerating-pulse override
+            // (0.45 s vs 0.9 s) declared in 06-states-anim.css. Clear it
+            // in the same cleanup block as cue-hot so it can never outlive
+            // the timer interval (game over, turn change, etc.).
+            if (cueDotCleanup) cueDotCleanup.classList.remove('cue-panic');
             return;
           }
 
@@ -486,6 +491,13 @@ export function initSocket() {
               // Mirroring timerSeverity 'panic' keeps ONE source of truth and
               // matches the design intent: silent until the final 5s, then fire.
               if (cueDot) cueDot.classList.toggle('cue-hot', timerSeverity(tr) === 'panic');
+              // Booth T5 fix: toggle cue-panic alongside cue-hot so the
+              // faster 0.45 s animation-duration override in 06-states-anim.css
+              // activates in the final 5 s. WHY toggle (not add): the timer
+              // tick runs every second; toggle mirrors the same guard as
+              // cue-hot so both classes track timerSeverity in lockstep with
+              // a single source of truth.
+              if (cueDot) cueDot.classList.toggle('cue-panic', timerSeverity(tr) === 'panic');
               if (tr > 0 && Math.floor(Date.now() / 1000) > getLastTickSound()) {
                 playTick();
                 setLastTickSound(Math.floor(Date.now() / 1000));
@@ -498,6 +510,9 @@ export function initSocket() {
               // cue-hot so the dot returns to the faint indigo ring at-rest
               // state when a new turn starts or the timer is reset.
               if (cueDot) cueDot.classList.remove('cue-hot');
+              // Booth T5 fix: also clear cue-panic in the all-clear branch —
+              // it is a strict subset of cue-hot so both must clear together.
+              if (cueDot) cueDot.classList.remove('cue-panic');
               if (tr <= 30) {
                 timerBar.style.backgroundColor = 'var(--timer-yellow)';
               } else {

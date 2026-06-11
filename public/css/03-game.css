@@ -670,7 +670,12 @@
   text-align: center;
   position: relative;
   opacity: 0.82;
-  transition: opacity 0.3s ease;
+  /* WHY no transition here: the opacity + transform transition is set on
+     .reel-node in the Booth Task 5 block below (uses --dur-sm / --ease-snap
+     tokens and covers both opacity and transform). The old "transition:
+     opacity 0.3s ease" that lived here was a raw-literal duplicate that the
+     later rule superseded; removing it here avoids the dead declaration and
+     keeps the 0.3s inconsistency with the token system from reappearing. */
 }
 .reel-node.now-playing { opacity: 1; }
 .reel-poster {

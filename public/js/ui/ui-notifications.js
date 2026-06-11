@@ -329,12 +329,35 @@ export function renderPendingGhost(reel) {
   const bridge = document.createElement('div');
   bridge.className = 'reel-bridge reel-bridge-broken';
   bridge.textContent = '✗';
+
+  // Booth T5 fix: fire the torn-seam recoil animation when the broken bridge
+  // first appears. WHY add then remove on animationend: lets the same bridge
+  // element re-animate if showGhostAttempt is called a second time while the
+  // 8 s window is still open (a rapid second failed attempt clears and
+  // re-renders, so a fresh animationend listener is safe here).
+  bridge.classList.add('booth-seam-recoil');
+  bridge.addEventListener('animationend', () => {
+    bridge.classList.remove('booth-seam-recoil');
+  }, { once: true });
+
   reel.appendChild(bridge);
 
   // Ghost reel-node — borrows the .reel-node layout so the failed attempt
   // sits in the same horizontal cadence as the chain entries.
   const node = document.createElement('div');
   node.className = 'reel-node reel-node-ghost';
+
+  // Booth T5 fix: fire the strip-recoil animation on the ghost node as soon
+  // as it enters the DOM. WHY add before appendChild: the class must be on
+  // the element when it connects to the document so the CSS animation starts
+  // from keyframe 0% (adding after insert risks missing the first paint).
+  // WHY animationend cleanup: the ghost node is replaced on every
+  // renderPendingGhost call so leak risk is negligible, but cleanup keeps the
+  // pattern consistent with the other Booth T5 animation hooks.
+  node.classList.add('booth-recoil');
+  node.addEventListener('animationend', () => {
+    node.classList.remove('booth-recoil');
+  }, { once: true });
 
   // Poster: same TMDB-URL gate the chain entries use, with the same
   // attachPosterFallback so a broken poster degrades to the designed
