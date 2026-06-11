@@ -487,15 +487,21 @@
     <!-- GAME SCREEN -->
     <div id="game-screen" class="screen">
       <!-- MOBILE TAB BAR -->
+      <!-- Booth Task 6: relabel tab TEXT to booth voice (Gate / Booth / Lobby)
+           per spec §9 ("relabel Board/Players/Chat → e.g. Gate / Booth / Lobby").
+           IMPORTANT: data-tab VALUES are kept unchanged (board / players / chat)
+           because app.js queries them directly via btn.dataset.tab — changing
+           the values would break the tab-switching logic without any CSS/HTML
+           benefit. Only the visible button text (and emoji) changes here. -->
       <nav class="mobile-tabs" id="mobile-tabs">
-        <button class="mobile-tab active" data-tab="board">🎬 Board</button>
-        <button class="mobile-tab" data-tab="players">👥 Players</button>
+        <button class="mobile-tab active" data-tab="board">🎞 Gate</button>
+        <button class="mobile-tab" data-tab="players">🎬 Booth</button>
         <!-- Booth Task 4 fix: mobile chat tab needs its own badge element because
              #chat-badge lives inside the desktop right-panel aside (hidden on mobile).
              .mobile-chat-badge is updated in parallel by renderDrawerBadge() in app.js
              so mobile users see the unread count on the tab bar while the board tab
              is active. data-tab routing in app.js clears both badges on open. -->
-        <button class="mobile-tab" data-tab="chat">💬 Chat
+        <button class="mobile-tab" data-tab="chat">🎟 Lobby
           <span class="mobile-chat-badge hidden" aria-live="polite" aria-atomic="true"></span>
         </button>
       </nav>
