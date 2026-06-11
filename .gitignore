@@ -7,3 +7,7 @@ coverage/
 # Local Claude Code agent settings/state — machine-specific, never committed
 # (was untracked-but-unignored, so a stray `git add -A` would have captured it).
 .claude/
+# Brainstorming visual-companion scratch dir — local mockup HTML + server
+# state for the design-session browser preview; regenerated per session,
+# never part of the app.
+.superpowers/
