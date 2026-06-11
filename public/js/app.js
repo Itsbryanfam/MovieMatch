@@ -50,6 +50,32 @@ import { makeJoinUrl } from './url-helpers.js';
 export { makeJoinUrl };
 
 // ============================================================================
+// BOOTH TASK 4 — REACTION PAYLOAD (exported for unit test)
+// ============================================================================
+// WHY (booth reactions): decouple the wire payload from the button's visible
+// label so ticket-stub text ("Bravo") can replace the emoji glyph without
+// changing what peers receive. Reads data-reaction first; falls back to
+// textContent so old-style emoji buttons still work.
+export function reactionPayload(btn) {
+  return (btn && btn.dataset && btn.dataset.reaction) || (btn && btn.textContent) || '';
+}
+
+// ============================================================================
+// BOOTH TASK 4 — CHAT DRAWER STATE (exported for unit test)
+// ============================================================================
+// WHY (booth lobby drawer): unread count is closed-only state; reset on open.
+// A tiny class keeps the rule testable and the DOM wiring thin. The drawer
+// instance is created inside DOMContentLoaded below so the badge element
+// is available; the class itself is stateless w.r.t. the DOM so it can be
+// tested without a document.
+export class ChatDrawerState {
+  constructor() { this.isOpen = false; this.unread = 0; }
+  open()  { this.isOpen = true;  this.unread = 0; }
+  close() { this.isOpen = false; }
+  onMessage() { if (!this.isOpen) this.unread += 1; }
+}
+
+// ============================================================================
 // LOBBY SETTINGS CHANGE HANDLERS — exported for unit testing
 // ============================================================================
 
@@ -685,10 +711,69 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       const lobbyId = getCurrentLobbyId();
       if (!lobbyId) return;
-      socket.emit('sendReaction', { lobbyId, emoji: btn.innerText });
+      // WHY (booth reactions): use reactionPayload() so ticket-stub text
+      // labels ("Bravo") don't silently change the wire payload — the data-
+      // reaction attribute carries the canonical emoji, innerText is just UI.
+      socket.emit('sendReaction', { lobbyId, emoji: reactionPayload(btn) });
       btn.style.transform = 'scale(0.8)';
       setTimeout(() => btn.style.transform = '', 100);
     });
+  });
+
+  // =========================================================================
+  // BOOTH TASK 4 — LOBBY DRAWER WIRING
+  // =========================================================================
+  // WHY: Chat lives in a collapsible drawer toggled by #lobby-toggle on the
+  // bench. The ChatDrawerState class (tested in booth-chat-drawer.test.js)
+  // tracks open/close and increments unread only while closed. The badge
+  // element (#chat-badge) is updated on every state change so the counter is
+  // always in sync. On desktop the drawer is the primary chat surface; on
+  // mobile the existing mobile-tabs flow continues to function alongside it.
+
+  const drawerState = new ChatDrawerState();
+  const lobbyDrawer = document.querySelector('.lobby-drawer');
+  const lobbyToggle = document.getElementById('lobby-toggle');
+
+  function renderDrawerBadge() {
+    // WHY: render the unread count into #chat-badge (the shared badge used by
+    // both the mobile tab and the new lobby-toggle button). Show as a number
+    // when > 0; hide when zero.
+    const badge = document.getElementById('chat-badge');
+    if (!badge) return;
+    if (drawerState.unread > 0) {
+      badge.textContent = drawerState.unread > 99 ? '99+' : String(drawerState.unread);
+      badge.classList.remove('hidden');
+      badge.style.display = '';
+    } else {
+      badge.textContent = '';
+      badge.classList.add('hidden');
+      badge.style.display = 'none';
+    }
+  }
+
+  if (lobbyToggle && lobbyDrawer) {
+    lobbyToggle.addEventListener('click', () => {
+      if (drawerState.isOpen) {
+        // Close the drawer
+        drawerState.close();
+        lobbyDrawer.classList.remove('open');
+        lobbyToggle.setAttribute('aria-expanded', 'false');
+      } else {
+        // Open the drawer — resets unread
+        drawerState.open();
+        lobbyDrawer.classList.add('open');
+        lobbyToggle.setAttribute('aria-expanded', 'true');
+      }
+      renderDrawerBadge();
+    });
+  }
+
+  // Listen for new chat messages dispatched by socketClient (no circular import)
+  // WHY: mm:chat is dispatched by socketClient.js receiveChat handler so that
+  // the drawer unread counter increments without requiring a direct import.
+  document.addEventListener('mm:chat', () => {
+    drawerState.onMessage();
+    renderDrawerBadge();
   });
 
   // =========================================================================

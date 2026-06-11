@@ -867,6 +867,13 @@ export function initSocket() {
       const badgeEl = document.getElementById('chat-badge');
       if (badgeEl) badgeEl.style.display = 'block';
     }
+
+    // WHY (booth drawer): notify app.js that a chat message arrived so the
+    // lobby-drawer unread counter can increment. A custom DOM event avoids a
+    // circular import (socketClient ↛ app.js). app.js listens and calls
+    // drawerState.onMessage(). This event fires on every message; the drawer
+    // state itself decides whether to count (only while closed).
+    document.dispatchEvent(new CustomEvent('mm:chat'));
   });
 
   socket.on('receiveReaction', ({ emoji }) => {

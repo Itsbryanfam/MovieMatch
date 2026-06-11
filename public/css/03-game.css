@@ -1632,3 +1632,164 @@
    dropdown is absolutely positioned out of flow. Ensure it doesn't clip
    against the input-area overflow:visible rule (already set). */
 
+/* ── BOOTH TASK 4: LOBBY DRAWER ─────────────────────────────────────────── */
+/* WHY: chat lives in a collapsible drawer so it doesn't crowd the suggestions
+   half on desktop. The drawer slides off-canvas to the right when closed
+   (transform + overflow:hidden on the parent), showing only the header/toggle.
+   The .open class restores full height. On mobile the existing mobile-tabs
+   flow handles visibility, so the drawer transition is desktop-only (≥768px). */
+
+/* Drawer toggle button in the sidebar header — sits beside the "Lobby Chat"
+   heading. The badge pill overlays the chevron icon. */
+.lobby-toggle-btn {
+  /* WHY: sit beside the "Lobby Chat" h3 without pushing it; auto left-margin
+     keeps it right-aligned inside the flex header. */
+  margin-left: auto;
+  position: relative;
+  padding: 0.35rem 0.5rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+.lobby-toggle-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+
+/* WHY: flex the header so the h3 and toggle sit side-by-side. The .sidebar-header
+   rule already uses padding; we only add flex here (additive). */
+.sidebar-half.chat-half .sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Chevron rotates 180° when the drawer is open so it points up (close) vs
+   down (open). The aria-expanded attribute drives it so state is accessible. */
+.lobby-toggle-btn[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lobby-toggle-btn[aria-expanded="false"] svg {
+  transform: rotate(0deg);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Unread badge pill — overlays top-right of the toggle icon.
+   WHY: small number badge makes it clear at a glance how many messages
+   arrived while the drawer was closed, without needing a separate indicator. */
+.chat-badge-pill {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+  background: var(--accent-primary);
+  color: #fff;
+  pointer-events: none;
+}
+.chat-badge-pill.hidden {
+  display: none;
+}
+
+/* Drawer collapse: when .open is NOT present on desktop, shrink the chat half
+   to just the header row so content is hidden without removing from DOM
+   (preserves scroll position and ids). Only applied ≥ 768px; mobile uses the
+   tab-bar pattern instead.
+   WHY: max-height + overflow:hidden gives a CSS transition with no JS layout
+   jank; the starting height (open) is unrestricted. We default to open. */
+@media (min-width: 768px) {
+  .lobby-drawer {
+    /* WHY: default (closed) state clips to just the header row (~52px) so
+       chat doesn't crowd the right panel on first load. The .open class
+       expands to full height. Using max-height for the transition avoids
+       needing a fixed height on the open state (content-driven). */
+    max-height: 52px;
+    overflow: hidden;
+    transition: max-height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Open state: app.js adds .open when the toggle is clicked. */
+  .lobby-drawer.open {
+    /* WHY: 600px is a generous cap; the sidebar will never be that tall so
+       max-height effectively means "natural height". */
+    max-height: 600px;
+  }
+
+  /* Hide messages and input when collapsed so keyboard focus can't reach them. */
+  .lobby-drawer:not(.open) .chat-messages,
+  .lobby-drawer:not(.open) .chat-input-wrapper {
+    /* WHY: visibility:hidden removes from tab order (a11y) when collapsed;
+       combined with max-height clip, the content is truly inaccessible. */
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+/* ── BOOTH TASK 4: TICKET-STUB REACTIONS ──────────────────────────────────── */
+/* WHY: plain emoji buttons break the booth aesthetic and couple visible text
+   to the wire payload. Die-cut ticket stubs (perforation notch on the left)
+   give each reaction booth physicality while the data-reaction attribute
+   carries the emoji payload independently of the label text.
+   Ported from reference .stub; applied on top of the existing .reaction-btn
+   base rules in 04-modals.css (which handle min-height/tap targets). */
+.reaction-btn {
+  /* WHY: replace pill shape with the booth's rectangular ticket look.
+     A small border-radius keeps it approachable, not cold. */
+  font-family: var(--font-display, 'Saira Condensed', 'Plus Jakarta Sans', sans-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--t-1, 12.8px);
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--booth-edge, var(--border-subtle));
+  border-radius: 6px;
+  /* WHY: left padding wider than right so the perforation notch (::before)
+     sits inside the padding zone without clipping the emoji/label. */
+  padding: 5px 9px 5px 14px;
+  position: relative;
+  /* Keep the tap-target size from 04-modals.css (min-height:44px). The
+     padding reduction is safe because the existing min-height floor holds. */
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Die-cut perforation: a dashed vertical line 6px from the left edge,
+   mimicking a tear-off stub notch. Ported from reference .stub::before. */
+.reaction-btn::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  /* WHY: repeating-linear-gradient creates the dashed perforation pattern
+     without an extra element. Color uses --text-dim alias which resolves to
+     the same dimmed grey as the reference's --g3. Falls back to border-subtle
+     if --text-dim is not defined. */
+  background: repeating-linear-gradient(
+    var(--text-dim, var(--border-subtle)) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+.reaction-btn:hover {
+  color: var(--text-main);
+  border-color: var(--beam, var(--accent-primary));
+  /* WHY: keep the existing scale/lift hover from 04-modals.css — it signals
+     interactivity. No change needed; just declare so the stub border shows. */
+}
+

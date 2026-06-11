@@ -490,7 +490,9 @@
       <nav class="mobile-tabs" id="mobile-tabs">
         <button class="mobile-tab active" data-tab="board">🎬 Board</button>
         <button class="mobile-tab" data-tab="players">👥 Players</button>
-        <button class="mobile-tab" data-tab="chat">💬 Chat <span id="chat-badge" class="hidden"></span></button>
+        <!-- Booth Task 4: chat badge moved to #lobby-toggle inside the drawer header
+             so a single #chat-badge serves both desktop toggle and mobile context. -->
+        <button class="mobile-tab" data-tab="chat">💬 Chat</button>
       </nav>
       <div class="layout-grid">
         <!-- Sidebar -->
@@ -599,10 +601,13 @@
                   (or nothing) to screen readers. aria-label + title give
                   each reaction a real name; the emoji stays as the visual. -->
              <!-- Phase 4: .btn additive base (cursor:pointer already on reaction-btn); zero visual change. -->
-             <button class="btn reaction-btn" aria-label="React with fire" title="Fire">🔥</button>
-             <button class="btn reaction-btn" aria-label="React with laughter" title="Laugh">😂</button>
-             <button class="btn reaction-btn" aria-label="React with skull" title="Skull">💀</button>
-             <button class="btn reaction-btn" aria-label="React with eyes" title="Eyes">👀</button>
+             <!-- Booth Task 4: data-reaction carries the canonical wire payload so
+                  visible ticket-stub labels ("Bravo") can differ from the emoji
+                  without changing what peers receive. reactionPayload(btn) reads this. -->
+             <button class="btn reaction-btn" data-reaction="🔥" aria-label="React with fire" title="Fire">🔥</button>
+             <button class="btn reaction-btn" data-reaction="😂" aria-label="React with laughter" title="Laugh">😂</button>
+             <button class="btn reaction-btn" data-reaction="💀" aria-label="React with skull" title="Skull">💀</button>
+             <button class="btn reaction-btn" data-reaction="👀" aria-label="React with eyes" title="Eyes">👀</button>
           </div>
         </main>
         
@@ -617,9 +622,26 @@
             </div>
           </div>
           
-          <div class="sidebar-half chat-half">
+          <!-- Booth Task 4: the chat half is wrapped in a .lobby-drawer so it can
+               slide off-canvas on desktop and be toggled by #lobby-toggle. The
+               #chat-messages/#chat-input/#chat-send-btn ids are preserved (DOM
+               contract §8). The drawer is open by default (no .open class =
+               visible; CSS transitions it out when .open is absent on desktop). -->
+          <div class="sidebar-half chat-half lobby-drawer" id="lobby-drawer">
             <div class="sidebar-header">
+              <!-- Booth Task 4: #lobby-toggle opens/closes the drawer and displays
+                   the unread badge. aria-expanded is managed by app.js wiring. -->
               <h3>Lobby Chat</h3>
+              <!-- WHY: drawer starts closed (aria-expanded="false") so chat
+                   doesn't crowd the right panel on first load. app.js manages
+                   the aria-expanded state and the .open class on the drawer. -->
+              <button id="lobby-toggle" class="btn btn-icon lobby-toggle-btn"
+                      aria-label="Toggle lobby chat" title="Toggle lobby chat"
+                      aria-expanded="false" aria-controls="lobby-drawer">
+                <!-- Chevron icon: rotates when drawer closes -->
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                <span id="chat-badge" class="chat-badge-pill hidden" aria-live="polite" aria-atomic="true"></span>
+              </button>
             </div>
             <div id="chat-messages" class="chat-messages">
                 <div class="empty-hint">Start chatting...</div>
