@@ -634,8 +634,9 @@
           <!-- Booth Task 4: the chat half is wrapped in a .lobby-drawer so it can
                slide off-canvas on desktop and be toggled by #lobby-toggle. The
                #chat-messages/#chat-input/#chat-send-btn ids are preserved (DOM
-               contract §8). The drawer is open by default (no .open class =
-               visible; CSS transitions it out when .open is absent on desktop). -->
+               contract §8). The drawer starts CLOSED (no .open class = max-height
+               clipped to header row; app.js adds .open to expand).
+               aria-expanded on #lobby-toggle mirrors this state. -->
           <div class="sidebar-half chat-half lobby-drawer" id="lobby-drawer">
             <div class="sidebar-header">
               <!-- Booth Task 4: #lobby-toggle opens/closes the drawer and displays
@@ -644,7 +645,10 @@
               <!-- WHY: drawer starts closed (aria-expanded="false") so chat
                    doesn't crowd the right panel on first load. app.js manages
                    the aria-expanded state and the .open class on the drawer. -->
+              <!-- WHY: explicit type="button" prevents the HTML-spec default of
+                   type="submit" on buttonless forms; also satisfies a11y linters. -->
               <button id="lobby-toggle" class="btn btn-icon lobby-toggle-btn"
+                      type="button"
                       aria-label="Toggle lobby chat" title="Toggle lobby chat"
                       aria-expanded="false" aria-controls="lobby-drawer">
                 <!-- Chevron icon: rotates when drawer closes -->

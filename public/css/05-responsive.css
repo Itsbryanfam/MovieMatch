@@ -577,18 +577,6 @@
     position: relative;
   }
 
-  /* Legacy dot badge on the mobile chat tab (kept for backward compatibility;
-     .mobile-chat-badge is the new numbered pill for the same tab button). */
-  #chat-badge {
-    position: absolute;
-    top: 4px;
-    right: 8px;
-    width: 8px;
-    height: 8px;
-    background: var(--status-danger);
-    border-radius: 50%;
-  }
-
   /* WHY: .mobile-chat-badge is the numbered unread pill for the mobile chat
      tab button. It mirrors the desktop .chat-badge-pill shape/tokens but is
      positioned relative to the tab button rather than the lobby-toggle. The
@@ -607,7 +595,9 @@
     text-align: center;
     border-radius: var(--radius-md);
     background: var(--accent-primary);
-    color: #fff;
+    /* WHY: --text-on-accent (#fff) token from 01-base.css; mirrors the
+       desktop .chat-badge-pill token usage — no raw hex literals. */
+    color: var(--text-on-accent);
     pointer-events: none;
   }
   .mobile-chat-badge.hidden {

@@ -244,6 +244,12 @@ body {
      --bg-base (#09090b), satisfying WCAG AA for the small --t-micro
      status labels. The 3-step ramp is: main → muted → dim. */
   --text-dim: #6b7280;
+
+  /* WHY: --text-on-accent is pure white for text rendered on the indigo
+     accent chip (e.g. .chat-badge-pill, .mobile-chat-badge). --text-inverse
+     is #0f172a (dark navy), so it cannot serve this role. No brand override
+     is needed — the indigo pill is always dark enough for #fff to pass WCAG AA. */
+  --text-on-accent: #fff;
 }
 
 /* .btn — shared base for the button variants (Phase 4). ADDITIVE ONLY:

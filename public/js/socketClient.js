@@ -859,14 +859,11 @@ export function initSocket() {
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    const chatPanel = document.querySelector('[data-panel="chat"]');
-    const isMobileVisible = chatPanel && chatPanel.classList.contains('mobile-visible');
-    const isDesktop = window.innerWidth > 767;
-
-    if (!isDesktop && !isMobileVisible) {
-      const badgeEl = document.getElementById('chat-badge');
-      if (badgeEl) badgeEl.style.display = 'block';
-    }
+    // WHY (booth drawer): Badge update delegated to app.js via mm:chat event.
+    // The old inline-style block that set #chat-badge.style.display='block' was
+    // removed: #chat-badge now lives inside the desktop lobby-toggle button (a
+    // hidden panel on mobile), so the old guard branch was writing a dead style.
+    // renderDrawerBadge() in app.js owns all badge state via the mm:chat event.
 
     // WHY (booth drawer): notify app.js that a chat message arrived so the
     // lobby-drawer unread counter can increment. A custom DOM event avoids a

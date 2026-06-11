@@ -1699,7 +1699,10 @@
      instead of a raw literal, keeping all radii tokenised. */
   border-radius: var(--radius-md);
   background: var(--accent-primary);
-  color: #fff;
+  /* WHY: --text-on-accent (#fff) from 01-base.css; the indigo chip is dark
+     enough for white text to pass WCAG AA. --text-inverse is dark navy, not
+     usable here. */
+  color: var(--text-on-accent);
   pointer-events: none;
 }
 .chat-badge-pill.hidden {
@@ -1721,7 +1724,8 @@
        needing a fixed height on the open state (content-driven). */
     max-height: 52px;
     overflow: hidden;
-    transition: max-height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    /* 320ms --ease-gate — spec §7 slow-entrance step; panel-scale reveal. */
+    transition: max-height 0.32s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   /* Open state: app.js adds .open when the toggle is clicked. */
@@ -1761,9 +1765,10 @@
   border: 1px solid var(--booth-edge, var(--border-subtle));
   /* WHY: --radius-sm (6px) token from 01-base.css; avoids raw literals. */
   border-radius: var(--radius-sm);
-  /* WHY: left padding wider than right so the perforation notch (::before)
-     sits inside the padding zone without clipping the emoji/label. */
-  padding: 5px 9px 5px 14px;
+  /* WHY: grid-conforming steps (spec §5.4 — 4/8/12/16px grid): 4px top/bottom,
+     8px right, 16px left. The wider left padding gives the perforation notch
+     (::before at left:6px) 10px of clear space — notch still fits comfortably. */
+  padding: 4px 8px 4px 16px;
   position: relative;
   /* Keep the tap-target size from 04-modals.css (min-height:44px). The
      padding reduction is safe because the existing min-height floor holds. */
