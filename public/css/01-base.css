@@ -188,6 +188,47 @@ body {
   display: flex;
 }
 
+/* Booth Task 0: Second :root block adds the Projection Booth design system
+   on top of the existing brand tokens — appended, never merged, so the
+   cascade order is preserved and a later revert can remove this block
+   cleanly without touching existing declarations.
+
+   WHY a second :root block rather than editing the first:
+   - Cascade is load-bearing in this codebase (spec §11).
+   - Keeps the original tokens exactly as shipped across Phases 1–7.
+   - A clean diff boundary for each Booth task. */
+:root {
+  /* DISPLAY FONT — Saira Condensed is the billing-block voice (real
+     film one-sheet condensed grotesque). Falls back to Plus Jakarta Sans
+     so the UI degrades gracefully while the font loads. */
+  --font-display: 'Saira Condensed', 'Plus Jakarta Sans', sans-serif;
+
+  /* TYPE SCALE — 1.2 modular ratio off a 16px base.
+     Every Booth font-size must reference one of these steps; the ~19
+     ad-hoc px sizes scattered through the file are intentionally killed
+     over the Booth task arc in favour of this unified scale. */
+  --t-1: 12.8px;    /* small labels, captions            */
+  --t0:  16px;      /* body / base                       */
+  --t1:  19.2px;    /* secondary headings, large labels  */
+  --t2:  23px;      /* tertiary headings                 */
+  --t3:  33px;      /* primary headings                  */
+  --t-display: 46px; /* billing-block movie title        */
+
+  /* SEMANTIC ALIASES — point at existing brand values, no new colours.
+     --beam    = the projector light (indigo, already the brand accent).
+     --beam-glow = soft halo around the gate poster and active marker.
+     --cue-hot  = the amber threshold pulse (already --status-warning).
+     Kept as aliases so a single upstream change propagates everywhere. */
+  --beam:      var(--accent-primary);           /* #818cf8               */
+  --beam-glow: rgba(129, 140, 248, .55);        /* wider, softer halo    */
+  --cue-hot:   var(--status-warning);           /* #f59e0b               */
+
+  /* BOOTH EDGE — the border/separator tone for the dark booth surfaces.
+     Slightly lighter than --bg-surface so the panel edges read without
+     needing a fully opaque border-highlight. */
+  --booth-edge: #1f1f26;
+}
+
 /* .btn — shared base for the button variants (Phase 4). ADDITIVE ONLY:
    `cursor: pointer` is the single declaration all 9 variants
    (.btn-primary/.btn-secondary/.btn-icon/.nav-link-btn/.btn-join-team/

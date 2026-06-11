@@ -77,13 +77,30 @@
   min-height: 0;
 }
 
+/* Booth Task 0: The board surface moves from glassmorphism (frosted, translucent)
+   to an opaque graded charcoal radial — the "booth-dark" interior.
+   WHY remove backdrop-filter: spec §5.3 explicitly calls out frost as a
+   legibility hazard on a timed competitive screen; the opaque surface also
+   removes any dependency on what is behind the element, making it consistent
+   across devices that handle backdrop-filter at varying quality or not at all.
+   The radial gradient creates a subtle center-brighter / edge-darker lighting
+   that reads as the projector beam illuminating the inside of the booth.
+   All other layout properties (min-height, overflow-y, border-radius, padding,
+   position:relative) are kept unchanged — they are load-bearing for the chain
+   scroll and ::before/::after stacking below. */
 .feed-container {
   flex: 1;
-  min-height: 60vh; /* Forces the glass board to stay expanded when empty */
-  background: rgba(15, 23, 42, 0.65); /* Translucent dark wash */
-  backdrop-filter: blur(var(--blur-xl));
-  -webkit-backdrop-filter: blur(var(--blur-xl)); /* Safari support */
-  border: 1px solid rgba(255, 255, 255, 0.1); /* Glass edge highlight */
+  min-height: 60vh; /* Forces the board to stay expanded when empty */
+  /* Opaque graded charcoal — replaces the translucent frost wash.
+     Center-top is slightly blue-shifted (#15151f) so the projector beam
+     feel is present without adding a chromatic colour; edges fall to near-
+     black (#060608) to form a natural vignette anchor. */
+  background: radial-gradient(120% 80% at 50% 16%, #15151f 0%, var(--bg-base) 56%, #060608 100%);
+  /* Explicitly clear any inherited or future frost declarations — belt-and-
+     suspenders guarantee the frost is gone even if specificity shifts. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid var(--booth-edge); /* Booth-edge tone instead of white-glass */
   border-radius: var(--radius-xl);
   padding: 1.5rem 1.5rem 1.5rem 3.5rem; /* Expanded left padding for timeline */
   overscroll-behavior: contain; /* Don't chain scroll back to body */
@@ -92,8 +109,71 @@
   flex-direction: column;
   gap: 1.25rem; /* Increased gap for visual breathing room */
   scroll-behavior: smooth;
-  position: relative;
-  box-shadow: var(--shadow-lg); /* Deep drop shadow for floating effect */
+  position: relative; /* Stacking context for ::before/::after overlays below */
+  box-shadow: var(--shadow-lg);
+}
+
+/* Booth Task 0 — FILM-GRAIN OVERLAY
+   WHY: neutral analogue texture at very low opacity (5%) anchors the
+   booth-dark surface in physical space without adding warmth or colour.
+   SVG feTurbulence generates the noise inline so there is no extra HTTP
+   request; the steps(3) animation shifts the grain tile slightly on each
+   frame to read as real grain motion without being distracting.
+   mix-blend-mode:overlay lets the grain react to the surface lightness —
+   brighter regions of the radial pick up slightly more texture.
+   pointer-events:none + z-index:2 keep it invisible to clicks and behind
+   chain content (chain items get z-index:3 below). */
+.feed-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2; /* above board background, below chain items (z-index:3) */
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: .05; /* ≤6% cap from spec — subtle, not visible as texture at a glance */
+  mix-blend-mode: overlay;
+  animation: grain 1.1s steps(3) infinite;
+  /* border-radius matches parent so the grain doesn't bleed past the card edge */
+  border-radius: var(--radius-xl);
+}
+
+/* Booth Task 0 — VIGNETTE OVERLAY
+   WHY: a radial dark vignette around the edges of the board focuses
+   attention on the center (where the chain content lives) and reinforces
+   the projector-lens framing of the booth metaphor.
+   Ported verbatim from .booth::after in the approved reference mockup.
+   z-index:1 keeps it behind the grain layer (z-index:2) and both behind
+   chain items (z-index:3). */
+.feed-container::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(125% 95% at 50% 28%, transparent 55%, rgba(0, 0, 0, .55) 100%);
+  border-radius: var(--radius-xl);
+}
+
+/* Booth Task 0 — GRAIN KEYFRAMES
+   Three-step jitter (translate only, no scale/opacity) keeps the
+   grain alive without triggering repaints on the composite layer.
+   Ported verbatim from the reference mockup @keyframes grain. */
+@keyframes grain {
+  0%   { transform: translate(0,    0);   }
+  33%  { transform: translate(-3px, 2px); }
+  66%  { transform: translate(2px, -2px); }
+  100% { transform: translate(0,    0);   }
+}
+
+/* Booth Task 0 — CHAIN ITEM STACKING CONTEXT
+   WHY: the film-grain (z-index:2) and vignette (z-index:1) overlays are
+   absolutely positioned inside .feed-container. Without an explicit
+   z-index on .chain-item the overlays would paint over the chain content.
+   Setting z-index:3 (with position:relative, which .chain-item already
+   has) ensures chain items always render above both overlay layers.
+   This is an additive declaration — no existing property is changed. */
+.chain-item {
+  z-index: 3;
 }
 
 
