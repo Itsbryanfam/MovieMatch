@@ -619,43 +619,51 @@ function choreographTurn(heroNode, gameState, clutch) {
   // Booth T5 fix: wire the per-turn cinematic beat. WHY fire here (not in
   // the reel loop): choreographTurn is the designated hook for the hero;
   // the reel loop is a pure build pass that must not diverge timings.
-  // WHY animationend + { once: true }: removes the class after a single
-  // fire so the same node can re-trigger if it somehow remains hero across
-  // two consecutive renders (no memory leak, no double-fire risk).
+  //
+  // WHY a named, self-removing handler instead of { once: true } (Finding 2):
+  // the hero's .reel-poster can run BOTH boothSpliceAdvance and boothGateFlare
+  // from the compound CSS rule, at identical var(--dur-sm) duration. With
+  // { once: true } the FIRST animationend to bubble (often boothSpliceAdvance)
+  // is consumed and the listener detaches; the animationName guard then
+  // rejects it and the class is NEVER stripped — cleanup fails closed. A
+  // named handler that detaches itself ONLY when its own keyframe ends fires
+  // exactly once for the right animation, strips the class, and removes
+  // itself — no leak, no double-fire, regardless of event order.
   //
   // WHY win branch uses booth-match-win INSTEAD OF booth-gate-flare:
-  // both classes would compete for the same animationend event from
-  // .reel-poster. The { once: true } gate-flare listener would consume the
-  // event first, leaving booth-match-win permanently on the node (the
-  // advertised "animationend cleanup" contract silently fails). The win beam
-  // supersedes the gate flare on that turn — only one class is added so
-  // exactly one animationend fires and cleanup is reliable.
+  // the win beam supersedes the gate flare on that turn — only ONE class is
+  // ever added per turn (this if/else is exclusive), so the two never compete.
   // WHY check gameState.winner before adding either class: the win flag is
   // guaranteed present in the same tick that introduced the winning entry
   // (choreographTurn only fires on grew).
+  //
+  // WHY listen on heroNode: the animations run on the descendant .reel-poster,
+  // and animationend bubbles, so heroNode reliably observes them.
   if (gameState && gameState.winner) {
     // Win turn: theatrical beam supersedes the per-turn gate-flare.
     heroNode.classList.add('booth-match-win');
-    heroNode.addEventListener('animationend', (e) => {
+    const onWinEnd = (e) => {
       // WHY guard animationName: .reel-poster may carry other animations;
-      // only remove booth-match-win when the win-beam keyframe completes.
-      if (e.animationName === 'boothWinBeam') {
-        heroNode.classList.remove('booth-match-win');
-      }
-    }, { once: true });
+      // only act when the win-beam keyframe itself completes, then detach so
+      // no stray listener survives after the class is stripped.
+      if (e.animationName !== 'boothWinBeam') return;
+      heroNode.classList.remove('booth-match-win');
+      heroNode.removeEventListener('animationend', onWinEnd);
+    };
+    heroNode.addEventListener('animationend', onWinEnd);
   } else {
     // Normal turn: indigo gate-flare confirms the accepted splice.
     heroNode.classList.add('booth-gate-flare');
-    heroNode.addEventListener('animationend', (e) => {
-      // WHY guard animationName: ensures cleanup targets the right animation
-      // even if the node carries booth-splice-enter simultaneously (the
-      // compound CSS rule plays both; two animationend events fire and
-      // { once: true } only catches the first — but both animate .reel-poster
-      // so order is non-deterministic; guarding by name makes it robust).
-      if (e.animationName === 'boothGateFlare') {
-        heroNode.classList.remove('booth-gate-flare');
-      }
-    }, { once: true });
+    const onFlareEnd = (e) => {
+      // WHY guard animationName: when the hero is also entering this tick the
+      // compound rule plays boothSpliceAdvance + boothGateFlare at the same
+      // duration; ignore the splice event and act only on the gate-flare,
+      // then detach so the listener never outlives the removed class.
+      if (e.animationName !== 'boothGateFlare') return;
+      heroNode.classList.remove('booth-gate-flare');
+      heroNode.removeEventListener('animationend', onFlareEnd);
+    };
+    heroNode.addEventListener('animationend', onFlareEnd);
   }
 }
 

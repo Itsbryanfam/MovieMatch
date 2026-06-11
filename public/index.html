@@ -571,11 +571,15 @@
               <!-- Phase 4: .btn additive base (cursor:pointer already on btn-icon); zero visual change. -->
               <!-- Booth Task 3 (Roll It): text label span added beside the
                    existing SVG so the button reads visually as "▸ Roll It".
-                   The SVG keeps aria-hidden="true" (set above); the button's
-                   accessible name remains aria-label="Submit movie". The span
-                   is aria-hidden so screen readers hear the button label, not
-                   the decorative label text. CSS widens #submit-btn to fit. -->
-              <button id="submit-btn" class="btn btn-icon" aria-label="Submit movie" title="Submit movie" disabled>
+                   The SVG keeps aria-hidden="true" (set above); the span is
+                   aria-hidden so screen readers hear the button label, not the
+                   decorative label text. CSS widens #submit-btn to fit. -->
+              <!-- WCAG 2.5.3 (Label in Name) fix: the visible label is "Roll It"
+                   but the accessible name was "Submit movie", so voice-control
+                   users saying "click Roll It" could not activate it. aria-label
+                   now CONTAINS the visible "Roll It" text while preserving the
+                   submit intent. title unchanged. -->
+              <button id="submit-btn" class="btn btn-icon" aria-label="Roll It — submit movie" title="Submit movie" disabled>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                 <span class="roll-label" aria-hidden="true">Roll It</span>
               </button>
@@ -619,10 +623,15 @@
                   ("Bravo", "Brutal", "Cut!", "Eyes") so the button text fits
                   the ticket-stub aesthetic; aria-label + title keep the screen-
                   reader meaning tied to the original emoji intent. -->
-             <button class="btn reaction-btn" data-reaction="🔥" aria-label="React with fire" title="Fire">Bravo</button>
-             <button class="btn reaction-btn" data-reaction="😂" aria-label="React with laughter" title="Laugh">Brutal</button>
-             <button class="btn reaction-btn" data-reaction="💀" aria-label="React with skull" title="Skull">Cut!</button>
-             <button class="btn reaction-btn" data-reaction="👀" aria-label="React with eyes" title="Eyes">Eyes</button>
+             <!-- WCAG 2.5.3 (Label in Name) fix: the accessible name must
+                  CONTAIN the visible label so voice-control users saying
+                  "click Bravo" can activate the control. aria-label now leads
+                  with the visible text ("Bravo") and keeps the emoji intent in
+                  parentheses. data-reaction (wire payload) and title unchanged. -->
+             <button class="btn reaction-btn" data-reaction="🔥" aria-label="Bravo (fire reaction)" title="Fire">Bravo</button>
+             <button class="btn reaction-btn" data-reaction="😂" aria-label="Brutal (laugh reaction)" title="Laugh">Brutal</button>
+             <button class="btn reaction-btn" data-reaction="💀" aria-label="Cut! (skull reaction)" title="Skull">Cut!</button>
+             <button class="btn reaction-btn" data-reaction="👀" aria-label="Eyes (eyes reaction)" title="Eyes">Eyes</button>
           </div>
         </main>
         

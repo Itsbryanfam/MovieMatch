@@ -952,10 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (playersPanel) playersPanel.classList.remove('mobile-visible');
       if (chatPanel) chatPanel.classList.remove('mobile-visible');
 
-      if (tab === 'players') {
-        if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
-        if (playersPanel) playersPanel.classList.add('mobile-visible');
-      } else if (tab === 'chat') {
+      if (tab === 'chat') {
         // WHY: opening the chat tab reads all messages — clear both badge
         // elements (desktop pill inside lobby-toggle + mobile tab badge) and
         // reset the drawer unread counter so renderDrawerBadge stays in sync.
@@ -963,6 +960,23 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDrawerBadge();
         if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
         if (chatPanel) chatPanel.classList.add('mobile-visible');
+      } else {
+        // WHY (Finding 1): leaving the chat tab (board OR players) hides the
+        // chat panel but previously never flipped drawerState back to closed,
+        // so ChatDrawerState.onMessage()'s `if (!this.isOpen)` guard stayed
+        // false forever and unread never incremented again after the first
+        // chat open — the .mobile-chat-badge was frozen at 0 for the session.
+        // close() only sets isOpen=false (it does NOT touch unread, so any
+        // count accumulated while closed persists), re-arming unread counting.
+        // This is mobile-only: .mobile-tab buttons are display:none on desktop,
+        // and the desktop drawer is toggled independently via #lobby-toggle, so
+        // this does not affect desktop open/close behaviour.
+        drawerState.close();
+        renderDrawerBadge();
+        if (tab === 'players') {
+          if (gameBoardEl) gameBoardEl.classList.add('mobile-hidden');
+          if (playersPanel) playersPanel.classList.add('mobile-visible');
+        }
       }
     });
   }

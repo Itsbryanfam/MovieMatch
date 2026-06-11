@@ -13,3 +13,11 @@ test('falls back to textContent when data-reaction absent', () => {
   btn.textContent = '👀';
   expect(reactionPayload(btn)).toBe('👀');
 });
+// WHY (Finding 4): pin the '' fallback branch — a button with NEITHER a
+// data-reaction attribute NOR any text content must yield the empty string
+// (the `|| ''` arm), not undefined, so callers never emit `undefined` on the
+// wire. Previously this branch of reactionPayload() was untested.
+test('returns empty string when neither data-reaction nor text present', () => {
+  const btn = document.createElement('button');
+  expect(reactionPayload(btn)).toBe('');
+});
