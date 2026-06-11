@@ -655,21 +655,14 @@
 @media (max-width: 767px) {
 
   /* BOOTH STACK — beam (game-board / feed-container) on top.
-     WHY: the layout-grid already collapses to a single column at 767px
-     (see the existing 1fr rule above). Setting order:0 on .game-board and
-     order:1 on the sidebars enforces beam-first stacking without changing
-     the DOM order or breaking the mobile-hidden / mobile-visible tab swap
-     that app.js manages. The game-board already gets flex:1 in the base
-     rules; adding min-height:0 ensures it doesn't overflow when the bench
-     is swapped in. */
-  .game-board {
-    order: 0; /* beam sits on top */
-  }
-
-  [data-panel="players"],
-  [data-panel="chat"] {
-    order: 1; /* bench / lobby slide in below when their tab is active */
-  }
+     WHY: beam-first stacking is enforced by the .mobile-tabs default state
+     in app.js (lines ~951-965): the board tab is active on load, so
+     .game-board carries .mobile-visible and both panel elements carry
+     .mobile-hidden. Since only one element occupies the single-column grid
+     at any time, CSS `order` has no layout effect and was removed to
+     prevent misleading future readers. If the DOM tab-init logic ever
+     changes, this comment is the reminder: board-tab must remain the
+     default active tab to satisfy spec §9 "beam on top". */
 
   /* FEED-CONTAINER — shrink to fit available vertical space.
      WHY: without a min-height cap the opaque graded-charcoal board
@@ -705,8 +698,8 @@
   .reel-bridge {
     writing-mode: horizontal-tb !important; /* override if vertical is ever set */
     transform: none !important;             /* undo any rotate(180deg) for vertical */
-    padding: 0 6px;                          /* tighter spacing in the narrow strip */
-    font-size: var(--t-micro);              /* 9.6px — fits in the strip gap */
+    padding: 0 4px;                          /* 4px — smallest 8px-grid step; tighter than base to avoid crowding posters */
+    font-size: var(--t-1);                  /* 12.8px — minimum legible size for actor names; horizontal scroll handles overflow */
     white-space: normal;                    /* allow wrap for long names */
     max-width: 60px;                        /* cap width so it doesn't push posters apart */
     text-align: center;
@@ -731,7 +724,7 @@
      screens. Reduce row padding and clamp the status label to avoid
      overflow beyond the narrow sidebar. */
   .sidebar-players li {
-    padding: 6px 10px;  /* tighter than the 12px desktop spec */
+    padding: 4px 8px;   /* 4px vertical, 8px horizontal — nearest 8px-grid steps; tighter than 12px desktop spec to reduce row height on narrow screens */
   }
 
   /* CUE DOT — ensure it stays in the header right area, not displaced.
