@@ -14,6 +14,7 @@ describe('validateAdminSecret', () => {
   });
 
   test('rejects a non-string value', () => {
+    // eslint-disable-next-line no-loss-of-precision -- T5d: the literal is an intentional non-string input; exact precision is irrelevant — the test only asserts validateAdminSecret rejects any number. Editing the literal would dilute the "non-string" intent.
     expect(validateAdminSecret(1234567890123456789012345678901234)).toMatch(/at least 32/);
   });
 

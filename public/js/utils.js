@@ -111,7 +111,11 @@ const SFX_DEFS = {
   fail: {
     url: '/sfx/fail.mp3',
     synth: () => {
-      const g = _envelope(280, 'sawtooth', 0.32, 0.12, 4);
+      // T5d ESLint: was `const g = _envelope(...)` but `g` was never read —
+      // dropped the unused binding while KEEPING the call so the first
+      // envelope still plays (the side effect is the whole point). Behavior-
+      // identical: an unused return value is the only thing removed.
+      _envelope(280, 'sawtooth', 0.32, 0.12, 4);
       // Pitch drop adds a "wah" feel — sweeps the second oscillator down.
       setTimeout(() => _envelope(180, 'sawtooth', 0.32, 0.10, 4), 100);
     },

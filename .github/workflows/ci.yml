@@ -12,7 +12,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [18, 20]
+        # T5e: Node 18 is EOL (end-of-life 2025-04) — test on the supported
+        # 20/22 line instead. NOTE: package.json `engines` is intentionally
+        # left at ">=18" (Render's prod runtime floats on it; bumping engines
+        # would silently move prod). Pin NODE_VERSION on the Render dashboard
+        # to match the CI floor (20) — see PR notes.
+        node-version: [20, 22]
     steps:
       - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version }}
@@ -25,3 +30,33 @@ jobs:
       # --runInBand keeps Redis-double/timer behavior deterministic in the
       # CI container and makes the Phase 2 R3 clean-exit guarantee a real gate.
       - run: npm test -- --coverage --runInBand
+
+  # T5e: lint gate — runs the ESLint flat config added in T5d on every push/PR.
+  # Single Node version (the CI floor) since lint output is runtime-independent.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  # T5e: dependency-audit gate. --omit=dev so only shipped (prod) deps gate CI;
+  # --audit-level=high means moderates are reported but do NOT fail the build,
+  # while highs/criticals do (matches the T5c "no --force major bumps" posture —
+  # a high/critical should force a human decision, a moderate should not block).
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high

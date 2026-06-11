@@ -12,7 +12,9 @@ describe('BOT_DIFFICULTIES invariants', () => {
 
   test('every profile has a strictly-beatable whiff (0 < whiff < 1)', () => {
     // WHY: this is THE "bot is never unbeatable" invariant from the spec.
-    for (const [name, p] of Object.entries(profiles)) {
+    // T5d ESLint: profile key (`name`) is unused in the loop body — _-prefixed
+    // to mark it intentionally-unused while keeping the [key, value] destructure.
+    for (const [_name, p] of Object.entries(profiles)) {
       expect(p.whiff).toBeGreaterThan(0);
       expect(p.whiff).toBeLessThan(1);
     }

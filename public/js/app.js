@@ -20,16 +20,22 @@ import {
   mountHeroPuzzle, // Phase 7.9: Playable Hero driver mount
   submissionPill, // Phase 7.2 (CG-03): keeps submitted title visible during TMDB round-trip
   createPromptModal, buildNamePromptConfig, buildJoinPromptConfig, // Phase 7.3 (MI-02): shared prompt-modal factory + builders
-  playerNameInput, logo, lobbyScreen, heroScreen, gameScreen, waitingRoom,
-  privatePanel, publicPanel, joinPanel, lobbyIdInput, hardcoreToggle,
-  tvShowsToggle, publicRoomToggle, joinBtn, startBtn, showPublicBtn,
+  // T5d ESLint: dropped genuinely-unused imports (lobbyScreen, heroScreen,
+  // gameScreen, publicPanel, joinPanel, hardcoreToggle, tvShowsToggle,
+  // closeHowToPlay, closeCredits, closeLeaderboard, shareModal) — they were
+  // imported but never referenced in this file. Removing names from an
+  // import {} list is behavior-neutral (the still-used names and ui.js's
+  // module side effects are unchanged).
+  playerNameInput, logo, waitingRoom,
+  privatePanel, lobbyIdInput,
+  publicRoomToggle, joinBtn, startBtn, showPublicBtn,
   showPrivateBtn, backToJoinBtn, backToJoinBtn2, refreshLobbiesBtn,
   heroPlayBtn, heroCodeBtn, heroDailyBtn, howToPlayBtn, creditsBtn, howToPlayModal,
-  creditsModal, closeHowToPlay, closeCredits, leaderboardBtn,
-  leaderboardModal, closeLeaderboard, leaderboardList, submitBtn,
+  creditsModal, leaderboardBtn,
+  leaderboardModal, leaderboardList, submitBtn,
   movieInput, autocompleteContainer, chatInput, modeChips, joinRedBtn,
   joinBlueBtn, teamBackBtn, teamStartBtn, teamScreen, downloadCardBtn,
-  copyCardBtn, shareCanvas, shareModal
+  copyCardBtn, shareCanvas
 } from './ui.js';
 
 import { initSocket, leaveLobby } from './socketClient.js';
@@ -81,6 +87,103 @@ export function initLobbySettingsHandlers(socket, getLobbyId) {
       socket.emit('toggleTvShows', { lobbyId: getLobbyId(), state: e.target.checked });
     });
   });
+}
+
+// ============================================================================
+// MODAL FOCUS RESTORATION (L6 / T4h) — exported for unit testing
+// ============================================================================
+
+/**
+ * T4h audit fix: restore focus to the element that had it before a modal
+ * opened — but ONLY if that element is still in the document. Pre-fix the
+ * observer called priorFocus.focus() unconditionally; if the opener was
+ * removed from the DOM while the modal was open (a re-render, a list item that
+ * vanished, the opener button itself being replaced), .focus() either threw or
+ * silently no-op'd on a detached node, dumping keyboard users at the top of the
+ * page. Now we check isConnected and fall back to a safe landmark.
+ *
+ * Extracted (like initLobbySettingsHandlers) so it's unit-testable without
+ * standing up the whole MutationObserver init.
+ *
+ * @param {Element|null} priorFocus  Element that had focus before the modal opened.
+ * @param {Element}      [fallback]  Where to send focus if priorFocus is gone.
+ *                                   Defaults to document.body.
+ */
+export function restoreModalFocus(priorFocus, fallback) {
+  // isConnected is true only while the node is in the live document tree — the
+  // exact "was it removed mid-modal?" signal. Guard typeof focus too: exotic
+  // activeElement values (SVG, foreign nodes) may lack the method.
+  if (priorFocus && priorFocus.isConnected && typeof priorFocus.focus === 'function') {
+    try { priorFocus.focus(); return; } catch { /* fall through to fallback */ }
+  }
+  // Prior opener is gone (or un-focusable) — send focus to a safe element so a
+  // keyboard user lands somewhere sane instead of nowhere. document.body is the
+  // universal fallback; callers may pass a more specific landmark.
+  const safe = (fallback && typeof fallback.focus === 'function') ? fallback : document.body;
+  if (safe && typeof safe.focus === 'function') {
+    try { safe.focus(); } catch { /* last resort: nothing more we can do */ }
+  }
+}
+
+// ============================================================================
+// LEADERBOARD RENDERER — exported for behavior testing
+// ============================================================================
+// T6c: hoisted from inside the DOMContentLoaded closure to module scope and
+// exported (export-only — the body is byte-for-byte unchanged, it only reads
+// the same module-scope ui.js DOM bindings and the global fetch it always did).
+// This lets leaderboard-render.test.js exercise the REAL render through the
+// jsdom fixture DOM instead of regex-extracting the function body from source
+// text. The DOMContentLoaded wiring below still references it by name (module
+// function declarations are in scope there).
+export async function loadLeaderboard() {
+  leaderboardModal.classList.remove('hidden');
+  leaderboardList.innerHTML = '';
+  // Phase 7.10 — DS-01 pass 2: classes migrated to 03-game.css.
+  // .empty-hint--lg preserves the previous 2rem inline padding override.
+  const loadingDiv = document.createElement('div');
+  loadingDiv.className = 'empty-hint empty-hint--lg';
+  loadingDiv.textContent = 'Loading...';
+  leaderboardList.appendChild(loadingDiv);
+  try {
+    const res = await fetch('/api/leaderboard');
+    const data = await res.json();
+    leaderboardList.innerHTML = '';
+    if (!data.length) {
+      const emptyDiv = document.createElement('div');
+      emptyDiv.className = 'empty-hint empty-hint--lg';
+      emptyDiv.textContent = 'No wins recorded yet. Play a game!';
+      leaderboardList.appendChild(emptyDiv);
+      return;
+    }
+    data.forEach((entry, i) => {
+      // Phase 7.10 — DS-01 pass 2: row/rank/name/wins styling moved to
+      // .leaderboard-* component classes in 03-game.css.
+      const row = document.createElement('div');
+      row.className = 'leaderboard-row';
+      const rank = document.createElement('span');
+      rank.className = 'leaderboard-rank';
+      rank.textContent = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i + 1);
+      const name = document.createElement('span');
+      name.className = 'leaderboard-name';
+      name.textContent = entry.name;
+      const wins = document.createElement('span');
+      wins.className = 'leaderboard-wins';
+      wins.textContent = entry.wins + ' 🏆';
+      row.appendChild(rank);
+      row.appendChild(name);
+      row.appendChild(wins);
+      leaderboardList.appendChild(row);
+    });
+  } catch {
+    // T7e: optional catch binding — the error object is never read (we render a
+    // fixed user-facing message regardless of cause), so drop the unused `err`
+    // param to match the codebase idiom (see the other bare `catch {}` sites).
+    leaderboardList.innerHTML = '';
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'empty-hint empty-hint--lg';
+    errorDiv.textContent = 'Failed to load leaderboard.';
+    leaderboardList.appendChild(errorDiv);
+  }
 }
 
 // ============================================================================
@@ -606,54 +709,9 @@ document.addEventListener('DOMContentLoaded', () => {
     runTutorial().catch(() => {});
   });
 
-  async function loadLeaderboard() {
-    leaderboardModal.classList.remove('hidden');
-    leaderboardList.innerHTML = '';
-    // Phase 7.10 \u2014 DS-01 pass 2: classes migrated to 03-game.css.
-    // .empty-hint--lg preserves the previous 2rem inline padding override.
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'empty-hint empty-hint--lg';
-    loadingDiv.textContent = 'Loading...';
-    leaderboardList.appendChild(loadingDiv);
-    try {
-      const res = await fetch('/api/leaderboard');
-      const data = await res.json();
-      leaderboardList.innerHTML = '';
-      if (!data.length) {
-        const emptyDiv = document.createElement('div');
-        emptyDiv.className = 'empty-hint empty-hint--lg';
-        emptyDiv.textContent = 'No wins recorded yet. Play a game!';
-        leaderboardList.appendChild(emptyDiv);
-        return;
-      }
-      data.forEach((entry, i) => {
-        // Phase 7.10 \u2014 DS-01 pass 2: row/rank/name/wins styling moved to
-        // .leaderboard-* component classes in 03-game.css.
-        const row = document.createElement('div');
-        row.className = 'leaderboard-row';
-        const rank = document.createElement('span');
-        rank.className = 'leaderboard-rank';
-        rank.textContent = i === 0 ? '\uD83E\uDD47' : i === 1 ? '\uD83E\uDD48' : i === 2 ? '\uD83E\uDD49' : '#' + (i + 1);
-        const name = document.createElement('span');
-        name.className = 'leaderboard-name';
-        name.textContent = entry.name;
-        const wins = document.createElement('span');
-        wins.className = 'leaderboard-wins';
-        wins.textContent = entry.wins + ' \uD83C\uDFC6';
-        row.appendChild(rank);
-        row.appendChild(name);
-        row.appendChild(wins);
-        leaderboardList.appendChild(row);
-      });
-    } catch (err) {
-      leaderboardList.innerHTML = '';
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'empty-hint empty-hint--lg';
-      errorDiv.textContent = 'Failed to load leaderboard.';
-      leaderboardList.appendChild(errorDiv);
-    }
-  }
-
+  // T6c: loadLeaderboard hoisted to module scope (see export above) so it can
+  // be behavior-tested directly. The click wiring is unchanged \u2014 it still binds
+  // the same function by name.
   leaderboardBtn?.addEventListener('click', loadLeaderboard);
 
   // =========================================================================
@@ -729,11 +787,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (target && typeof target.focus === 'function') target.focus();
       } else if (!isOpen && modal._wasOpen) {
         modal._wasOpen = false;
-        // Restore focus to whoever opened the modal so keyboard users don't
-        // get dumped at the top of the page.
-        if (priorFocus && typeof priorFocus.focus === 'function') {
-          try { priorFocus.focus(); } catch {}
-        }
+        // T4h: restore focus to whoever opened the modal — but the guarded
+        // helper falls back to document.body if that opener was removed from
+        // the DOM mid-modal, so keyboard users are never silently dumped onto
+        // a detached node.
+        restoreModalFocus(priorFocus);
       }
     }).observe(modal, { attributes: true, attributeFilter: ['class'] });
   });

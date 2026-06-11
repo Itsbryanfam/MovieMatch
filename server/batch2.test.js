@@ -15,6 +15,18 @@ beforeEach(() => {
   redisUtils.incrementPlayerWins.mockResolvedValue(undefined);
   redisUtils.recordPlayerWinAtomic.mockResolvedValue(undefined);
   redisUtils.saveLobby.mockResolvedValue(undefined);
+  // T2c: startGame commits through withLobbyLock now (fresh re-read inside
+  // the lock). Faithful contract mock against this file's getLobby/saveLobby
+  // mocks — same shape as socket.integration.test.js / turn-watchdog.test.js.
+  // Tests that drive startGame point getLobby at their state object so the
+  // in-lock "fresh" room is that same object.
+  redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+    const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+    if (!r) return null;
+    const res = await fn(r);
+    if (res !== false) await redisUtils.saveLobby(pub, id, r);
+    return r;
+  });
 });
 
 describe('clampString', () => {
@@ -53,6 +65,8 @@ describe('gameLogic — solo mode', () => {
       players: [{ id: '1', isAlive: false, score: 50 }],
       status: 'waiting'
     };
+    // T2c: wire the in-lock fresh read to the state under test.
+    redisUtils.getLobby.mockResolvedValue(state);
     await gameLogic.startGame(mockIo, mockPubClient, 'SOLO1', state);
     expect(state.status).toBe('playing');
     expect(state.players[0].isAlive).toBe(true);

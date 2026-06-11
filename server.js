@@ -294,6 +294,10 @@ async function fetchBackgroundPosters() {
 }
 
 const { setupSocketHandlers } = require('./server/socketHandlers');
+// T3c audit fix: per-IP cap on NEW socket connections — the Express limiter
+// above explicitly skips /socket.io/, so without this an attacker could mint
+// unlimited fresh sockets (each with fresh per-socket rate-limit buckets).
+const { createConnectionThrottle } = require('./server/connectionThrottle');
 const redisUtils = require('./server/redisUtils');
 const posterCache = require('./server/posterCache');
 const telemetry = require('./server/telemetry');
@@ -338,10 +342,19 @@ async function startApp() {
     logger.error(err, 'Redis connection failed');
   }
 
-  io = new Server(server, { 
+  io = new Server(server, {
     adapter: createAdapter(pubClient, subClient),
     cors: { origin: process.env.FRONTEND_URL || 'http://localhost:3000' }
   });
+
+  // T3c audit fix: connection-rate throttle MUST register before the
+  // connection handlers — io.use() middleware runs at handshake time, so an
+  // over-cap IP is refused (client sees connect_error 'rate_limited') before
+  // any per-connection work (posters/themes/ruleKits push) happens. 20/min
+  // per IP, Redis-bucketed, FAIL-OPEN on Redis errors; rightmost-XFF IP
+  // derivation is shared with socketHandlers via server/clientIp.js so both
+  // layers always agree on which IP a client is.
+  io.use(createConnectionThrottle(pubClient));
 
   setupSocketHandlers(io, pubClient, TMDB_HEADERS);
 
@@ -397,3 +410,17 @@ function gracefulShutdown(signal) {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// T1 audit fix T1b: process-level backstop for stray promise rejections.
+// Node's default for an unhandled rejection is to CRASH the process — and
+// because lobby/game state lives in Redis but socket connections don't, a
+// crash here drops every live game on the instance at once. node-redis v4
+// rejects ALL in-flight commands when its socket flaps, so any await that a
+// future code path leaves outside a try (the watchdog had exactly this bug —
+// fixed properly in T1a) turns one transient blip into a full outage.
+// Log loudly and DO NOT exit: per-path try/catch remains the real fix; this
+// exists solely so one missed path degrades one action instead of the fleet.
+// (Listener presence alone disables Node's crash-on-unhandled default.)
+process.on('unhandledRejection', (reason) => {
+  logger.error(reason, 'Unhandled promise rejection reached the process backstop (T1b) — find and wrap the offending await');
+});

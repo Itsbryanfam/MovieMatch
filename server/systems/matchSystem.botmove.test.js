@@ -31,6 +31,19 @@ beforeEach(() => {
   redisUtils.acquireSubmitLock.mockResolvedValue('token-bot');
   redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
   redisUtils.saveLobby.mockResolvedValue(undefined);
+  // T2 (audit P1-3): submitBotMove's commits and the eliminate tail now go
+  // through withLobbyLock. Faithful contract mock (read fresh inside the
+  // lock → mutate → persist unless the mutator returned false → return the
+  // room) against this file's getLobby/saveLobby mocks — the same shape as
+  // socket.integration.test.js. Static getLobby mocks hand back the test's
+  // room object itself, so in-lock mutations stay visible to assertions.
+  redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+    const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+    if (!r) return null;
+    const res = await fn(r);
+    if (res !== false) await redisUtils.saveLobby(pub, id, r);
+    return r;
+  });
 });
 afterEach(() => gameLogic.clearTurnTimeout('TEST'));
 

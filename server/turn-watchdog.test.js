@@ -63,6 +63,20 @@ describe('audit #2 — turn watchdog authority', () => {
     redisUtils.saveLobby.mockResolvedValue(undefined);
     redisUtils.getSocketLobby.mockResolvedValue('LOBBY1');
     redisUtils.deleteSocketLobby.mockResolvedValue(undefined);
+    redisUtils.setSocketLobby.mockResolvedValue(undefined);
+    // T1e: handleDisconnect/rejoinLobby now mutate through withLobbyLock —
+    // the bare auto-mock resolves undefined, which reads as "lobby gone" and
+    // dead-ends both paths. Faithfully simulate the real contract against
+    // the getLobby/saveLobby mocks (same shape as socket.integration.test.js):
+    // read inside the lock → mutate → persist unless the mutator returned
+    // false → return the room.
+    redisUtils.withLobbyLock.mockImplementation(async (pub, id, fn, opts = {}) => {
+      const r = (await redisUtils.getLobby(pub, id)) || opts.seedRoom || null;
+      if (!r) return null;
+      const res = await fn(r);
+      if (res !== false) await redisUtils.saveLobby(pub, id, r);
+      return r;
+    });
   });
 
   afterEach(() => {
@@ -73,6 +87,9 @@ describe('audit #2 — turn watchdog authority', () => {
   test('startGame arms the server turn watchdog', async () => {
     const state = playingRoom(0);
     state.status = 'waiting';
+    // T2c: startGame commits on a fresh in-lock re-read — wire the faithful
+    // lock mock's read (set in beforeEach) to the state under test.
+    redisUtils.getLobby.mockResolvedValue(state);
 
     expect(gameLogic.hasActiveTurnTimeout('LOBBY1')).toBe(false);
     await gameLogic.startGame(io, pubClient, 'LOBBY1', state);
@@ -174,5 +191,75 @@ describe('audit #6 — recoverActiveTurns re-arms watchdogs after restart', () =
   test('is resilient — a getAllLobbies failure does not throw at boot', async () => {
     redisUtils.getAllLobbies.mockRejectedValue(new Error('redis down at boot'));
     await expect(gameLogic.recoverActiveTurns(io, pubClient)).resolves.toBe(0);
+  });
+});
+
+// T1 audit (2026-06-09), fix T1a: the watchdog callback's FIRST await — the
+// submit-lock acquire — sat OUTSIDE its try block. node-redis v4 rejects every
+// in-flight command when the socket drops, so a Redis flap landing at exactly
+// watchdog-fire time became an unhandled rejection; with no process-level
+// handler that kills the process and drops every live game at once. These
+// tests capture the armed callback and invoke it directly: awaiting it is the
+// only deterministic way to observe whether its promise rejects — production
+// setTimeout discards the promise, which is precisely WHY a rejection escapes
+// as "unhandled" there instead of surfacing anywhere recoverable.
+describe('audit T1a — watchdog Redis flap cannot escape as an unhandled rejection', () => {
+  let io, pubClient;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    io = fakeIo();
+    pubClient = {};
+    redisUtils.releaseSubmitLock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    gameLogic.clearTurnTimeout('LOBBY1');
+  });
+
+  // Spy on (fake-timer) setTimeout around the arm call so the test holds the
+  // exact async callback the watchdog registered. First recorded call is the
+  // watchdog: armTurnTimeout registers its timer before the bot-move hook
+  // could schedule anything (and no player here is a bot anyway).
+  function armAndCaptureCallback(room) {
+    const spy = jest.spyOn(global, 'setTimeout');
+    gameLogic.armTurnTimeout(io, pubClient, 'LOBBY1', room);
+    const cb = spy.mock.calls[0][0];
+    spy.mockRestore();
+    return cb;
+  }
+
+  test('acquireSubmitLock rejecting is contained: callback resolves and the map entry is cleaned up', async () => {
+    // The node-redis v4 failure mode: in-flight command rejected on socket drop.
+    redisUtils.acquireSubmitLock.mockRejectedValue(new Error('Socket closed unexpectedly'));
+    const cb = armAndCaptureCallback(playingRoom(0));
+    expect(gameLogic.hasActiveTurnTimeout('LOBBY1')).toBe(true);
+
+    // Pre-T1a this REJECTS (the unhandled rejection that crashed prod);
+    // post-fix the rejection is caught + logged and the callback resolves.
+    await expect(cb()).resolves.toBeUndefined();
+
+    // The in-process map entry must not leak when the fire path errors —
+    // a stale entry would block hasActiveTurnTimeout-based re-arming forever.
+    expect(gameLogic.hasActiveTurnTimeout('LOBBY1')).toBe(false);
+    // Nothing was acquired, so nothing may be released (a release call here
+    // would be a second pointless round-trip into the very flap we survived).
+    expect(redisUtils.releaseSubmitLock).not.toHaveBeenCalled();
+  });
+
+  // Behavior-preservation pin for the restructure: the pre-existing no-lock
+  // semantics (a submit holds the lock → watchdog stands down, cleans its map
+  // entry, releases NOTHING) must survive the acquire moving inside the try.
+  test('no lock acquired (submit in flight) → map cleanup only, release never called', async () => {
+    redisUtils.acquireSubmitLock.mockResolvedValue(null);
+    const cb = armAndCaptureCallback(playingRoom(0));
+
+    await expect(cb()).resolves.toBeUndefined();
+
+    expect(gameLogic.hasActiveTurnTimeout('LOBBY1')).toBe(false);
+    expect(redisUtils.releaseSubmitLock).not.toHaveBeenCalled();
+    // It never read the room either — without the lock any state it saw
+    // could be mid-mutation by the lock holder.
+    expect(redisUtils.getLobby).not.toHaveBeenCalled();
   });
 });

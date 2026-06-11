@@ -9,27 +9,36 @@
 // ============================================================================
 
 import {
-  initUIElements, renderLobby, renderGame, renderTeamScreen,
-  showNotification, renderAutocompleteResults, closeMobileAc,
-  openShareModal, showGameOverBanner, resetMobileTab, playRecap,
-  showEliminationFlash, showSelfEliminationScreen, showWinFlash,
-  showGhostAttempt, showToast, renderDailyResult, renderMyStats, showConfetti,
+  // T5d ESLint: dropped genuinely-unused imports from this list (initUIElements,
+  // renderTeamScreen, closeMobileAc, openShareModal, showGameOverBanner,
+  // showEliminationFlash, showWinFlash, showConfetti, lobbyScreen, gameScreen,
+  // notificationOverlay, notificationText) — imported but never referenced here
+  // (the two that grep twice only reappear inside comments). Trimming an
+  // import {} list is behavior-neutral.
+  renderLobby, renderGame,
+  showNotification, renderAutocompleteResults,
+  resetMobileTab, playRecap,
+  showSelfEliminationScreen,
+  showGhostAttempt, showToast, renderDailyResult, renderMyStats,
   toast, gameEvent, submissionPill, // Phase 7.2: feedback router
   timerSeverity, // Phase 7.4: pure timer-severity seam (Panic Timer)
   isClutchSave, markClutchSave, // Phase 7.7: clutch-save predicate + one-shot flag
   showScreen, // WHY: Phase 3 Task D — canonical group-normaliser for screen transitions
   renderRuleKitChips, // Phase 6c: renders lobby quick-kit chips from server-delivered list
   // DOM elements
-  publicLobbiesList, posterCarousel, lobbyScreen, gameScreen,
-  heroScreen, waitingRoom, lobbyCodeDisplay, notificationOverlay, notificationText,
+  publicLobbiesList, posterCarousel,
+  heroScreen, waitingRoom, lobbyCodeDisplay,
   chatMessages
 } from './ui.js';
 
-import { prepareAudio, playSuccess, playFail, playTick, playSfx, vibrate, escapeHtml, getStableId } from './utils.js';
+// T5d ESLint: dropped unused prepareAudio, playSuccess, escapeHtml (imported,
+// never called here) — behavior-neutral import-list trim.
+import { playFail, playTick, playSfx, vibrate, getStableId } from './utils.js';
 
 import {
   getSocket, setSocket, getCurrentLobbyId, getMyPlayerId, getGameState,
-  getIsSpectator, getIsDaily, getTurnInterval, getLastTickSound,
+  // T5d ESLint: dropped unused getTurnInterval (imported, never read here).
+  getIsSpectator, getIsDaily, getLastTickSound,
   setTurnInterval, setLastTickSound, clearTurnTimer,
   onJoined, onStateUpdate, onRejoined, resetSession
 } from './state.js';
@@ -42,6 +51,14 @@ import {
 // Suppresses the generic notification overlay so the full-screen
 // self-elimination screen can take the stage without overlap.
 let selfElimActive = false;
+
+// T4f audit fix: server-authoritative player cap, delivered via the
+// 'serverConfig' connect-time event. Module-local with a fallback of 8 so the
+// public-lobby "N / max" count renders correctly even before the event arrives
+// (or if an old server never sends it). Updated in the serverConfig handler;
+// read by the publicLobbiesList renderer below. Single source of truth on the
+// client so the cap can never be hardcoded out of sync with the server.
+let serverMaxPlayers = 8;
 
 // H3: Most recent `youWereEliminated` payload, buffered so it can be picked
 // up by the alive→dead transition handler in stateUpdate. The events arrive
@@ -151,7 +168,9 @@ export function initSocket() {
       stats.className = 'public-lobby-stats';
 
       const countSpan = document.createElement('span');
-      countSpan.textContent = '👥 ' + lobby.playerCount + ' / 8';
+      // T4f: render the cap from the server-delivered serverMaxPlayers (falls
+      // back to 8 pre-event) instead of a hardcoded '/ 8' literal.
+      countSpan.textContent = '👥 ' + lobby.playerCount + ' / ' + serverMaxPlayers;
       stats.appendChild(countSpan);
 
       // M4: Last-game chain-length stat. Only shown when the lobby has
@@ -241,6 +260,16 @@ export function initSocket() {
     });
   });
 
+  // T4f audit fix: server-authoritative config. Currently just the player
+  // hard-cap, used by the publicLobbiesList renderer's "N / max" count. Guard
+  // the value so a malformed/old payload can't blank the cap — only a positive
+  // integer replaces the fallback of 8.
+  socket.on('serverConfig', (cfg) => {
+    if (cfg && Number.isInteger(cfg.maxPlayers) && cfg.maxPlayers > 0) {
+      serverMaxPlayers = cfg.maxPlayers;
+    }
+  });
+
   // -----------------------------------------------------------------------
   // BACKGROUND POSTERS
   // -----------------------------------------------------------------------
@@ -263,6 +292,11 @@ export function initSocket() {
 
       seamlessPosters.forEach(url => {
         const img = document.createElement('img');
+        // T4g audit fix: decode off the main thread so the marquee animation
+        // doesn't jank while each poster decodes. NOT loading="lazy" here — the
+        // carousel is always visible (it's the page background), so lazy would
+        // only add IntersectionObserver overhead with nothing to defer.
+        img.decoding = 'async';
         img.src = url;
         rowDiv.appendChild(img);
       });
@@ -678,7 +712,9 @@ export function initSocket() {
   // Players who didn't vote get the tally line only.
   // -----------------------------------------------------------------------
 
-  socket.on('predictionResult', ({ outcome, correct, total, perVoter }) => {
+  // T5d ESLint: dropped unused `outcome` from the destructuring — it was never
+  // read in this handler (behavior-neutral; ignoring a payload field is a no-op).
+  socket.on('predictionResult', ({ correct, total, perVoter }) => {
     if (!total) return; // no votes this turn — nothing to surface
     const myVoteCorrect = perVoter && perVoter[socket.id];
     const overall = `${correct} of ${total} called it`;

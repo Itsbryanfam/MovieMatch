@@ -262,6 +262,69 @@ describe('socketClient handlers — screen transitions', () => {
   // because (15s / 60s) * 100 = 25, instead of (15s / 15s) * 100 = 100.
   // ------------------------------------------------------------------------
 
+  // ------------------------------------------------------------------------
+  // T4f — server-driven player cap. The public-lobby "N / max" count renders
+  // from the server-delivered serverConfig.maxPlayers (fallback 8 pre-event),
+  // not a hardcoded '/ 8'.
+  // ------------------------------------------------------------------------
+
+  test('publicLobbiesList renders "/ 8" before any serverConfig arrives (fallback)', () => {
+    fakeSocket.trigger('publicLobbiesList', [
+      { id: 'AAA111', hostName: 'Bob', playerCount: 3 },
+    ]);
+    const list = document.getElementById('public-lobbies-list');
+    expect(list.textContent).toContain('3 / 8');
+  });
+
+  test('serverConfig updates the rendered cap dynamically', () => {
+    // Server announces a non-default cap; the next render must reflect it.
+    fakeSocket.trigger('serverConfig', { maxPlayers: 12 });
+    fakeSocket.trigger('publicLobbiesList', [
+      { id: 'BBB222', hostName: 'Sue', playerCount: 5 },
+    ]);
+    const list = document.getElementById('public-lobbies-list');
+    expect(list.textContent).toContain('5 / 12');
+    expect(list.textContent).not.toContain('5 / 8');
+  });
+
+  test('serverConfig ignores a malformed payload (keeps the last good cap)', () => {
+    // Self-contained (serverMaxPlayers is module-level state that persists
+    // across tests): establish a known-good cap, then send junk and prove it
+    // didn't overwrite it. 6 is distinct from both the 8 fallback and the 12
+    // used above, so a leak from another test would also be caught.
+    fakeSocket.trigger('serverConfig', { maxPlayers: 6 });    // good
+    fakeSocket.trigger('serverConfig', { maxPlayers: 0 });    // non-positive → ignored
+    fakeSocket.trigger('serverConfig', { maxPlayers: 'lots' }); // non-integer → ignored
+    fakeSocket.trigger('serverConfig', null);                 // missing payload → ignored
+    fakeSocket.trigger('publicLobbiesList', [
+      { id: 'CCC333', hostName: 'Al', playerCount: 2 },
+    ]);
+    const list = document.getElementById('public-lobbies-list');
+    expect(list.textContent).toContain('2 / 6');
+  });
+
+  // ------------------------------------------------------------------------
+  // T4g — hero poster carousel images get async decode (but NOT lazy: the
+  // carousel is the always-visible page background).
+  // ------------------------------------------------------------------------
+
+  test('posters carousel images carry decoding="async" and are NOT lazy-loaded', () => {
+    fakeSocket.trigger('posters', [
+      'https://image.tmdb.org/t/p/w92/a.jpg',
+      'https://image.tmdb.org/t/p/w92/b.jpg',
+    ]);
+    const imgs = document.querySelectorAll('#poster-carousel img');
+    expect(imgs.length).toBeGreaterThan(0);
+    imgs.forEach((img) => {
+      // IDL property (jsdom stores it but doesn't reflect to an attribute).
+      expect(img.decoding).toBe('async');
+      // Always visible → loading is left UNSET (no observer overhead). The key
+      // invariant is simply that it is not 'lazy' — assert that so a future
+      // copy-paste from the autocomplete path can't slip lazy in.
+      expect(img.loading).not.toBe('lazy');
+    });
+  });
+
   test('timer bar starts full in speed mode (15s turn)', () => {
     jest.useFakeTimers();
     try {

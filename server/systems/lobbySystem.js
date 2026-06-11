@@ -12,7 +12,9 @@ const posterCache = require('../posterCache');
 const telemetry = require('../telemetry');
 const dailySystem = require('./dailySystem');
 // Player hard-cap constant (single source of truth — see server/constants.js).
-const { MAX_PLAYERS_PER_LOBBY, SEAT_HUES } = require('../constants');
+// T4c audit fix: TMDB_FETCH_TIMEOUT_MS joins this shared import (was a local
+// duplicate const below) so the 5s ceiling has one definition repo-wide.
+const { MAX_PLAYERS_PER_LOBBY, SEAT_HUES, TMDB_FETCH_TIMEOUT_MS } = require('../constants');
 // Phase 5a: bot factory + in-process bot-timer cleanup (lobbySystem→botSystem
 // is a plain acyclic top-level require — botSystem only top-level-requires
 // fs/path — so no lazy-require / cycle concern here).
@@ -20,7 +22,7 @@ const botSystem = require('./botSystem');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
-const TMDB_FETCH_TIMEOUT_MS = 5000;
+// T4c: TMDB_FETCH_TIMEOUT_MS now imported from ../constants (see import above).
 
 // Unambiguous charset for lobby codes (Crockford base32 — no 0/O, 1/I/L)
 const LOBBY_CHARS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -167,43 +169,64 @@ async function joinLobby(ctx, socket, { name, lobbyId, stableId }) {
 async function rejoinLobby(ctx, socket, { lobbyId, playerId, stableId }) {
   const { io, pubClient } = ctx;
 
-  const room = await redisUtils.getLobby(pubClient, lobbyId);
+  // T1 audit fix T1e: this was an unlocked getLobby → mutate → saveLobby, so
+  // a locked write committed in that window (a submit advancing the turn,
+  // another player's disconnect) was silently clobbered by the rejoin's
+  // full-blob save. Mutate INSIDE the per-lobby mutex; emits and socket
+  // bookkeeping run OUTSIDE it on the room the lock returns (the R1
+  // pattern). failMsg/oldSocketId are closure-captured because they are
+  // computed on the FRESH in-lock room, which only exists inside the mutator.
+  let failMsg = null;
+  let oldSocketId = null;
+
+  const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+    // stableId is the only identity field that is NOT broadcast in player lists
+    // (broadcastState strips it). The rejoin caller must prove they know it,
+    // otherwise anyone who sees a victim's socket.id could hijack the slot.
+    // Checked inside the mutator (not pre-lock) to preserve the original
+    // failure precedence: lobby-gone wins over missing-identity.
+    if (typeof stableId !== 'string' || stableId.length === 0) {
+      failMsg = 'Missing identity';
+      return false; // decline — a failed rejoin must not rewrite the blob
+    }
+
+    // Two paths:
+    //   1) Same socket id (transient reconnect on the same tab) — still require stableId match
+    //   2) New socket id (page refresh) — only allow if the player is currently disconnected
+    const player = r.players.find(p => p.id === playerId && p.stableId === stableId)
+      || r.players.find(p => p.stableId === stableId && !p.connected);
+
+    if (!player) {
+      failMsg = 'Player not found in lobby';
+      return false; // decline — same no-write semantics as the old early return
+    }
+
+    // Clear grace period timer so the player isn't eliminated after
+    // reconnecting. In-process + idempotent, so safe inside the mutator —
+    // and it must key off the OLD socket id, readable only pre-reassign.
+    const graceKey = `${lobbyId}:${player.id}`;
+    if (graceTimers.has(graceKey)) {
+      clearTimeout(graceTimers.get(graceKey));
+      graceTimers.delete(graceKey);
+    }
+
+    oldSocketId = player.id;
+    player.id = socket.id;
+    player.connected = true;
+    // Implicit non-false return → withLobbyLock persists this mutation.
+  });
+
+  // Null room = lobby vanished — the same emit the old unlocked getLobby
+  // null-check produced, just sourced from the lock helper now.
   if (!room) {
     socket.emit('rejoinFailed', 'Lobby no longer exists');
     return;
   }
-
-  // stableId is the only identity field that is NOT broadcast in player lists
-  // (broadcastState strips it). The rejoin caller must prove they know it,
-  // otherwise anyone who sees a victim's socket.id could hijack the slot.
-  if (typeof stableId !== 'string' || stableId.length === 0) {
-    socket.emit('rejoinFailed', 'Missing identity');
+  if (failMsg) {
+    socket.emit('rejoinFailed', failMsg);
     return;
   }
 
-  // Two paths:
-  //   1) Same socket id (transient reconnect on the same tab) — still require stableId match
-  //   2) New socket id (page refresh) — only allow if the player is currently disconnected
-  const player = room.players.find(p => p.id === playerId && p.stableId === stableId)
-    || room.players.find(p => p.stableId === stableId && !p.connected);
-
-  if (!player) {
-    socket.emit('rejoinFailed', 'Player not found in lobby');
-    return;
-  }
-
-  // Clear grace period timer so the player isn't eliminated after reconnecting
-  const graceKey = `${lobbyId}:${player.id}`;
-  if (graceTimers.has(graceKey)) {
-    clearTimeout(graceTimers.get(graceKey));
-    graceTimers.delete(graceKey);
-  }
-
-  const oldSocketId = player.id;
-  player.id = socket.id;
-  player.connected = true;
-
-  await redisUtils.saveLobby(pubClient, lobbyId, room);
   await redisUtils.setSocketLobby(pubClient, socket.id, lobbyId);
   if (oldSocketId !== socket.id) {
     await redisUtils.deleteSocketLobby(pubClient, oldSocketId);
@@ -476,9 +499,21 @@ async function startLobby(ctx, socket, lobbyId) {
   // finished match, wiping chain/usedMovies, reviving the dead, and zeroing
   // scores. Mirrors the room.status checks every other host-only mutator
   // (setGameMode/kickPlayer/restartLobby) already enforces.
+  //
+  // T2c-ii (audit P1-3): these snapshot checks are now only the cheap
+  // fast-reject — two concurrent clicks both pass them (both reads see
+  // 'waiting'). The AUTHORITATIVE gate re-runs on FRESH state inside
+  // startGame's withLobbyLock mutator: status via startGame itself, the
+  // host seat via verifyFresh below — so the race loser declines instead of
+  // double-firing game_started telemetry/recordGamePlayed and re-running
+  // the whole game setup.
   if (room.status !== 'waiting') return;
   if (!room.players.find(p => p.id === socket.id)?.isHost) return;
-  await gameLogic.startGame(io, pubClient, lobbyId, room);
+  await gameLogic.startGame(io, pubClient, lobbyId, room, {
+    // Re-verify the clicking socket still holds the host seat on the
+    // in-lock fresh room (host migration can land in the gate window).
+    verifyFresh: (fresh) => !!fresh.players.find(p => p.id === socket.id)?.isHost,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +652,19 @@ async function startDailyChallenge(ctx, socket, { name, stableId }) {
   gameLogic.resetTimer(room);
 
   await redisUtils.saveLobby(pubClient, lobbyId, room);
+  // T4a audit fix: register the daily lobby in the activeLobbies set and arm
+  // its first-turn watchdog — joinLobby does both for regular lobbies, but
+  // this bespoke daily-bootstrap path skipped them entirely. WHY it matters:
+  // boot-recovery (recoverActiveTurns) and the 30s sweep (sweepMissingTurnWatchdogs)
+  // BOTH iterate the activeLobbies set, so an unregistered daily run is invisible
+  // to them — a deploy mid-run strands the attempt 'in_progress' with no server
+  // watchdog, locking the player out of today's puzzle until the next UTC day.
+  // addToActiveLobbies makes the lobby recoverable; armTurnTimeout gives the
+  // opening (post-seed) turn the same server backstop every other game gets.
+  // deleteLobby already sRem's the id from activeLobbies on cleanup, so this
+  // adds no leak. Both are post-save, matching joinLobby/startGame ordering.
+  await redisUtils.addToActiveLobbies(pubClient, lobbyId);
+  gameLogic.armTurnTimeout(io, pubClient, lobbyId, room);
   await redisUtils.setSocketLobby(pubClient, socket.id, lobbyId);
   socket.join(lobbyId);
 
@@ -775,7 +823,39 @@ async function quitGame(ctx, socket, lobbyId) {
     onOwnTurn: isCurrentTurn,
   });
   if (isCurrentTurn) {
-    await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, 'Quit');
+    // T1 audit fix T1c: this branch was the lone eliminateCurrentPlayer call
+    // site holding NO submit lock (watchdog, forceNextTurn, and bot-whiff all
+    // take it) and it passed the UNLOCKED snapshot from the top of quitGame.
+    // eliminateCurrentPlayer mutates state, advances the turn, and saves —
+    // doing that on a stale snapshot races an in-flight submit (double
+    // elimination, or a committed chain advance silently clobbered). Mirror
+    // forceNextTurn exactly: lock → fresh in-lock re-read → re-verify →
+    // eliminate the FRESH room → token-guarded release.
+    const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+    // No lock = a submit/forceNextTurn/watchdog already holds it and is
+    // advancing this very turn itself — quitting now is a no-op, not an
+    // error (the player can simply quit again once that resolves).
+    if (!lockToken) return;
+    try {
+      // Every check below must re-run against state the previous lock holder
+      // finished writing — our pre-lock snapshot only chose the branch.
+      const fresh = await redisUtils.getLobby(pubClient, lobbyId);
+      if (!fresh || fresh.status !== 'playing') return;
+      const freshPlayer = fresh.players.find(p => p.id === socket.id);
+      // Already eliminated while we waited (e.g. the watchdog beat us) —
+      // eliminating again would advance the turn twice.
+      if (!freshPlayer || !freshPlayer.isAlive) return;
+      // Turn moved on while the quit was in flight: "current player" is now
+      // someone ELSE — eliminating them off our stale view kills the wrong
+      // player, the exact race this lock exists to prevent.
+      if (fresh.players[fresh.currentTurnIndex]?.id !== socket.id) return;
+      await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, fresh, 'Quit');
+    } finally {
+      // Token-guarded by construction (returned above when acquire failed).
+      // .catch mirrors forceNextTurn: a failed release self-heals via the
+      // lock's 30s TTL and must never mask an eliminate error.
+      await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
+    }
   } else {
     // R1: previously this did an unlocked getLobby (top of quitGame) ->
     // mutate -> saveLobby, so a concurrent submit/quit/grace-expiry on the
@@ -802,7 +882,22 @@ async function quitGame(ctx, socket, lobbyId) {
       // 'info' kind = no shake/sound effects — quitting isn't a strategic
       // failure to celebrate or mourn, just a player departing.
       io.to(lobbyId).emit('notification', { msg: `${quitter.name} quit the game.`, kind: 'info' });
-      await gameLogic.checkWinCondition(io, pubClient, lobbyId, updated);
+      // T4j audit fix (from the T2 review concern #1): checkWinCondition can
+      // saveLobby (the finish transition), and it used to run HERE, AFTER the
+      // withLobbyLock section above released — an unlocked RMW one
+      // recordPlayerWinAtomic round-trip wide, so a concurrent submit/quit
+      // landing in that window could be clobbered by the finish save. Run it
+      // INSIDE a second withLobbyLock section on a FRESH in-lock re-read.
+      // checkWinCondition owns its own persistence/broadcast/scheduleGameReset
+      // (it saves only when a win actually triggers), so the mutator returns
+      // false to DECLINE withLobbyLock's trailing save — the isAlive=false above
+      // is already persisted, and a no-win check has nothing to save. Verified
+      // checkWinCondition takes NEITHER the submit lock NOR lobbymut, so calling
+      // it inside this mutator creates no re-entrancy / lock-order inversion.
+      await redisUtils.withLobbyLock(pubClient, lobbyId, async (fresh) => {
+        await gameLogic.checkWinCondition(io, pubClient, lobbyId, fresh);
+        return false; // checkWinCondition persisted any finish itself
+      });
       const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
       if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
     }
@@ -825,74 +920,116 @@ async function handleDisconnect(ctx, socketId) {
 
     await redisUtils.deleteSocketLobby(pubClient, socketId);
 
-    const room = await redisUtils.getLobby(pubClient, lobbyId);
+    // T1 audit fix T1e: this function did an unlocked getLobby → mutate →
+    // saveLobby — and disconnects are the single most frequent event on the
+    // site, so a concurrent locked write (join, submit commit, settings
+    // change) committing in that window was silently clobbered by the
+    // full-blob save. Mutate INSIDE the per-lobby mutex; io/timer
+    // side-effects run OUTSIDE it on the room the lock returns (the R1
+    // pattern). The closure flags below carry decisions computed on the
+    // FRESH in-lock room out to those side-effects.
+    let isSpectatorPath = false;     // socket wasn't a player → spectator handling
+    let spectatorsTouched = false;   // spectator array existed → save + broadcast (old behavior even when the filter no-ops)
+    let disconnectedPlayer = null;   // fresh player object for the grace/notification block
+    let shouldClearWatchdog = false; // watchdog decision from fresh status/turn
+    let shouldTearDown = false;      // no connected humans left → delete lobby
+
+    const room = await redisUtils.withLobbyLock(pubClient, lobbyId, (r) => {
+      const player = r.players.find(p => p.id === socketId);
+      if (!player) {
+        isSpectatorPath = true;
+        // No spectator array → nothing to mutate; decline the save (false),
+        // exactly like the old early-return-without-save.
+        if (!r.spectators) return false;
+        r.spectators = r.spectators.filter(s => s.id !== socketId);
+        spectatorsTouched = true;
+        return; // persist the (possibly no-op) filter — old behavior saved here too
+      }
+
+      // Audit finding #2: only clear the turn watchdog if the disconnecting
+      // socket is the CURRENT turn holder. Clearing it unconditionally (the
+      // old behavior) meant a bystander dropping their connection wiped the
+      // active player's only server-side timer, leaving that turn advanceable
+      // solely by the active client's forceNextTurn — a soft-lock lever.
+      // When the current player is the one leaving we DO clear it: the 15s
+      // grace timer below owns their elimination, and a live watchdog would
+      // double-eliminate. (The grace→eliminate→nextTurn path re-arms for the
+      // next player; rejoinLobby re-arms if they return within grace.)
+      // T1e: the DECISION is computed here on locked-fresh state; the
+      // clearTurnTimeout call itself is an in-process side-effect and runs
+      // after the lock releases (R1: io/timer work stays outside the mutex).
+      shouldClearWatchdog =
+        r.status !== 'playing' ||
+        r.players[r.currentTurnIndex]?.id === socketId;
+
+      // In playing state we use a grace period — keep the player alive while they try to reconnect.
+      // In all other states, mark them dead immediately.
+      player.connected = false;
+      if (r.status !== 'playing') {
+        player.isAlive = false;
+      }
+
+      const wasHost = player.isHost;
+
+      if (r.status === 'waiting') {
+        r.players = r.players.filter(p => p.id !== socketId);
+        // Phase 5a: a bot must NEVER become host (host = settings/start
+        // authority). Promote the first remaining HUMAN; if only bots remain,
+        // leave no host — the no-human cleanup below will tear the lobby down.
+        if (wasHost) {
+          const nextHuman = r.players.find(p => !p.isBot);
+          if (nextHuman) nextHuman.isHost = true;
+        }
+      }
+
+      // Captured for the post-lock grace-timer/notification block, which
+      // needs the FRESH player's name/stableId (not a stale snapshot's).
+      disconnectedPlayer = player;
+
+      // Phase 5a: generalize "no players" to "no connected humans". In WAITING
+      // state a bots-only lobby can never start and would ghost forever (bots
+      // never fire 'disconnect' and never empty room.players). In PLAYING state
+      // a bots-only remnant is also unrecoverable — no human can re-enter a game
+      // mid-play — so we tear down immediately (below, outside the lock), BEFORE
+      // the grace-timer block, intentionally giving the last human no 15s
+      // reconnect window (bots can't run the game forward for a reconnect
+      // anyway). Decided here on the fresh post-mutation player list.
+      const connectedHumans = r.players.filter(p => !p.isBot && p.connected);
+      shouldTearDown = r.players.length === 0 || connectedHumans.length === 0;
+    });
+
+    // Lobby vanished between the socket mapping and the lock — same early
+    // return as the old unlocked getLobby null-check.
     if (!room) return;
 
-    const player = room.players.find(p => p.id === socketId);
-    if (!player) {
-      if (room.spectators) {
-        room.spectators = room.spectators.filter(s => s.id !== socketId);
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
-        gameLogic.broadcastState(io, lobbyId, room);
-      }
+    if (isSpectatorPath) {
+      if (spectatorsTouched) gameLogic.broadcastState(io, lobbyId, room);
       return;
     }
 
-    // Audit finding #2: only clear the turn watchdog if the disconnecting
-    // socket is the CURRENT turn holder. Clearing it unconditionally (the
-    // old behavior) meant a bystander dropping their connection wiped the
-    // active player's only server-side timer, leaving that turn advanceable
-    // solely by the active client's forceNextTurn — a soft-lock lever.
-    // When the current player is the one leaving we DO clear it: the 15s
-    // grace timer below owns their elimination, and a live watchdog would
-    // double-eliminate. (The grace→eliminate→nextTurn path re-arms for the
-    // next player; rejoinLobby re-arms if they return within grace.)
-    const disconnectingIsCurrentTurn =
-      room.status === 'playing' &&
-      room.players[room.currentTurnIndex]?.id === socketId;
-    if (room.status !== 'playing' || disconnectingIsCurrentTurn) {
+    if (shouldClearWatchdog) {
       gameLogic.clearTurnTimeout(lobbyId);
     }
 
-    // In playing state we use a grace period — keep the player alive while they try to reconnect.
-    // In all other states, mark them dead immediately.
-    player.connected = false;
-    if (room.status !== 'playing') {
-      player.isAlive = false;
-    }
-
-    const wasHost = player.isHost;
-
-    if (room.status === 'waiting') {
-      room.players = room.players.filter(p => p.id !== socketId);
-      // Phase 5a: a bot must NEVER become host (host = settings/start
-      // authority). Promote the first remaining HUMAN; if only bots remain,
-      // leave no host — the no-human cleanup below will tear the lobby down.
-      if (wasHost) {
-        const nextHuman = room.players.find(p => !p.isBot);
-        if (nextHuman) nextHuman.isHost = true;
-      }
-    }
-
-    await redisUtils.saveLobby(pubClient, lobbyId, room);
-
-    // Phase 5a: generalize "no players" to "no connected humans". In WAITING
-    // state a bots-only lobby can never start and would ghost forever (bots
-    // never fire 'disconnect' and never empty room.players). In PLAYING state
-    // a bots-only remnant is also unrecoverable — no human can re-enter a game
-    // mid-play — so we tear down immediately here, BEFORE the grace-timer
-    // block, intentionally giving the last human no 15s reconnect window
-    // (bots can't run the game forward for a reconnect anyway). Clear BOTH
-    // in-process timers so a stale watchdog/bot-move can't fire on a dead lobby.
-    const connectedHumans = room.players.filter(p => !p.isBot && p.connected);
-    if (room.players.length === 0 || connectedHumans.length === 0) {
+    if (shouldTearDown) {
       gameLogic.clearTurnTimeout(lobbyId);
+      // T4b audit fix: clear any pending game-reset timer too — a torn-down
+      // lobby's id may be reused (deterministic daily ids, or a player creating
+      // a new lobby), and a stale reset firing against a deleted/new lobby is
+      // exactly the cross-game leak T4b closes. In-process clear, same place as
+      // the turn/bot timer cleanup above.
+      gameLogic.clearGameResetTimeout(lobbyId);
       // Clear the in-process bot-move timer too so a pending bot fire can't
       // act against a torn-down lobby. Top-level botSystem ref (acyclic).
       botSystem.clearBotTimeout(lobbyId);
       await redisUtils.deleteLobby(pubClient, lobbyId);
       return;
     }
+
+    // From here down everything is read-only side-effects on the room the
+    // lock returned (already persisted above) — alias the captured fresh
+    // player under the name the grace-timer block has always used.
+    const player = disconnectedPlayer;
 
     if (room.status === 'playing') {
       // Broadcast immediately so others see the player as disconnected
@@ -913,7 +1050,47 @@ async function handleDisconnect(ctx, socketId) {
 
           const isCurrentTurn = liveRoom.players[liveRoom.currentTurnIndex]?.id === livePlayer.id;
           if (isCurrentTurn) {
-            await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, liveRoom, 'Disconnected');
+            // T2c-i (audit P1-3): this was the LAST eliminateCurrentPlayer
+            // call site holding NO submit lock — the same class of gap T1c
+            // closed for quitGame's current-turn branch — and it passed the
+            // UNLOCKED liveRoom read above. Mirror quitGame/forceNextTurn
+            // exactly: acquire the pipeline lock → fresh in-lock re-read →
+            // re-verify → eliminate the FRESH room → token-guarded release.
+            const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
+            // No lock = a submit/forceNextTurn/watchdog is mid-flight and
+            // will resolve this very turn itself. If the player really is
+            // gone, the armed turn watchdog eliminates them on the next
+            // expiry — skipping here is a no-op, not a leak.
+            if (!lockToken) return;
+            try {
+              // Every check below re-runs against state the previous lock
+              // holder finished writing — the pre-lock read only chose the
+              // branch.
+              const fresh = await redisUtils.getLobby(pubClient, lobbyId);
+              if (!fresh || fresh.status !== 'playing') return;
+              // Same dual lookup that produced livePlayer (stableId first,
+              // so a page-refresh rejoin that changed socket ids matches).
+              const freshPlayer = fresh.players.find(p => p.stableId === player.stableId || p.id === socketId);
+              // Rejoined (connected flipped true) or already eliminated
+              // while we waited — the grace kill must cancel, not double-fire.
+              if (!freshPlayer || freshPlayer.connected || !freshPlayer.isAlive) return;
+              // Turn moved on: "the current player" is now someone ELSE —
+              // eliminating off our stale view would kill the wrong player.
+              if (fresh.players[fresh.currentTurnIndex]?.id !== freshPlayer.id) return;
+              // extraVerify re-checks "still disconnected" AGAIN on the
+              // lobbymut-fresh room inside eliminateCurrentPlayer's commit
+              // (T2a) — a rejoin landing between this submit-locked check
+              // and that commit still cancels the kill.
+              await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, fresh, 'Disconnected', {
+                extraVerify: (f, v) => !v.connected,
+              });
+            } finally {
+              // Token-guarded by construction (returned above when acquire
+              // failed). .catch mirrors quitGame/forceNextTurn: a failed
+              // release self-heals via the lock's 30s TTL and must never
+              // mask an eliminate error.
+              await redisUtils.releaseSubmitLock(pubClient, lobbyId, lockToken).catch(() => {});
+            }
           } else {
             // R1: same lost-update race as quitGame's else branch — the
             // getLobby above this block is unlocked. Re-find the player on
@@ -930,7 +1107,17 @@ async function handleDisconnect(ctx, socketId) {
               changed = true;
             });
             if (changed && updated) {
-              await gameLogic.checkWinCondition(io, pubClient, lobbyId, updated);
+              // T4j audit fix: same post-lock unlocked win-check as quitGame's
+              // else branch — run checkWinCondition INSIDE a second
+              // withLobbyLock section on a FRESH re-read so its finish save
+              // can't clobber a concurrent write. checkWinCondition owns its
+              // own persistence; the mutator returns false to decline the
+              // trailing save (the isAlive=false above is already persisted).
+              // No re-entrancy: checkWinCondition takes neither lock class.
+              await redisUtils.withLobbyLock(pubClient, lobbyId, async (fresh) => {
+                await gameLogic.checkWinCondition(io, pubClient, lobbyId, fresh);
+                return false;
+              });
               const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
               if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
             }
@@ -942,8 +1129,10 @@ async function handleDisconnect(ctx, socketId) {
 
       graceTimers.set(graceKey, graceTimeoutId);
     } else {
-      const finalRoom = await redisUtils.getLobby(pubClient, lobbyId);
-      if (finalRoom) gameLogic.broadcastState(io, lobbyId, finalRoom);
+      // T1e: broadcast the room the lock returned — it IS the state the
+      // mutator just persisted. The old extra getLobby here predates the
+      // lock and would only re-open a read-after-write race for no benefit.
+      gameLogic.broadcastState(io, lobbyId, room);
     }
   } catch (err) {
     logger.error(err, `handleDisconnect error for socket ${socketId}`);

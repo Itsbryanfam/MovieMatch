@@ -6,13 +6,16 @@
 // Import audio helpers — renderChainItems plays success audio on new entries.
 import { playSuccess } from '../utils.js';
 // Import socket helpers — renderLobby emits kickPlayer via the live socket.
-import { getSocket, getCurrentLobbyId } from '../state.js';
+// T5d ESLint: dropped unused getCurrentLobbyId (imported, never referenced
+// here) — import-list trim is behavior-neutral.
+import { getSocket } from '../state.js';
 // Import DOM refs and shared helpers — live bindings assigned by
 // initUIElements() in ui-dom.js; attachPosterFallback lives in ui-dom
 // (leaf module) so both render and autocomplete can import it without
 // creating a sideways ui-autocomplete → ui-render coupling.
 import {
-  modeChips, modeDescription, waitingRoom, teamScreen,
+  // T5d ESLint: dropped unused waitingRoom, teamScreen DOM refs (never read here).
+  modeChips, modeDescription,
   lobbyCodeDisplay, lobbyPlayersList,
   hardcoreToggle, tvShowsToggle, publicRoomToggle, startBtn,
   teamLobbyCode, teamRedList, teamBlueList, joinRedBtn, joinBlueBtn,
@@ -37,7 +40,8 @@ import { clearGhostAttempt, renderPendingGhost } from './ui-notifications.js';
 // SEAT_HUES added Phase 7.5.3: renderLobby mirrors the claim-only mutex
 // client-side (compute every OTHER player's effective hue) so taken
 // swatches render disabled — the server is still the arbiter.
-import { diffArrivals, playerCardModel, seatModel, rollCameraLabel, SEAT_HUES } from './red-carpet.js';
+// T5d ESLint: dropped unused playerCardModel (imported, never called here).
+import { diffArrivals, seatModel, rollCameraLabel, SEAT_HUES } from './red-carpet.js';
 // Phase 7.8c — QR scan-to-join. renderQR is the thin wrapper around the
 // vendored qrcode-generator; makeJoinUrl is the single source of truth for
 // invite-URL format (extracted from app.js inline duplications into a leaf
@@ -54,6 +58,7 @@ import { buildSeatNode, buildEmptySeatNode } from './ui-seat.js';
 // the reveal→impact choreography phases; imported here (NOT via the ./ui.js
 // barrel) to match the 7.5 DAG discipline (ui-render.js is itself re-exported
 // by that barrel, so a barrel import would be a cycle).
+// eslint-disable-next-line no-unused-vars -- T5d: intentionally kept available (see choreographTurn note ~L569): the pure engine is independently tested and reserved for a future cinematic pass; removing the import would contradict that documented intent.
 import { buildTurnTimeline } from './turn-motion.js';
 
 // Phase 7.5 Red Carpet: page-session set of player ids whose entrance card
@@ -91,6 +96,7 @@ const SEATS = 8;
 // Phase 7.8b note: a byte-identical copy lives in public/js/ui/ui-seat.js
 // (the shared buildSeatNode also injects this SVG). Keep both copies in
 // sync until the DS-01 pass 2 dedupes them.
+// eslint-disable-next-line no-unused-vars -- T5d: deliberately retained dead copy; the comment above mandates keeping this byte-identical SVG in sync with ui-seat.js until the DS-01 dedup. Removing it would be that dedup, which is out of scope for a tooling pass.
 const SEAT_CHAIR_SVG = `<svg class="seat-svg" viewBox="0 0 150 120" aria-hidden="true">
   <defs>
     <linearGradient id="seat-backG" x1="0" x2="0" y1="0" y2="1">

@@ -19,6 +19,12 @@ const lobbySystem = require('./systems/lobbySystem');
 const matchSystem = require('./systems/matchSystem');
 const posterCache = require('./posterCache');
 const redisUtils = require('./redisUtils');
+// T3a audit fix: shared rightmost-XFF client-IP derivation — same helper the
+// io.use() connection throttle uses, so HTTP and socket layers agree on IPs.
+const { deriveClientIp } = require('./clientIp');
+// T4f audit fix: the player hard-cap is server-authoritative — emit it on
+// connect so the client renders the cap dynamically instead of hardcoding '/ 8'.
+const { MAX_PLAYERS_PER_LOBBY } = require('./constants');
 const pino = require('pino');
 const logger = pino();
 
@@ -78,6 +84,30 @@ const RATE_LIMITS = {
 };
 
 // ---------------------------------------------------------------------------
+// T3b audit fix (P2): per-IP limiter dimension.
+// ---------------------------------------------------------------------------
+// Every bucket above keys on socket.id — and a NEW socket gets fresh buckets,
+// so one attacker opening many sockets multiplies their effective budget.
+// (server.js's Express limiter explicitly skips /socket.io/, so nothing else
+// catches this.) For the actions below, rateLimit ALSO checks a shared
+// per-IP bucket so the budget is bounded per attacker, not per socket.
+// Scope: ONLY the expensive/pre-room surfaces —
+//   joinLobby        — pre-room; also the lobby CREATION path (there is no
+//                      separate createLobby handler — empty lobbyId creates),
+//   autocomplete     — in-room, but every allowed call is a TMDB search
+//                      against the single shared token,
+//   heroActorSearch  — pre-room, no membership required, proxies straight to
+//                      TMDB /search/person: the cheapest token-burn lever.
+// Everything else stays per-socket-only so cheap in-room events (chat,
+// typing, posters…) don't pay an extra Redis round-trip per event.
+const PER_IP_RATE_LIMITED_ACTIONS = new Set(['joinLobby', 'autocomplete', 'heroActorSearch']);
+// 4× the per-socket ceiling: a household/office NAT sharing one IP can hold
+// several legitimate concurrent players, so the IP ceiling must sit well
+// above one player's allowance — while still capping a many-socket attacker
+// at a small constant multiple instead of (sockets × limit).
+const PER_IP_LIMIT_MULTIPLIER = 4;
+
+// ---------------------------------------------------------------------------
 // INPUT HELPERS
 // ---------------------------------------------------------------------------
 
@@ -111,7 +141,13 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
   // Per-socket rate limiter (Redis-backed, atomic pipeline).
   // Returns true if the socket has exceeded the limit and the action should be dropped.
-  async function rateLimit(socketId, action, limit = 10, windowMs = 10000) {
+  // T3b: callers for PER_IP_RATE_LIMITED_ACTIONS pass `clientIp`
+  // (socket.data.clientIp, derived once at connection — T3a) so those events
+  // are ALSO checked against a shared per-IP bucket. The set membership is
+  // the gate; the param is just the data — passing an IP for an unflagged
+  // action is a no-op, and a flagged action without an IP (defensive: a
+  // handshake that somehow skipped T3a) degrades to per-socket-only.
+  async function rateLimit(socketId, action, limit = 10, windowMs = 10000, clientIp = null) {
     const key = `ratelimit:${action}:${socketId}`;
     const ttlSec = Math.ceil(windowMs / 1000);
     const results = await pubClient.multi()
@@ -119,7 +155,34 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       .expire(key, ttlSec)
       .exec();
     const count = results[0];
-    return count > limit;
+    // T3b: early-return (was `return count > limit`) so the per-IP dimension
+    // below only runs — and only spends its Redis round-trip — for events the
+    // per-socket dimension already admitted. UX fairness is unchanged: the
+    // per-socket buckets and ceilings are exactly as before.
+    if (count > limit) return true;
+    if (clientIp && PER_IP_RATE_LIMITED_ACTIONS.has(action)) {
+      // FAIL-OPEN (adminLimiter philosophy): the per-IP bucket is an abuse
+      // ceiling, not a correctness gate — if Redis flaps exactly here, the
+      // rejection must NOT bubble to safeOn and silently drop a legitimate
+      // player's action. Without this try/catch the per-IP addition would
+      // CREATE a new failure mode (per-socket already admitted the event);
+      // with it, a flap degrades to "per-socket-only", i.e. the pre-T3
+      // behavior. (The per-socket await above keeps its pre-existing
+      // semantics on rejection — unchanged by design.)
+      try {
+        const ipKey = `ratelimit:ip:${action}:${clientIp}`;
+        const ipResults = await pubClient.multi()
+          .incr(ipKey)
+          // Same TTL as the action's per-socket window so the two dimensions
+          // measure the same time slice (just with a 4× ceiling).
+          .expire(ipKey, ttlSec)
+          .exec();
+        if (ipResults[0] > limit * PER_IP_LIMIT_MULTIPLIER) return true;
+      } catch {
+        // Swallow: degraded Redis must never block players (see above).
+      }
+    }
+    return false;
   }
 
   // Finds the player or spectator for a socket in a room.
@@ -135,6 +198,20 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
   // =========================================================================
 
   io.on('connection', (socket) => {
+
+    // T3a audit fix (P2): derive the client IP ONCE per connection and pin it
+    // on socket.data so every later rate-limit check reads one stable value
+    // (headers can't change mid-connection, so re-parsing per event would be
+    // waste). Rightmost-XFF-wins trust reasoning lives in clientIp.js: Render
+    // appends the real client IP as the LAST x-forwarded-for entry, while
+    // client-supplied entries sit further LEFT and must be ignored — mirroring
+    // Express `trust proxy: 1`, so socket and HTTP limiters key the same IP.
+    // Defensive init: socket.io v4 always supplies socket.data = {}, but
+    // harness-built fake sockets (my-stats-enrichment.test.js) don't — and a
+    // throw HERE would abort the whole connection callback, silently
+    // unregistering every handler below. Never let an IP nicety do that.
+    if (!socket.data) socket.data = {};
+    socket.data.clientIp = deriveClientIp(socket.handshake);
 
     // Send cached posters on connect so the background renders immediately
     const cached = posterCache.getPosters();
@@ -161,6 +238,14 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // No kits is degenerate — the chip strip simply stays empty.
     }
 
+    // T4f audit fix: emit the server-authoritative config (currently just the
+    // player hard-cap) once per connection — same connect-time, fire-once
+    // pattern as posters/themesList/ruleKitsList. The client renders the public-
+    // lobby "N / max" count from this instead of a hardcoded '/ 8', so the cap
+    // can never drift between MAX_PLAYERS_PER_LOBBY and the UI. Tiny payload,
+    // sent once; the client falls back to 8 if this event hasn't arrived yet.
+    socket.emit('serverConfig', { maxPlayers: MAX_PLAYERS_PER_LOBBY });
+
     // Every handler below registers via safeOn instead of socket.on directly.
     // safeOn wraps the handler in a try/catch so an unhandled rejection can't
     // crash the process. This replaces an earlier monkey-patch on socket.on,
@@ -185,9 +270,29 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
     // -----------------------------------------------------------------------
 
     on('joinLobby', async ({ name, lobbyId, stableId }) => {
-      if (await rateLimit(socket.id, 'joinLobby', RATE_LIMITS.joinLobby.limit, RATE_LIMITS.joinLobby.windowMs)) return;
+      // T3b: clientIp added — joinLobby is pre-room AND the creation path, so
+      // it gets the per-IP dimension on top of the unchanged per-socket bucket.
+      if (await rateLimit(socket.id, 'joinLobby', RATE_LIMITS.joinLobby.limit, RATE_LIMITS.joinLobby.windowMs, socket.data.clientIp)) return;
       name = clampString(name, 24);
       if (!name || !name.trim()) return socket.emit('error', 'Name cannot be empty.');
+      // T1 audit fix T1f: lobbyId flows into Redis keys — lobby:${id}
+      // (NX-created with a 2h TTL), both lock keys, and the activeLobbies
+      // set — so an uncapped client value let one socket inflate Redis with
+      // multi-megabyte keys for free. Validate the SAME normalization
+      // lobbySystem.joinLobby applies (trim + uppercase) so the regex judges
+      // exactly the string that becomes the key. Empty stays "generate a
+      // fresh code" (unchanged); non-strings pass through untouched so the
+      // pre-existing behavior (lobbySystem throws, safeOn swallows, no lobby
+      // created) is preserved rather than silently reinterpreted. The 32-cap
+      // + A-Z/0-9/hyphen charset admits both generated 6-char codes and
+      // DAILY-… ids by construction. Rejection reuses this handler's own
+      // socket.emit('error', ...) pattern (see the name guard above).
+      if (typeof lobbyId === 'string') {
+        const requestedId = lobbyId.trim().toUpperCase();
+        if (requestedId && !/^[A-Z0-9-]{1,32}$/.test(requestedId)) {
+          return socket.emit('error', 'Invalid lobby code.');
+        }
+      }
       // stableId is a client-generated persistent ID that survives socket reconnects.
       // Fall back to socket.id if the client doesn't supply one.
       stableId = (typeof stableId === 'string' && stableId.length > 0 && stableId.length <= 64) ? stableId : socket.id;
@@ -291,10 +396,23 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
     on('startDailyChallenge', async ({ name, stableId }) => {
       if (await rateLimit(socket.id, 'dailyChallenge', RATE_LIMITS.dailyChallenge.limit, RATE_LIMITS.dailyChallenge.windowMs)) return;
+      // T7b audit fix: clamp stableId at 64 BEFORE it can flow into
+      // dailySystem.claimDailyAttempt → `daily:attempt:<date>:<stableId>`.
+      // The empty/non-string check lives in lobbySystem.startDailyChallenge,
+      // but it did NOT bound the UPPER length — so an oversized client stableId
+      // minted a multi-KB Redis key (the later `.slice(0,12)` only protects the
+      // LOBBY id, not this attempt key). Reject ONLY the over-cap STRING case
+      // here (silent return, mirroring requestMyStats' >64 guard — a legit
+      // stableId is `p_`+32 hex = 34 chars, so nothing real trips this; an
+      // over-cap payload is junk that deserves no feedback and no Redis
+      // footprint). The missing/non-string case is intentionally left to fall
+      // through so lobbySystem still emits its user-facing "requires a stable
+      // identity" error (preserving that UX-feedback path unchanged).
+      if (typeof stableId === 'string' && stableId.length > 64) return;
       // Defensive name sanitization same as joinLobby — keeps the daily
-      // attempt record's display name within bounds. stableId validation
-      // is done inside startDailyChallenge (it's the auth signal for the
-      // attempt-NX claim).
+      // attempt record's display name within bounds. The remaining stableId
+      // validation (empty/non-string → user-facing error) stays inside
+      // startDailyChallenge (it's the auth signal for the attempt-NX claim).
       const cleanName = clampString(name, 24);
       await lobbySystem.startDailyChallenge(ctx, socket, { name: cleanName, stableId });
     });
@@ -394,9 +512,21 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // Dedicated channel — does NOT share the autocomplete rate-limit bucket
       // with live-game autocompleteSearch (different surface, different bucket
       // name so a malicious hero spam doesn't deny live-game players).
+      // Max-length guard (100) predates T3 and stays — it bounds the
+      // encodeURIComponent blow-up and the Redis cache key length alike.
       if (typeof query !== 'string' || query.length === 0 || query.length > 100) return;
-      if (await rateLimit(socket.id, 'heroActorSearch', RATE_LIMITS.autocomplete.limit, RATE_LIMITS.autocomplete.windowMs)) return;
-      const results = await heroPuzzle.searchPersonForHero(query, TMDB_HEADERS);
+      // T3d: minimum 2 chars AFTER trim. A 1-char fragment is useless for
+      // the dropdown but still costs a TMDB call — and it must be rejected
+      // BEFORE the limiter below so junk can't eat a player's real budget.
+      // Trim first so whitespace padding can't smuggle a 1-char query in.
+      if (query.trim().length < 2) return;
+      // T3b: clientIp added — pre-room, membership-free, straight to TMDB:
+      // the cheapest token-burn lever in the app, so the per-IP bucket is
+      // most important here.
+      if (await rateLimit(socket.id, 'heroActorSearch', RATE_LIMITS.autocomplete.limit, RATE_LIMITS.autocomplete.windowMs, socket.data.clientIp)) return;
+      // T3d: pubClient wired through for the 6h person-search result cache —
+      // a cache hit answers entirely from Redis with zero TMDB spend.
+      const results = await heroPuzzle.searchPersonForHero(query, TMDB_HEADERS, pubClient);
       socket.emit('heroActorResults', { query, results });
     });
 
@@ -406,6 +536,7 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
       // the client falls back to its cached bundled outcome on timeout.
       if (typeof pairId !== 'string' || pairId.length === 0 || pairId.length > 100) return;
       if (typeof actorTmdbId !== 'number' || !Number.isInteger(actorTmdbId)) return;
+      // eslint-disable-next-line no-useless-assignment -- T5d: defensive input clamp. validateGuess() ignores actorName today so the '' write is currently unread, but it is deliberate sanitization kept so any future code path that DOES read actorName sees a bounded value, never oversize/attacker-controlled input. Removing it would be a behavior change-in-waiting.
       if (typeof actorName !== 'string' || actorName.length > 200) actorName = '';
       if (await rateLimit(socket.id, 'heroGuessSubmit', RATE_LIMITS.submitMovie.limit, RATE_LIMITS.submitMovie.windowMs)) return;
       const result = heroPuzzle.validateGuess(pairId, actorTmdbId);
@@ -428,7 +559,9 @@ function setupSocketHandlers(io, pubClient, TMDB_HEADERS) {
 
     on('autocompleteSearch', async ({ query, lobbyId }) => {
       if (typeof query !== 'string' || query.length === 0 || query.length > 100) return;
-      if (await rateLimit(socket.id, 'autocomplete', RATE_LIMITS.autocomplete.limit, RATE_LIMITS.autocomplete.windowMs)) return;
+      // T3b: clientIp added — every allowed call is a TMDB search on the
+      // shared token, so this event also checks the per-IP bucket.
+      if (await rateLimit(socket.id, 'autocomplete', RATE_LIMITS.autocomplete.limit, RATE_LIMITS.autocomplete.windowMs, socket.data.clientIp)) return;
       await matchSystem.autocompleteSearch(ctx, socket, { query, lobbyId });
     });
 

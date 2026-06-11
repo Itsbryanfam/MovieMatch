@@ -116,20 +116,58 @@ async function recordPlay(pubClient, stableId, matchedActors) {
     // Use a separate hash so the main stats blob stays small and easy to
     // HGETALL-and-render.
     if (Array.isArray(matchedActors) && matchedActors.length > 0) {
+      // T4d audit fix: ENFORCE MAX_CONNECTOR_ENTRIES so the connectors hash
+      // can't grow unboundedly with distinct co-actors (cardinality, not
+      // volume: a player connecting via 50k different actors over 90 days would
+      // accumulate a 50k-field hash). T8b refinement (Codex regression): the
+      // pre-fix code computed atCap via hLen and wrapped the WHOLE increment
+      // loop in `if (!atCap)` — so an at-cap player stopped incrementing
+      // connectors they ALREADY had, FREEZING favoriteConnector. The right rule
+      // is: at the cap, only suppress NEW actors (a new hash field GROWS
+      // cardinality); an EXISTING field must STILL be incremented (HINCRBY on a
+      // field that already exists never grows cardinality). One hKeys round-trip
+      // (instead of hLen) gives BOTH the count for the cap check AND the
+      // existing-field set for membership — still a single read per call.
+      let atCap = false;
+      let existing = new Set();
+      try {
+        const keys = await pubClient.hKeys(_connectorsKey(stableId));
+        if (Array.isArray(keys)) {
+          existing = new Set(keys);
+          atCap = keys.length >= MAX_CONNECTOR_ENTRIES;
+        }
+      } catch {
+        // hKeys failed (Redis blip) — treat as not-at-cap with an EMPTY
+        // existing-set so we behave like the old "add freely up to the per-call
+        // cap": a missed cap check is far less harmful than dropping a legit
+        // connector write.
+        atCap = false;
+        existing = new Set();
+      }
+
       const ops = pubClient.multi();
-      let added = 0;
+      let newAdds = 0; // counts only NEW fields, so a corrupt array can't pile on
       for (const actor of matchedActors) {
         if (typeof actor !== 'string' || !actor) continue;
-        // Cap at MAX_CONNECTOR_ENTRIES to bound the hash size. We don't
-        // actually enforce the cap atomically (would require a Lua script);
-        // instead we count opportunistically and stop adding when over.
-        // Worst case: a few extra entries past the cap on a hot night —
-        // not worth the complexity of a hard guard.
         const trimmed = actor.length > 64 ? actor.slice(0, 64) : actor;
-        ops.hIncrBy(_connectorsKey(stableId), trimmed, 1);
-        added++;
-        if (added >= 10) break; // sanity per-call cap so a corrupt array can't pile on
+        if (existing.has(trimmed)) {
+          // Existing connector: ALWAYS increment — this never grows cardinality,
+          // and skipping it is exactly the favoriteConnector freeze we fix.
+          ops.hIncrBy(_connectorsKey(stableId), trimmed, 1);
+        } else {
+          // New connector (would CREATE a field): only add when under the cap
+          // AND under the per-call new-add sanity bound. The bound counts NEW
+          // adds so a hot turn can't inflate the hash in a single call.
+          if (atCap || newAdds >= 10) continue;
+          ops.hIncrBy(_connectorsKey(stableId), trimmed, 1);
+          newAdds++;
+        }
       }
+      // TTL refresh regardless of the cap — an at-cap active player must not
+      // have their connectors expire out from under them just because we
+      // stopped ADDING; so a capped player's favoriteConnector readout stays
+      // alive. (When nothing was incremented this is a cheap single-command
+      // pipeline.)
       ops.expire(_connectorsKey(stableId), STATS_RETENTION_SEC);
       await ops.exec();
     }

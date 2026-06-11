@@ -14,10 +14,13 @@ const soloObjectivesSystem = require('./soloObjectivesSystem');
 const themesSystem = require('./themesSystem');
 // Phase 5b: local fallback movie DB (leaf module — fs/path only, no cycle).
 const fallbackMovies = require('./fallbackMovies');
+// T4c audit fix: shared 5s TMDB fetch ceiling (was a local duplicate const
+// below). constants.js is a leaf module — no require cycle.
+const { TMDB_FETCH_TIMEOUT_MS } = require('../constants');
 
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
-const TMDB_FETCH_TIMEOUT_MS = 5000;
+// T4c: TMDB_FETCH_TIMEOUT_MS now imported from ../constants (see import above).
 
 // Phase 6a — Post-Game Learning Breakdown.
 // Upper bound on the best-effort "a move you could have played" computation.
@@ -149,21 +152,34 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType, pos
   // The token is required by releaseSubmitLock so the Lua compare-and-delete
   // can refuse to release a lock that has expired and been re-acquired by
   // someone else.
+  //
+  // T2b (audit P1-3): the submit lock stays the PIPELINE-level dedup — one
+  // submission/turn-advance in flight per lobby. It is NOT the data lock any
+  // more: every write of the lobby blob below goes through withLobbyLock on
+  // a room re-read inside that lock (see the LOCK ORDERING RULE in
+  // redisUtils.js — lobbymut nests inside submit, never the reverse).
   const lockToken = await redisUtils.acquireSubmitLock(pubClient, lobbyId);
   if (!lockToken) return;
 
   try {
-    // Re-read after acquiring lock — disconnects may have mutated state during acquisition
-    room = await redisUtils.getLobby(pubClient, lobbyId);
-    if (!room || room.status !== 'playing' || room.isValidating) return;
+    // T2b: the old post-lock re-read + isValidating=true + full-blob save
+    // raced lobbymut writers in its tiny read→save window. Now ONE lobbymut
+    // section does it: re-read fresh inside the mutex, re-verify the same
+    // preconditions the old re-read checked, set the flag, persist. The
+    // returned fresh room becomes the pipeline's working snapshot.
+    let flagged = false; // side-channel: withLobbyLock returns the room even when the mutator declines
+    room = await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => {
+      if (fresh.status !== 'playing' || fresh.isValidating) return false;
+      const p = fresh.players.find(pp => pp.id === socket.id);
+      if (!p || !p.isAlive || fresh.players[fresh.currentTurnIndex].id !== socket.id) return false;
+      fresh.isValidating = true;
+      flagged = true;
+    });
+    if (!flagged || !room) return;
     // `let` (not const): re-derived from the freshly re-read room after the
     // post-enrich re-read below, so commitPlay / attemptFailed use the player
     // from the same object graph as the room they persist.
     let player = room.players.find(p => p.id === socket.id);
-    if (!player || !player.isAlive || room.players[room.currentTurnIndex].id !== socket.id) return;
-
-    room.isValidating = true;
-    await redisUtils.saveLobby(pubClient, lobbyId, room);
 
     try {
       // Step 1: Resolve candidates (by ID or text search)
@@ -176,14 +192,23 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType, pos
         // per turn. The turn timer is NOT reset, so the player still pays
         // for fumbling in lost seconds; they just keep their life. Whether
         // the limit is hit determines elimination vs. a private retry hint.
-        room = await redisUtils.getLobby(pubClient, lobbyId);
-        // Default the counter to 0 for older states that pre-date this field.
-        room.currentTurnRetries = (room.currentTurnRetries || 0) + 1;
-        const retriesUsed = room.currentTurnRetries;
+        //
+        // T2b: the strike used to be an unlocked re-read + full-blob save —
+        // a lobbymut write landing during the TMDB search above was clobbered
+        // by it. Increment the counter and release the flag on FRESH state
+        // inside the mutex instead.
+        let retriesUsed = 0;
+        const struck = await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => {
+          // Default the counter to 0 for older states that pre-date this field.
+          fresh.currentTurnRetries = (fresh.currentTurnRetries || 0) + 1;
+          retriesUsed = fresh.currentTurnRetries;
+          fresh.isValidating = false;
+        });
+        // Lobby vanished mid-pipeline — nothing to strike, nothing to emit
+        // (the old code's unguarded re-read would have thrown to the catch).
+        if (!struck) return;
+        room = struck;
         const retriesLeft = MAX_TITLE_NOT_FOUND_RETRIES - retriesUsed;
-
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
 
         if (retriesLeft >= 0) {
           // Emit only to the submitting socket — nobody else needs to learn
@@ -239,11 +264,16 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType, pos
         }
       }
 
-      // Step 3: Re-read room (may have changed during async fetches)
+      // Step 3: Re-read room (may have changed during async fetches). T2b:
+      // this stays an UNLOCKED read — reads can't clobber anything, and the
+      // payloads below want the freshest names — while the authoritative
+      // verify now lives in the commit mutator further down.
       room = await redisUtils.getLobby(pubClient, lobbyId);
       if (room.status !== 'playing' || room.players[room.currentTurnIndex].id !== socket.id) {
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        // T2b: the early-out used to save THIS whole (post-enrich, stale)
+        // snapshot just to clear the flag — the exact full-blob clobber this
+        // task removes. Clear the flag on fresh state under the mutex.
+        await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => { fresh.isValidating = false; });
         return;
       }
 
@@ -324,23 +354,74 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType, pos
           });
         }
 
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        // T2b: release the flag on FRESH state under the mutex (was a stale
+        // full-blob save), then eliminate — eliminateCurrentPlayer re-reads
+        // and re-verifies under lobbymut itself (T2a). Two short sections
+        // instead of one: the flag release must persist even if the
+        // elimination then declines (a stuck true flag blocks every future
+        // submit via the pre-lock check).
+        await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => { fresh.isValidating = false; });
         await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, result.reason);
         return;
       }
 
-      // Step 5: Commit the valid play. Pass the object form of matched
-      // actors too so previousSharedActors carries ids — required for
-      // id-precise hardcore-mode comparison on the next turn.
-      commitPlay(room, socket.id, player, result.match, result.matchedActors, result.matchedActorObjects);
+      // Step 5: Commit the valid play. T2b core: commitPlay used to mutate
+      // the post-enrich SNAPSHOT and rely on nextTurn's full-blob save —
+      // reverting every lobbymut write that landed during the (up to ~5s of)
+      // resolve/enrich awaits above. Now validation stays on the snapshot
+      // (chain/turn can't move while we hold the submit lock) and the COMMIT
+      // re-reads fresh inside the mutex, re-verifies, then replays the play
+      // and the turn advance onto the fresh room in ONE atomic section — a
+      // torn two-section commit could persist the chain entry without the
+      // advance and let the watchdog kill the very player who just played.
+      const expectedChainLen = room.chain.length;
+      let committed = false; // side-channel: withLobbyLock returns the room even on decline
+      const committedRoom = await redisUtils.withLobbyLock(pubClient, lobbyId, async (fresh) => {
+        // Re-verify the snapshot's preconditions on FRESH state. A status
+        // flip (a concurrent quit ended the game) or a turn/chain move means
+        // this play no longer applies — decline with no write.
+        if (fresh.status !== 'playing') return false;
+        const freshPlayer = fresh.players.find(pp => pp.id === socket.id);
+        if (!freshPlayer || !freshPlayer.isAlive || fresh.players[fresh.currentTurnIndex].id !== socket.id) return false;
+        if ((fresh.chain || []).length !== expectedChainLen) return false;
 
+        // Pass the object form of matched actors too so previousSharedActors
+        // carries ids — required for id-precise hardcore-mode comparison on
+        // the next turn. freshPlayer belongs to the fresh object graph, the
+        // same invariant the old post-enrich re-derive protected.
+        commitPlay(fresh, socket.id, freshPlayer, result.match, result.matchedActors, result.matchedActorObjects);
+
+        // L3: Settle spectator predictions for this turn — outcome is 'yes'
+        // (the player got it). Inside the commit so the predictionResult
+        // only fires for a play that actually landed, and the cleared map
+        // persists with it.
+        gameLogic.settlePredictions(io, lobbyId, fresh, 'yes');
+
+        fresh.isValidating = false;
+
+        // Win-check on fresh state before advancing — a successful play can
+        // never END a game by itself, but a concurrent lobbymut kill (quit
+        // else-branch) may have left this player the last one standing
+        // during our TMDB window; the fresh check resolves that correctly
+        // (it persists/broadcasts internally when it fires).
+        await gameLogic.checkWinCondition(io, pubClient, lobbyId, fresh);
+        if (fresh.status === 'playing') {
+          // Synchronous advance on the fresh room (the submitter is alive,
+          // so a live next player always exists). Watchdog arming is an
+          // in-process side-effect and runs after the lock.
+          gameLogic.applyTurnAdvance(fresh);
+        }
+        committed = true;
+      });
+      if (!committed || !committedRoom) return;
+
+      // Post-commit side-effects — only for a play that actually persisted.
       // H6: Telemetry — successful play. `usedAutocomplete` distinguishes
       // pick-from-suggestions players from raw-typers; `chainLength` after
       // commit lets us study mode-specific chain length distributions.
       telemetry.track(pubClient, 'submit_success', {
-        mode: room.gameMode,
-        chainLength: room.chain.length,
+        mode: committedRoom.gameMode,
+        chainLength: committedRoom.chain.length,
         usedAutocomplete: !!tmdbId,
         mediaType: result.match.mediaType,
       });
@@ -358,28 +439,23 @@ async function submitMovie(ctx, socket, { lobbyId, movie, tmdbId, mediaType, pos
         ).catch(() => {});
       }
 
-      // L3: Settle spectator predictions for this turn — outcome is 'yes'
-      // (the player got it). Done before nextTurn (which resets the timer
-      // and broadcasts) so the predictionResult lands first and the next
-      // tally starts clean. The settle helper clears the predictions map
-      // on the room object so the upcoming broadcast reflects an empty
-      // tally for the next active player.
-      gameLogic.settlePredictions(io, lobbyId, room, 'yes');
-
-      room.isValidating = false;
-      await gameLogic.nextTurn(io, pubClient, lobbyId, room);
+      // T2b: the next turn's watchdog + broadcast, post-lock (the R1
+      // pattern: io/timer side-effects stay outside the mutex). The finished
+      // case already broadcast inside checkWinCondition above.
+      if (committedRoom.status === 'playing') {
+        gameLogic.armTurnTimeout(io, pubClient, lobbyId, committedRoom);
+        gameLogic.broadcastState(io, lobbyId, committedRoom);
+      }
 
     } catch (err) {
-      // Guard the re-read: if Redis is briefly unavailable at cleanup time,
-      // getLobby returns null and `room.isValidating = false` would throw a
-      // TypeError that escapes past the outer finally as an unhandled
-      // rejection. The lock is still released by finally; we just skip the
-      // (now-unreachable) state cleanup. Mirrors submitBotMove's catch.
-      room = await redisUtils.getLobby(pubClient, lobbyId);
-      if (room) {
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
-        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "API Error or Timeout!");
+      // T2b: the cleanup used to be an unlocked re-read + full-blob save
+      // (clobber-prone) with a null-guard for a Redis blip. The lobbymut
+      // helper gives both for free: null when the lobby is gone (skip — the
+      // outer finally still releases the submit lock), otherwise the flag is
+      // released on FRESH state and the locked eliminate runs on that room.
+      const cleared = await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => { fresh.isValidating = false; });
+      if (cleared) {
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, cleared, "API Error or Timeout!");
       }
     }
   } finally {
@@ -906,15 +982,21 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
   if (!lockToken) return;
 
   try {
-    room = await redisUtils.getLobby(pubClient, lobbyId);
-    if (!room || room.status !== 'playing' || room.isValidating) return;
+    // T2b: identical conversion to submitMovie — the post-lock re-read +
+    // flag write happens in ONE lobbymut section on fresh state; the
+    // returned room is the pipeline's working snapshot.
+    let flagged = false; // side-channel: withLobbyLock returns the room even when the mutator declines
+    room = await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => {
+      if (fresh.status !== 'playing' || fresh.isValidating) return false;
+      const p = fresh.players.find(pp => pp.id === botId);
+      if (!p || !p.isAlive || fresh.players[fresh.currentTurnIndex].id !== botId) return false;
+      fresh.isValidating = true;
+      flagged = true;
+    });
+    if (!flagged || !room) return;
     // `let` (not const): re-derived from the freshly re-read room after the
     // post-enrich re-read below (mirrors submitMovie).
     let botPlayer = room.players.find(p => p.id === botId);
-    if (!botPlayer || !botPlayer.isAlive || room.players[room.currentTurnIndex].id !== botId) return;
-
-    room.isValidating = true;
-    await redisUtils.saveLobby(pubClient, lobbyId, room);
 
     try {
       // movie arg is null — the bot always submits a concrete TMDB id, so
@@ -924,18 +1006,24 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
       if (topCandidates.length === 0) {
         // Couldn't resolve the bot's own pick (rare: TMDB blip). Treat like a
         // human who ran out of moves — graceful, fair, game continues.
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
-        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Bot couldn't find a move");
+        // T2b: flag release moves onto FRESH state under lobbymut (was a
+        // stale full-blob save); the eliminate then re-verifies under its
+        // own lobbymut commit (T2a).
+        const cleared = await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => { fresh.isValidating = false; });
+        if (cleared) {
+          await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, cleared, "Bot couldn't find a move");
+        }
         return;
       }
 
       const candidateMovies = await enrichWithCredits(topCandidates, pubClient, TMDB_HEADERS, logger);
 
+      // T2b: unchanged UNLOCKED re-read (fresher names for the payloads; the
+      // authoritative verify lives in the commit mutator below).
       room = await redisUtils.getLobby(pubClient, lobbyId);
       if (room.status !== 'playing' || room.players[room.currentTurnIndex].id !== botId) {
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        // T2b: flag release on fresh state (was a stale full-blob save).
+        await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => { fresh.isValidating = false; });
         return;
       }
 
@@ -963,33 +1051,53 @@ async function submitBotMove(ctx, lobbyId, botId, chosenMove) {
           year: candidateMovies[0]?.year || '',
           reason: result.reason,
         });
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
+        // T2b: flag release on fresh state under lobbymut (was a stale
+        // full-blob save), then the T2a-locked eliminate.
+        await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => { fresh.isValidating = false; });
         await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, result.reason);
         return;
       }
 
-      // Identical commit path to submitMovie. commitPlay scores by id
-      // (room.players.findIndex(p => p.id === botId)) so the bot id works.
-      // botPlayer was re-derived from the fresh post-enrich room above, so it
-      // belongs to the same object graph as `room` — consistent with
-      // submitMovie's matching re-derive.
-      commitPlay(room, botId, botPlayer, result.match, result.matchedActors, result.matchedActorObjects);
-      // Spectator-prediction settle ('yes' = play succeeded), same as submitMovie.
-      gameLogic.settlePredictions(io, lobbyId, room, 'yes');
-      room.isValidating = false;
-      await gameLogic.nextTurn(io, pubClient, lobbyId, room);
+      // Identical commit path to submitMovie (T2b): validation happened on
+      // the snapshot; the COMMIT re-reads fresh inside lobbymut, re-verifies,
+      // and replays the play + turn advance onto the fresh room atomically.
+      const expectedChainLen = room.chain.length;
+      let committed = false; // side-channel: withLobbyLock returns the room even on decline
+      const committedRoom = await redisUtils.withLobbyLock(pubClient, lobbyId, async (fresh) => {
+        if (fresh.status !== 'playing') return false;
+        // commitPlay scores by id (players.findIndex(p => p.id === botId)) so
+        // the bot id works; the fresh-derived player keeps the same-object-
+        // graph invariant the old post-enrich re-derive protected.
+        const freshBot = fresh.players.find(pp => pp.id === botId);
+        if (!freshBot || !freshBot.isAlive || fresh.players[fresh.currentTurnIndex].id !== botId) return false;
+        if ((fresh.chain || []).length !== expectedChainLen) return false;
+
+        commitPlay(fresh, botId, freshBot, result.match, result.matchedActors, result.matchedActorObjects);
+        // Spectator-prediction settle ('yes' = play succeeded), same as submitMovie.
+        gameLogic.settlePredictions(io, lobbyId, fresh, 'yes');
+        fresh.isValidating = false;
+        // Fresh win-check + advance — same rationale as submitMovie's commit.
+        await gameLogic.checkWinCondition(io, pubClient, lobbyId, fresh);
+        if (fresh.status === 'playing') {
+          gameLogic.applyTurnAdvance(fresh);
+        }
+        committed = true;
+      });
+      if (!committed || !committedRoom) return;
+      // Watchdog + broadcast post-lock, only for a committed, still-running
+      // game (the finished case broadcast inside checkWinCondition).
+      if (committedRoom.status === 'playing') {
+        gameLogic.armTurnTimeout(io, pubClient, lobbyId, committedRoom);
+        gameLogic.broadcastState(io, lobbyId, committedRoom);
+      }
     } catch (err) {
-      // Same shape as submitMovie's catch: clear the flag, then eliminate
-      // (room-wide reason only). No socket to notify. Null-guard the re-read:
-      // a Redis blip at cleanup makes getLobby return null and the unguarded
-      // `room.isValidating = false` would escape the outer finally as an
-      // unhandled rejection. Mirrors submitMovie's guarded catch.
-      room = await redisUtils.getLobby(pubClient, lobbyId);
-      if (room) {
-        room.isValidating = false;
-        await redisUtils.saveLobby(pubClient, lobbyId, room);
-        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, room, "Bot couldn't find a move");
+      // Same shape as submitMovie's catch (T2b): the lobbymut helper both
+      // null-guards a Redis blip (returns null → skip; the outer finally
+      // still releases the submit lock) and releases the flag on FRESH state
+      // instead of saving the stale snapshot. No socket to notify.
+      const cleared = await redisUtils.withLobbyLock(pubClient, lobbyId, (fresh) => { fresh.isValidating = false; });
+      if (cleared) {
+        await gameLogic.eliminateCurrentPlayer(io, pubClient, lobbyId, cleared, "Bot couldn't find a move");
       }
     }
   } finally {

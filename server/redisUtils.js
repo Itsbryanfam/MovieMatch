@@ -1,7 +1,35 @@
 // Phase 5b: local fallback movie DB (leaf module — fs/path only, no cycle).
 const fallbackMovies = require('./systems/fallbackMovies');
+// T4c audit fix: single source of truth for the 5s TMDB fetch ceiling (was
+// duplicated here + in heroPuzzle/lobbySystem/matchSystem). constants.js is a
+// leaf module — no require cycle.
+const { TMDB_FETCH_TIMEOUT_MS } = require('./constants');
+
+// T7c audit fix: single source of truth for "is this a structurally valid
+// lobby id?". WHY this charset: every legitimate id conforms to it BY
+// CONSTRUCTION — generated codes are 6 chars from a fixed uppercase-alnum
+// alphabet (generateLobbyId), and the daily id is
+// `DAILY-<stableId.slice(0,12)>-<yyyymmdd>` uppercased and capped at 32. The
+// daily stableId segment carries the client's `p_` prefix (getStableId mints
+// `'p_'+base36`), so after uppercasing it contains an UNDERSCORE — which is
+// why this regex is the T1f form WIDENED to add `_` (the bare `/^[A-Z0-9-]/`
+// would have wrongly rejected every real daily lock/read). 32 is the hard cap
+// the daily `.slice(0,32)` already enforces and the largest a generated code
+// or daily id can be. Anything else is a client-forged value we must not let
+// become a Redis key.
+const VALID_LOBBY_ID = /^[A-Z0-9_-]{1,32}$/;
+function isValidLobbyId(id) {
+  return typeof id === 'string' && VALID_LOBBY_ID.test(id);
+}
 
 async function getLobby(pubClient, id) {
+  // T7c: defense-in-depth chokepoint. Only joinLobby validated lobbyId before
+  // T7c; every other handler forwarded the raw client value into this GET. A
+  // malformed id can never name a real lobby, so no-op WITHOUT issuing the
+  // (potentially huge-key) GET rather than letting attacker-controlled bytes
+  // hit Redis. Returns null — identical to a normal cache miss, so callers
+  // already handle it as "lobby not found".
+  if (!isValidLobbyId(id)) return null;
   const data = await pubClient.get(`lobby:${id}`);
   if (!data) return null;
   try {
@@ -104,10 +132,10 @@ async function setPlayerWins(pubClient, playerId, wins) {
   await pubClient.setEx(`playerWins:${playerId}`, 30 * 24 * 60 * 60, wins.toString());
 }
 
-// 5s ceiling matches the timeout used by every other TMDB call in matchSystem.
-// Critical: this function runs inside the submit-movie lock — any hang here
-// freezes the game for the entire room until the 30s lock TTL expires.
-const TMDB_FETCH_TIMEOUT_MS = 5000;
+// T4c: TMDB_FETCH_TIMEOUT_MS now imported from ./constants (single source of
+// truth). Critical here: this module's fetches run inside the submit-movie
+// lock — any hang would freeze the room until the 30s lock TTL expires, which
+// is exactly why the 5s ceiling exists.
 
 // L10: Cache schema version. Bump this whenever the shape of the cached
 // credits payload changes — old entries simply expire over the 7-day TTL,
@@ -116,6 +144,18 @@ const TMDB_FETCH_TIMEOUT_MS = 5000;
 //   v1 — { cast: [{ name }] } (initial)
 //   v2 — { cast: [{ id, name }] } (H4 — id-based actor matching)
 const CREDITS_CACHE_VERSION = 'v2';
+
+// T1 audit fix T1d-ext: lazy-memoized module logger for degraded-path
+// warnings (same pattern + rationale as botSystem._getLogger): pino is only
+// instantiated the first time a degraded log actually fires, so requiring
+// this module stays side-effect-free for the many unit tests that drive it
+// with a bare mock pubClient. Memoized so repeated flaps reuse one instance
+// and keep stable pid correlation in prod logs.
+let _logger = null;
+function _getLogger() {
+  if (!_logger) _logger = require('pino')();
+  return _logger;
+}
 
 /**
  * Get credits from Redis cache or fetch from TMDB and cache for 30 days.
@@ -133,21 +173,58 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
   const lockKey = `${cacheKey}:fetching`;
 
   // Cache hit — fast path. Most calls land here in steady state.
-  const cached = await pubClient.get(cacheKey);
+  // T1 audit fix T1d: this read (and the lock SET below) previously ran
+  // OUTSIDE the try that owns the TMDB-fetch + Phase-5b-fallback path.
+  // node-redis v4 rejects in-flight commands when the socket flaps, so a
+  // blip exactly here propagated to matchSystem's enrichWithCredits catch,
+  // which answers `cast: []` — zero shared actors — and the player is
+  // eliminated "Invalid movie connection" on a CORRECT move. A Redis error
+  // on this path must instead degrade to cache-MISS semantics and fall
+  // through to the fetch (which has its own try + local-DB fallback).
+  // eslint-disable-next-line no-useless-assignment -- T5d: the `= null` init is intentional defensive scaffolding paired with the catch below (cache-miss-on-Redis-flap semantics — see the multi-line WHY above this block). Not auto-fixable without weakening that contract.
+  let cached = null;
+  try {
+    cached = await pubClient.get(cacheKey);
+  } catch {
+    cached = null; // flap = miss; TMDB below is the actual source of truth
+  }
   if (cached) {
-    return JSON.parse(cached);
+    try {
+      return JSON.parse(cached);
+    } catch {
+      // T1d: corrupt cache entry (torn write / manual poke) is a miss, not a
+      // fatal — fall through; the fresh write below self-heals the key.
+    }
   }
 
   // Try to claim the right to fetch. NX returns null if another worker is
   // already fetching the same movie — without this, five concurrent submits
   // for the same uncached title would all hit TMDB.
-  const gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
-  if (!gotLock) {
+  // T1d: a REJECTED set (Redis flap — distinct from a clean null) forfeits
+  // stampede protection for this call on purpose: a duplicate TMDB fetch is
+  // an acceptable price, eliminating a player on a correct move is not
+  // (correctness over efficiency in degraded mode). lockSubsystemUp also
+  // gates the wait-and-retry below — retrying a flapping Redis would burn
+  // 250ms inside the submit lock just to reject again.
+  let gotLock = null;
+  let lockSubsystemUp = true;
+  try {
+    gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
+  } catch {
+    lockSubsystemUp = false;
+  }
+  if (!gotLock && lockSubsystemUp) {
     // Another worker is already fetching. Briefly wait and retry the cache —
     // typical TMDB call returns in <1s, so 250ms catches most of them.
     await new Promise(r => setTimeout(r, 250));
-    const retry = await pubClient.get(cacheKey);
-    if (retry) return JSON.parse(retry);
+    // T1d: the retry read degrades identically — a flap or corrupt JSON here
+    // means we fetch ourselves rather than reject out to the eliminator.
+    try {
+      const retry = await pubClient.get(cacheKey);
+      if (retry) return JSON.parse(retry);
+    } catch {
+      // fall through and fetch ourselves
+    }
     // Cache still empty after the wait — fall through and fetch ourselves
     // rather than hang. We'd rather make a duplicate TMDB call than block
     // the user's submit indefinitely.
@@ -195,7 +272,21 @@ async function getOrFetchCredits(pubClient, tmdbId, mediaType, headers) {
         .map(actor => ({ id: actor.id, name: actor.name }))
     };
 
-    await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    // T1 audit fix T1d-ext: the write-back is Redis-only bookkeeping that
+    // runs AFTER TMDB already answered — at this point `stripped` is valid
+    // credits we hold. It used to share the fetch path's try, so a socket
+    // flap on this single SET fell into the catch below; for titles outside
+    // the local fallback DB that re-threw → matchSystem's enrichWithCredits
+    // catch → cast: [] → player eliminated on a CORRECT move. Isolated
+    // try/catch: log and continue. Worst case of a lost write-back is one
+    // duplicate TMDB fetch on the next miss — never a wrong elimination.
+    // (The other post-success Redis call, the lock-release del in finally,
+    // already swallows errors via .catch.)
+    try {
+      await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    } catch (cacheErr) {
+      _getLogger().warn(cacheErr, 'credits cache write-back failed — returning fetched credits uncached');
+    }
 
     return stripped;
   } catch (err) {
@@ -241,16 +332,51 @@ async function getOrFetchPersonCredits(pubClient, personId, headers) {
   // fetch — same invariant as getOrFetchCredits.
   const lockKey = `${cacheKey}:fetching`;
 
-  const cached = await pubClient.get(cacheKey);
-  if (cached) return JSON.parse(cached);
+  // T7d audit fix: read-path symmetry with getOrFetchCredits' T1d discipline.
+  // node-redis v4 rejects in-flight commands on a socket flap, so a bare
+  // `get` + `JSON.parse` here used to propagate (a flap rejected the lookup;
+  // a corrupt cached blob threw SyntaxError and persisted to TTL). Degrade to
+  // cache-MISS: any read/parse error → fall through to the TMDB fetch (the
+  // actual source of truth), which self-heals the entry on its write-back.
+  // eslint-disable-next-line no-useless-assignment -- the `= null` init is intentional defensive scaffolding paired with the catch below (cache-miss-on-Redis-flap semantics — see the multi-line WHY above). Mirrors the identical disable in getOrFetchCredits.
+  let cached = null;
+  try {
+    cached = await pubClient.get(cacheKey);
+  } catch {
+    cached = null; // flap = miss; TMDB below is the actual source of truth
+  }
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {
+      // Corrupt entry (torn write / manual poke) → miss; the write-back below
+      // overwrites the bad blob with fresh credits.
+    }
+  }
 
   // NX claim: only one worker fetches an uncached person; the rest wait+retry
   // the cache. Without it, a busy bot turn could fan out duplicate TMDB calls.
-  const gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
-  if (!gotLock) {
+  // T7d: a REJECTED lock-set (Redis flap) forfeits stampede protection for
+  // this call rather than throwing — a duplicate TMDB fetch is the acceptable
+  // price (same tradeoff getOrFetchCredits makes), and lockSubsystemUp gates
+  // the wait-and-retry so we don't burn 250ms retrying a flapping Redis.
+  let gotLock = null;
+  let lockSubsystemUp = true;
+  try {
+    gotLock = await pubClient.set(lockKey, '1', { NX: true, EX: 10 });
+  } catch {
+    lockSubsystemUp = false;
+  }
+  if (!gotLock && lockSubsystemUp) {
     await new Promise(r => setTimeout(r, 250));
-    const retry = await pubClient.get(cacheKey);
-    if (retry) return JSON.parse(retry);
+    // T7d: the retry read degrades identically — a flap or corrupt JSON here
+    // means we fetch ourselves rather than reject out to the bot generator.
+    try {
+      const retry = await pubClient.get(cacheKey);
+      if (retry) return JSON.parse(retry);
+    } catch {
+      // fall through and fetch ourselves
+    }
     // Fall through and fetch ourselves rather than hang the bot's turn.
   }
 
@@ -278,7 +404,21 @@ async function getOrFetchPersonCredits(pubClient, personId, headers) {
           popularity: typeof m.popularity === 'number' ? m.popularity : 0,
         })),
     };
-    await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    // T4i audit fix: same exposure fixed for getOrFetchCredits in 7ebeaa5
+    // (T1d-ext). The 7-day cache write-back is Redis-only bookkeeping that runs
+    // AFTER TMDB already answered — at this point `stripped` is a real
+    // filmography we hold. It used to share this function's try with no
+    // isolating catch, so a socket flap on this single SET propagated out of
+    // getOrFetchPersonCredits and rejected the bot's filmography lookup despite
+    // a SUCCESSFUL fetch (the bot would whiff its turn over a transient blip
+    // unrelated to the fetch). Isolate: log and continue — worst case of a lost
+    // write-back is one duplicate TMDB fetch on the next miss, never a failed
+    // bot move. (The lock-release del in finally already swallows via .catch.)
+    try {
+      await pubClient.set(cacheKey, JSON.stringify(stripped), { EX: 604800 }); // 7 days
+    } catch (cacheErr) {
+      _getLogger().warn(cacheErr, 'person-credits cache write-back failed — returning fetched credits uncached');
+    }
     return stripped;
   } finally {
     if (gotLock) await pubClient.del(lockKey).catch(() => {});
@@ -294,6 +434,28 @@ const SUBMIT_LOCK_RELEASE_SCRIPT = `
   else
     return 0
   end`;
+
+// ============================================================================
+// T2 LOCK ORDERING RULE (audit P1-3) — read before touching either helper.
+// ============================================================================
+// Two lock classes guard the same lobby blob, and they are STRICTLY ordered:
+//   OUTER — lock:submit:<id> (acquireSubmitLock here): the PIPELINE-level
+//     dedup. Exactly one submission/turn-advance pipeline runs per lobby at a
+//     time (prevents double-eliminate / double-advance). It is held across
+//     long TMDB awaits, so it must never be the lock that guards data writes.
+//   INNER — lock:lobbymut:<id> (withLobbyLock below): the short DATA-COMMIT
+//     mutex. Every write of lobby:<id> happens inside it, on a room re-read
+//     inside the lock, with preconditions re-verified on that fresh room.
+// lobbymut MAY be acquired while holding submit — every commit in the submit
+// pipeline does exactly that. The submit lock must NEVER be acquired inside a
+// withLobbyLock mutator: that inverts the order and deadlocks the two
+// pipelines against each other until a TTL expires. Corollary: a mutator
+// passed to withLobbyLock must not call back into anything that takes the
+// submit lock (submitMovie / submitBotMove / forceNextTurn / quitGame / the
+// grace-expiry kill / the watchdog callback). Scheduling a timer whose
+// CALLBACK takes the submit lock later (armTurnTimeout, scheduleBotMove) is
+// fine — the acquisition happens long after the mutator returned.
+// ============================================================================
 
 async function acquireSubmitLock(pubClient, lobbyId) {
   // Unique 128-bit token tags this lock so a release after expiry can't
@@ -358,27 +520,80 @@ async function recordPlayerWinAtomic(pubClient, stableId, name) {
 const LOBBY_MUTEX_PREFIX = 'lock:lobbymut:';
 const LOBBY_MUTEX_TTL_MS = 5000;
 
+// T8a audit fix: spin-acquire budget. The OLD budget was 25 × 20ms = 500ms —
+// an ORDER OF MAGNITUDE shorter than the 5000ms lock TTL, so a section that
+// legitimately ran long (mutators that await Redis inside the critical section,
+// e.g. joinLobby reading wins/title data under slow Redis) made a concurrent
+// caller exhaust the budget and fall through to an UNLOCKED save (the bug).
+// The new budget (≈110 × 50ms ≈ 5.5s) comfortably EXCEEDS the TTL: a live
+// holder's section is short so we normally acquire in a spin or two; a CRASHED
+// holder's lock self-frees at the PX TTL, so waiting slightly past the TTL
+// guarantees acquisition unless there is sustained back-to-back contention —
+// at which point we now DECLINE (return null) rather than save unlocked.
+// SPIN_INTERVAL_MS is env-tunable so tests can drive the full budget in
+// milliseconds (no real multi-second sleeps) without changing the prod default.
+// It is resolved PER CALL (via _spinIntervalMs) rather than frozen at require
+// time so a test can override the env after this module is already loaded.
+const LOBBY_MUTEX_SPIN_ATTEMPTS = 110;
+const LOBBY_MUTEX_SPIN_INTERVAL_MS_DEFAULT = 50;
+function _spinIntervalMs() {
+  const raw = Number(process.env.LOBBY_MUTEX_SPIN_INTERVAL_MS);
+  // Only honor a finite, non-negative override; anything else uses the default.
+  return Number.isFinite(raw) && raw >= 0 ? raw : LOBBY_MUTEX_SPIN_INTERVAL_MS_DEFAULT;
+}
+// Exported snapshot of the effective interval for the budget>TTL assertion.
+const LOBBY_MUTEX_SPIN_INTERVAL_MS = _spinIntervalMs();
+
 // opts.seedRoom: used ONLY when getLobby returns null. joinLobby just
 // NX-created the key, so in production the in-lock read finds it; the seed
 // preserves the old `isNewLobby ? initialRoom : getLobby` semantic (and
 // keeps a brand-new lobby working if a read-after-write is briefly empty).
 // Without a seed, a null read means "lobby gone" → return null (callers
 // surface "unavailable"), exactly the pre-fix behavior for existing lobbies.
+//
+// T2 LOCK ORDERING (see the full rule above acquireSubmitLock): lobbymut is
+// the INNER lock — it may be taken while holding lock:submit:<id>, but a
+// mutator must NEVER acquire the submit lock (or call into any code path
+// that does). Inversion deadlocks both pipelines until a TTL expires.
 async function withLobbyLock(pubClient, id, mutator, opts = {}) {
+  // T7c: defense-in-depth chokepoint, the CRITICAL half — this function does
+  // `SET lock:lobbymut:<id> NX PX` BEFORE the in-lock existence check, so a
+  // raw client lobbyId used to mint an attacker-controlled lock key for free.
+  // Bail on a malformed id BEFORE the lock SET (and before the mutator runs):
+  // no lock key is ever created, return null so callers treat it as "lobby
+  // gone" exactly as they would for a missing room. Every legitimate id
+  // conforms (see isValidLobbyId), so no real mutator path is affected.
+  if (!isValidLobbyId(id)) return null;
   const token = require('crypto').randomBytes(16).toString('hex');
   const lockKey = `${LOBBY_MUTEX_PREFIX}${id}`;
 
-  // Bounded spin-acquire. Lobby critical sections are sub-millisecond, so a
-  // contended caller normally gets in within a spin or two. If we exhaust
-  // the budget (a holder is pathologically slow, or died and we're waiting
-  // on the PX TTL) we proceed UNLOCKED rather than drop the user's action
-  // entirely — same best-effort tradeoff getOrFetchCredits makes for its
-  // stampede lock. The PX TTL bounds worst-case staleness.
+  // Bounded spin-acquire. Lobby critical sections are short, so a contended
+  // caller normally gets in within a spin or two. T8a: the budget now exceeds
+  // LOBBY_MUTEX_TTL_MS (see the constants above) so genuine exhaustion is rare
+  // — a live holder finishes fast and a crashed holder's lock self-frees at the
+  // PX TTL within this window.
   let acquired = false;
-  for (let i = 0; i < 25; i++) {
+  const spinIntervalMs = _spinIntervalMs(); // resolved per call (test-overridable)
+  for (let i = 0; i < LOBBY_MUTEX_SPIN_ATTEMPTS; i++) {
     const res = await pubClient.set(lockKey, token, { NX: true, PX: LOBBY_MUTEX_TTL_MS });
     if (res === 'OK') { acquired = true; break; }
-    await new Promise(r => setTimeout(r, 20));
+    await new Promise(r => setTimeout(r, spinIntervalMs));
+  }
+
+  // T8a audit fix: on TRUE exhaustion, DECLINE the mutation instead of running
+  // it unlocked. The pre-fix code fell through here and did
+  // getLobby→mutator→saveLobby with acquired=false, so a full lobby blob was
+  // written with NO mutex held — clobbering any write a concurrent locked
+  // section committed during the spin (the exact lost-update withLobbyLock
+  // exists to prevent; unlike getOrFetchCredits' stampede lock, proceeding
+  // unlocked here CORRUPTS state, it doesn't merely waste a fetch). Returning
+  // null is the existing "lobby unavailable" signal every caller already
+  // handles, so a declined mutation becomes a clean, rare, retryable transient
+  // failure. Log via the module's lazy logger (added in T1d-ext) so we can see
+  // sustained contention in prod without instantiating pino at require time.
+  if (!acquired) {
+    _getLogger().warn({ lobbyId: id }, 'withLobbyLock spin exhausted — declining mutation (no unlocked save)');
+    return null;
   }
 
   try {
@@ -462,6 +677,9 @@ async function pruneLeaderboard(pubClient) {
 
 module.exports = {
   getLobby,
+  // T7c: exported so handler-side guards/tests can reuse the SAME lobby-id
+  // charset rule instead of re-implementing (and drifting from) it.
+  isValidLobbyId,
   saveLobby,
   deleteLobby,
   addToActiveLobbies,
@@ -482,6 +700,12 @@ module.exports = {
   releaseSubmitLock,
   // Audit finding #4: per-lobby mutation mutex for all non-submit RMW paths.
   withLobbyLock,
+  // T8a: spin-budget + TTL constants exported so tests can assert the budget
+  // exceeds the TTL (the invariant that makes genuine exhaustion rare) without
+  // hard-coding the numbers in a second place that could drift.
+  LOBBY_MUTEX_TTL_MS,
+  LOBBY_MUTEX_SPIN_ATTEMPTS,
+  LOBBY_MUTEX_SPIN_INTERVAL_MS,
   recordPlayerWinAtomic,
   getLeaderboard,
   // Audit finding #10: full-ZSET sweep to bound unbounded leaderboard growth.

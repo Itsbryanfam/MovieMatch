@@ -41,6 +41,12 @@ export function renderAutocompleteResults(results) {
 
       if (movie.poster && movie.poster.startsWith('https://image.tmdb.org/')) {
         const img = document.createElement('img');
+        // T4g audit fix: async decode keeps the dropdown responsive while
+        // mini-posters decode, and loading="lazy" defers fetching rows the user
+        // scrolls past in a long suggestion list — unlike the always-visible
+        // hero carousel, autocomplete rows below the fold may never be seen.
+        img.decoding = 'async';
+        img.loading = 'lazy';
         img.src = movie.poster;
         img.alt = 'Poster';
         img.className = 'mini-poster';
