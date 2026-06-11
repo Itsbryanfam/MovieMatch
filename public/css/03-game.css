@@ -1802,3 +1802,37 @@
      interactivity. No change needed; just declare so the stub border shows. */
 }
 
+/* ============================================================================
+   BOOTH TASK 5 — MOTION TRANSITION HOOKS
+   WHY (in 03-game.css not 06-states-anim.css): the layout rules for
+   .reel-node, .reel-bridge, and .reel-poster live in this file. Adding
+   the transition hook here keeps the rule and its transition together in
+   the same file — the composite layer declaration belongs with the
+   element's base layout. The keyframes and curve tokens live in
+   06-states-anim.css as spec requires.
+   ============================================================================ */
+
+/* REEL-NODE — transition into the booth-splice-enter and booth-gate-flare
+   states so nodes that ARE already visible (re-entering after a re-render)
+   transition gracefully rather than snapping.
+   WHY only opacity + transform: these are the only properties the Task 5
+   keyframes animate; specifying only them avoids accidentally animating any
+   layout property (width, height, padding) set elsewhere on .reel-node.
+   Duration uses --dur-sm (200ms) as a safe default; the keyframe animations
+   declared in 06-states-anim.css override this where a specific duration
+   is required (animation beats the transition for the same property). */
+.reel-node {
+  transition: opacity var(--dur-sm, 200ms) var(--ease-snap, ease),
+              transform var(--dur-sm, 200ms) var(--ease-snap, ease);
+}
+
+/* REEL-BRIDGE — seam text transition.
+   WHY: the seam fades in over 110ms (boothSeamFade). Adding an opacity
+   transition here ensures that even without the .booth-seam-enter class
+   the bridge cross-fades gracefully when its text changes (e.g. when a
+   new movie is played and the connecting-actor name updates). Duration
+   --dur-xs (120ms) is the shortest spec step — matches the seam-fade beat. */
+.reel-bridge {
+  transition: opacity var(--dur-xs, 120ms) var(--ease-snap, ease);
+}
+
