@@ -1240,6 +1240,11 @@
 .sidebar-players li {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;          /* Bug 2b fix: without this the ::after status label sits
+                               inline to the right of the score instead of wrapping onto
+                               its own line below the name+score pair as intended. The
+                               ::after has width:100% so it forces itself to line 2 while
+                               name (flex:1) and score (flex-shrink:0) stay on line 1. */
   gap: 10px;               /* chip gap matches reference .op: 10px */
   padding: 8px 10px;       /* tighter than 0.75rem 1rem — chip feel, not card */
   margin-bottom: 6px;      /* reference .ops: 7px gap */
@@ -1270,7 +1275,10 @@
    the player initial from CSS alone, we render the badge as an anonymous frame —
    the name + status label convey the identity and state. The indigo beam border
    on active-turn provides the strong visual cue. */
-.sidebar-players li::before {
+/* Bug 1 fix: scope the film-frame badge ONLY to real player rows.
+   .game-team-header, .solo-run-label, and .spectator-count are non-player rows
+   emitted by renderPlayerSidebar; they must not receive the badge pseudo-element. */
+.sidebar-players li:not(.game-team-header):not(.solo-run-label):not(.spectator-count)::before {
   content: "";
   display: block;
   width: 30px;           /* reference .frame: 30px */
@@ -1335,8 +1343,13 @@
    modern browsers) and requires zero markup change — satisfying the a11y
    requirement while honoring the "CSS-first, no unnecessary markup" constraint.
    Layout: the label sits on a new flex line below the name+score pair (flex-wrap
-   on the li parent means the ::after flows onto the next line at full width). */
-.sidebar-players li::after {
+   on the li parent means the ::after flows onto the next line at full width).
+
+   Bug 1 fix: the default "Seated" label is scoped to real player rows via :not().
+   Without this exclusion .game-team-header, .solo-run-label, and .spectator-count
+   (all <li> elements emitted by renderPlayerSidebar for non-player purposes) would
+   also receive the "Seated" label. */
+.sidebar-players li:not(.game-team-header):not(.solo-run-label):not(.spectator-count)::after {
   /* Default status: Seated — every operator not otherwise classified */
   content: "Seated";
   display: block;
@@ -1413,7 +1426,12 @@
 /* Walked Out status label */
 .sidebar-players li.eliminated::after {
   content: "Walked Out";
-  color: var(--text-dim); /* faint — matches the dimmed row context */
+  color: var(--text-dim);       /* faint — matches the dimmed row context */
+  text-decoration: none;        /* Bug 2a fix: .eliminated sets text-decoration:line-through
+                                   which inherits into this pseudo-element. The player NAME
+                                   should remain struck through (communicates elimination),
+                                   but the status label should read cleanly for screen readers
+                                   and visual clarity. Reset here to override the inherited value. */
 }
 
 /* ── CONFLICT GUARD: active-turn takes precedence over up-next ───────────── */
